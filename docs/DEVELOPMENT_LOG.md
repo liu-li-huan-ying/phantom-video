@@ -161,11 +161,12 @@
 - 实现：
   - `VideoRenderer` 增加 `RenderStats` 结构体 + `onMouseMove/onMouseClick` 方法
   - 控件栏：60px 圆角矩形 (`#181818@85%` + 高亮/阴影边框)
-  - 按钮：播放/暂停(三角形/双竖线)、音量喇叭、全屏方框
+  - 按钮布局：`[Prev|Play/Pause|Next]` + 进度条 + `[Vol|Fullscreen]`
+  - 按钮图标为几何图形绘制 (三角形/双竖线/喇叭/方框)
   - 进度条：6px 轨道 + 蓝色填充 (`#4D90FF`)
   - 鼠标悬移 500ms 无活动 → 控件栏自动隐藏
-  - 鼠标点击支持：播放/暂停按钮、音量+10%、全屏切换、进度条点击跳转
+  - **鼠标点击支持**: Prev/Play-Pause/Next/Volume-mute/Fullscreen 按钮 + 进度条点击跳转 + 双击全屏 (clicks==2)
   - main.cpp：SDL_MOUSEMOTION/MOUSEBUTTONDOWN 事件传递给 VideoRenderer
-- 验证：构建成功，smoketest 运行 3 秒无崩溃 ✓
-- 遗留：控件栏图标仍为几何图形绘制 (未来可改为位图纹理)；双击全屏暂未实现
+- 验证：构建成功，smoketest 运行 4 秒无崩溃 ✓
+- 遗留：控件栏图标仍为几何图形绘制 (未来可改为位图纹理)；缺少滑块拖动 (只有点击跳转)
 - 遗留：SDL 渲染默认白底 → 改为深灰 `#181818` 背景；字体改为更清晰的位图或 FreeType 加载。
