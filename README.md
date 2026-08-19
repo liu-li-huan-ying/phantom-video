@@ -17,20 +17,22 @@
 ```
 F:\vedioplayer\
 ├── CMakeLists.txt          # 构建脚本
-├── docs\DESIGN.md          # 详细设计文档
+├── AGENTS.md               # 开发约束与已知问题备忘
+├── docs\
+│   ├── DESIGN.md           # 详细设计文档
+│   └── DEVELOPMENT_LOG.md  # 阶段开发日志（困难与解决）
 ├── src\
 │   ├── main.cpp            # 入口 + SDL 事件循环 + 快捷键
 │   ├── core\               # 播放内核（与 UI 无关）
-│   │   ├── blocking_queue.h    # 线程安全有界队列
-│   │   ├── clock.h/.cpp        # 主时钟（音频时钟/视频时钟）
+│   │   ├── blocking_queue.h    # 线程安全有界队列（支持 close/reopen/clear）
+│   │   ├── types.h             # FramePtr/PacketPtr 工厂（makeFramePtr 等）
 │   │   ├── demuxer.h/.cpp      # 解封装
 │   │   ├── decoder.h/.cpp      # 音视频解码器封装
-│   │   └── player.h/.cpp       # 播放器总控（线程 + 同步 + 拖动）
-│   ├── audio\audio_output.h/.cpp   # SDL 音频输出 + 采样率转换
+│   │   └── player.h/.cpp       # 播放器总控（解码线程 + 时钟 + seek）
+│   ├── audio\audio_output.h/.cpp   # SDL 音频输出 + 重采样 + 音频时钟
 │   ├── video\video_renderer.h/.cpp # SDL 视频渲染（YUV 纹理）
 │   └── ui\osd.h/.cpp            # 进度条/时间/音量 OSD 绘制
-├── third_party\            # 运行时 DLL（发布时拷贝）
-│   └── bin\
+├── testdata\               # 冒烟测试素材（多格式/损坏文件）
 └── build\                  # 构建产物（gitignore）
 ```
 
@@ -53,15 +55,16 @@ cmake --build build
 .\build\vplayer.exe "视频文件.mp4"
 ```
 
-## 功能
+## 功能（M5 已通过 API 自动化测试 + GUI 运行验证）
 
-- [x] 播放本地视频（H.264/H.265/MPEG4 等任意 FFmpeg 支持的格式）
+- [x] 播放本地视频（H.264/H.265/MPEG4/VP9 等任意 FFmpeg 支持的格式）
 - [x] 音视频同步（音频为主时钟，纯视频用系统时钟）
 - [x] 播放 / 暂停 / 停止
-- [x] 进度拖动（可超过缓冲），音量调节 / 静音
+- [x] 进度拖动（精确到关键帧），音量调节 / 静音
 - [x] 拖拽文件到窗口直接打开
 - [x] 全屏切换
 - [x] OSD：进度条、时间显示、音量提示
+- [x] 异常文件容错（截断/损坏文件打开失败不崩溃）
 
 ### 快捷键
 
@@ -78,11 +81,13 @@ cmake --build build
 
 ## 开发计划（Roadmap）
 
-- [x] M1 环境搭建（FFmpeg + SDL2 安装验证）
+- [x] M1 环境搭建（FFmpeg 9.0.1 + SDL2 2.32.10 安装验证）
 - [x] M2 骨架：构建系统 + 文档
-- [x] M3 播放内核：解封装 → 解码 → 渲染 + 音频（含崩溃根因修复：跨堆 free）
-- [x] M4 替换稳定版 FFmpeg 9.0.1（BtbN master 构建弃用）
-- [ ] M5 硬解（DXVA2 / D3D11VA）
-- [ ] M6 字幕（ASS/SRT）
-- [ ] M7 播放列表与记忆播放位置
-- [ ] M8 倍速播放
+- [x] M3 播放内核：解封装 → 解码 → 渲染 + 音频（期间定位跨堆 free 崩溃）
+- [x] M4 替换稳定版 FFmpeg 9.0.1 + 根因修复（shared_ptr 跨堆 free 0xC0000374）
+- [x] M5 全功能验证：API 自动化测试 20/20、多格式冒烟、修复 BlockingQueue 永久 closed bug
+- [ ] M6 GUI 交互验证（全屏/拖拽/快捷键）+ 长时间稳定性测试
+- [ ] M7 硬解（DXVA2 / D3D11VA）
+- [ ] M8 字幕（ASS/SRT）
+- [ ] M9 播放列表与记忆播放位置
+- [ ] M10 倍速播放

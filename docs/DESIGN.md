@@ -11,24 +11,21 @@
                                 ▼
                  ┌─────────────────────────────────────────┐
                  │              Player (总控)               │
-                 │  线程管理 / 同步策略 / 拖动 / 生命周期     │
+                 │  解码线程 / 同步策略 / seek / 生命周期    │
                  └──┬────────────┬────────────┬───────────┘
                     │            │            │
         ┌───────────▼──┐  ┌──────▼──────┐  ┌─▼──────────────┐
-        │  Demuxer     │  │  Decoder    │  │  Clock         │
-        │  解封装/流表  │  │  音/视解码  │  │  主时钟        │
+        │  Demuxer     │  │  Decoder    │  │  VideoQueue    │
+        │  解封装/流表  │  │  音/视解码  │  │  (FramePtr)    │
         └───────────┬──┘  └──────┬──────┘  └───────┬────────┘
                     │            │                  │
               ┌─────▼─────┐  ┌───▼────┐   ┌────────▼────────┐
-              │ VideoQueue│  │AudioQ  │   │  AudioOutput    │
-              │ (AVFrame) │  │(PCM)   │   │  SDL 回调取数   │
-              └─────┬─────┘  └───┬────┘   └─────────────────┘
-                    │            │
-              ┌─────▼─────┐      │
-              │ VideoRender│      │
-              │ SDL 纹理   │      │
-              └───────────┘      │
-                         AudioOutput 内置 AudioClock 供 Clock 使用
+              │ AudioOutput│  │AudioQ  │   │  VideoRenderer  │
+              │ SDL 回调   │  │(PCM)   │   │  SDL 纹理       │
+              │ 音频时钟   │  └────────┘   └─────────────────┘
+              └───────────┘
+              时钟实现：Player::clock() = 音频时钟（writeHead_）
+              或视频时钟（首帧 pts + 累计播放时长）回退
 ```
 
 **线程模型（3 线程）：**
@@ -47,7 +44,7 @@
 AVPacket ──avcodec_send_packet──▶ AVCodecContext ──avcodec_receive_frame──▶ AVFrame (YUV420P)
     │                                                                          │
     └── 解码线程内完成，仅帧指针入队                                              ▼
-                                                                  VideoQueue<shared_ptr<AVFrame>>
+                                                                  VideoQueue<FramePtr>（FramePtr = shared_ptr<AVFrame>，makeFramePtr 构造）
                                                                           │
                                                     主线程取出，pts 对齐主时钟后：
                                                     SDL_UpdateYUVTexture(3 平面) → RenderCopy
@@ -60,9 +57,9 @@ AVPacket ──avcodec_send_packet──▶ AVCodecContext ──avcodec_receive
 
 ```
 AVFrame (FLTP/原始格式)
-    │  swr_convert（swr_alloc_set_opts2，目标 = SDL 实际打开的设备参数）
+    │  swr_convert（swr_alloc + av_opt_set_*，目标 = SDL 实际打开的设备参数）
     ▼
-AudioChunk { pts, 字节缓冲 }  ──▶  AudioQueue（按字节数限长，约 1 秒）
+AudioChunk { pts, 字节缓冲 }  ──▶  AudioQueue（按字节数限长，70560B ≈ 0.4 秒）
                                       │
                      SDL 回调 fill()：零填充 → 逐块拷入 → 推进音频时钟
 ```
@@ -95,14 +92,14 @@ AudioChunk { pts, 字节缓冲 }  ──▶  AudioQueue（按字节数限长，�
 ```
 UI 请求 seek(target) → Player 置 m_seekReq
 解码线程在安全点处理：
-  1. 清空视频/音频队列（丢弃所有帧）
+  1. 清空视频/音频队列（audio_ 额外清 current_）
   2. av_seek_frame(video 流, BACKWARD, target)  —— 保证跳到关键帧
   3. 两个解码器 avcodec_flush_buffers
-  4. 音频输出时钟复位（写头未定）
-  5. 置 m_dropUntil = target，随后解码线程丢弃 pts < target 的帧，直到赶上目标
+  4. 置 m_dropUntil = target，随后解码线程丢弃 pts < target 的帧，直到赶上目标
+  5. 音频时钟：不显式复位——seek 后新数据 pts 与旧写头偏差 >0.5s，fill() 自动重设写头
 ```
 
-拖动期间视频渲染循环照常运行（队列空则等），UI 不阻塞。
+拖动期间视频渲染循环照常运行（队列空则等），UI 不阻塞。seek 精度受关键帧间隔限制（如 s_30s.mp4 每 10 秒一个关键帧，seek(16.9) 会落到 10 秒处）。
 
 ## 4. 生命周期与状态机
 
@@ -124,8 +121,9 @@ IDLE ──打开文件──▶ DECODING ──首帧就绪──▶ PLAYING �
 
 ### 5.1 BlockingQueue\<T\>（core/blocking_queue.h）
 
-- 互斥量 + 条件变量，`max` 上限（视频 8 帧 / 音频按字节 1s），满则生产阻塞。
+- 互斥量 + 条件变量，`max` 上限（视频 8 帧 / 音频按字节 0.4s），满则生产阻塞。
 - `close()` 后 push 失败、pop 排空返回 false（EOF 哨兵用 `shared_ptr` 空指针实现）。
+- `reopen()`：重置 closed_ 并清空队列（**openFile 在 close() 后必须调用**，否则解码线程 push 立即失败——M5 修复）。
 - `clear()` 供 seek 使用。
 
 ### 5.2 Demuxer
@@ -136,13 +134,13 @@ IDLE ──打开文件──▶ DECODING ──首帧就绪──▶ PLAYING �
 
 ### 5.3 Decoder
 
-- 统一封装 `VideoDecoder` / `AudioDecoder`：`open(codecpar)` → `send(pkt)` → `receive()`。
+- 统一封装 `VideoDecoder` / `AudioDecoder`：`open(codecpar)` → `send(pkt)` → `receive()`（receive 用 av_frame_move_ref 转移后经 makeFramePtr 持有，避免跨堆 free——见 AGENTS.md M4 教训）。
 - 内部维护 `AVCodecContext`（线程安全由解码线程独占保证）。
-- `flush()`：send(nullptr) 排空 + `avcodec_flush_buffers`。
+- `flush()`：send(nullptr) 排空所有剩余帧（EOF 用）；`flushBuffers()`：`avcodec_flush_buffers`（seek 用）。
 
 ### 5.4 Player（总控）
 
-- `openFile(path)`：创建 Demuxer/Decoder/AudioOutput/队列，启动解码线程。
+- `openFile(path)`：创建 Demuxer/Decoder/AudioOutput/队列（close() 后必须 `videoQueue_.reopen()`），启动解码线程。
 - `togglePause()` / `seek(double)` / `setVolume(double)` / `mute()`：线程安全指令。
 - `clock()`：返回主时钟（供渲染同步）。
 - 解码线程主循环（伪代码）：
@@ -170,10 +168,10 @@ while (true) {
 
 ### 5.5 AudioOutput
 
-- `open(stream, spec)`：初始化 swr（解码参数 → SDL 设备参数），打开设备。
-- `push(AVFrame)`：swr 转换 → 组装 `AudioChunk` → 入队（超过 1s 阻塞）。
-- 回调 `fill(stream, len)`：零填充 → 循环拷入 → 累加写头 pts → 更新时钟。
-- `resetClock()`：seek 后写头复位。
+- `open(stream, spec)`：swr（av_opt_set_* 配置解码参数 → SDL 设备参数），打开设备。
+- `push(AVFrame)`：swr 转换 → 组装 `AudioChunk` → 入队（超过 0.4s 阻塞）。
+- 回调 `fill(stream, len)`：零填充 → 循环拷入 → 累加写头 pts → 更新时钟（检测到 pts 跳变 >0.5s 时自动重设写头，seek 后无需手动复位）。
+- `resetClock()`：写头置 -1（备用，当前 seek 流程依赖 fill 自动重设）。
 
 ### 5.6 VideoRenderer
 
@@ -191,7 +189,7 @@ while (true) {
 ## 6. 关键约定与坑
 
 1. **SDL main 宏**：`SDL_main.h` 会把 `main` 宏替换为 `SDL_main`，C++ 下会因符号修饰导致链接错误。本工程统一 `#define SDL_MAIN_HANDLED` 后写普通 `main`，链接时不带 `-lSDL2main`（保留控制台便于调试；发布版可换 `WinMain`）。
-2. **FFmpeg master API**：音频使用新版 `AVChannelLayout`（`ch_layout` 字段 + `swr_alloc_set_opts2`），不再用旧的 `channel_layout` 字段。
-3. **DLL 分发**：运行需要 `ffmpeg\bin`、`sdl2\...\bin` 下的 DLL，发布时拷贝到 `third_party\bin` 并随 exe 分发。
+2. **FFmpeg 新版 API**：音频使用新版 `AVChannelLayout`（`ch_layout` 字段）；swr 用 `swr_alloc` + `av_opt_set_*`（`av_opt_set_chlayout`/`av_opt_set_sample_fmt`）配置，不再用旧 API。
+3. **DLL 分发**：运行需要 `F:\dev\ffmpeg-9.0.1-full_build-shared\bin`、`F:\dev\sdl2\x86_64-w64-mingw32\bin` 下的 DLL，CMake 已自动拷贝到 build 目录；发布时需随 exe 分发。
 4. **零第三方模块**：不使用 vcpkg/conan，依赖全部用 pkg-config 定位（本机 `F:\dev`）。
 5. **磁盘约束**：构建产物一律放 F 盘 `build\`，不装任何东西到 C 盘。
