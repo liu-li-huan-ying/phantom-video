@@ -30,7 +30,7 @@
 - 构建：`cmake --build build`
 - 调试版：`cmake -S . -B build-debug -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Debug`
 - 运行：`build\vplayer.exe <视频路径>`（DLL 已由 CMake 自动拷贝到 build 目录）
-- 冒烟测试：`C:\Users\31697\AppData\Local\Temp\opencode\s_30s.mp4`（H.264，30 秒）
+- 冒烟测试：`F:\vedioplayer\testdata\s_30s.mp4`（H.264，30 秒）
 
 ### 5. 版本控制（2026-08-19 起强制）
 - 项目已纳入 git 管理（`git init` 于 F:\vedioplayer）。

@@ -22,6 +22,9 @@
   2. **FFmpeg 新版本 `AVCodecContext` 未定义**：新版 avformat.h 不再隐式包含 avcodec.h → 显式 `#include <libavcodec/avcodec.h>`
   3. **av_opt_set_* 链接失败**：libavutil/opt.h 没包在 `extern "C"` 里，C++ 符号修饰导致找不到 → 包上 extern "C"（此类问题以后一律注意）
   4. **SDL2 pkg-config 标志需过滤**：`-Dmain=SDL_main`、`-lSDL2main`、`-lmingw32`、`-mwindows` 与 SDL_MAIN_HANDLED 方案冲突 → CMake 里过滤
+  5. **MSYS Makefiles 生成器尝试失败**：w64devkit 的 sh 无法定位带空格路径的 cmake.exe → 放弃，仍用 MinGW Makefiles + 临时改名 sh.exe
+  6. **SDL_AUDIO_S16 常量不存在**：SDL2 2.32 开发包仍用旧式常量名 → 改用 `AUDIO_S16SYS`
+  7. **PowerShell Set-Content 损坏源码编码**：用 Set-Content 改 .cpp 会把 UTF-8 中文截断 → 教训：改代码一律用编辑工具，不用 shell 命令
 - 产物：vplayer.exe 编译成功（606KB）
 - 清理旧项目：已删除 Go 版 server/web/vplayer.exe/旧文档，git 提交"清理旧 Go 版本"
 
@@ -37,6 +40,9 @@
     5. 用 shared_ptr 持有帧（播放器标准模式）→ 崩（单线程也崩）
     6. 只持有不释放任何帧 → 也崩
   - 结论：**BtbN master-latest 自动构建的 FFmpeg 存在 bug**——所有播放器通用的"持有帧继续解码"模式即触发堆损坏，非本工程代码问题
+  - 期间尝试 **AddressSanitizer** 定位越界，但 w64devkit 未自带 libasan → 失败，改用手工二分隔离
+- 遗留清理：F:\dev 下已删除所有安装包（ffmpeg*.zip、sdl2.zip、7zr.exe、ffmpeg-9.0.1-shared.7z）；保留 ffmpeg.exe/ffplay.exe/ffprobe.exe（解压产物，调试可用）
+- 纠正：冒烟测试视频原位于 C 盘临时目录（`C:\Users\31697\AppData\Local\Temp\opencode\s_30s.mp4`），不符合"不占用 C 盘"原则 → 已移至 `F:\vedioplayer\testdata\s_30s.mp4` 并更新 AGENTS.md 引用
   - 解决方案（待执行）：换用 gyan.dev **稳定版 FFmpeg 9.0.1 shared** 构建
     - 下载地址：`https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-full-shared.7z`（约 100MB，唯一含 include/lib 的共享构建）
     - 解压工具：用户本机已有 `D:\Program Files\7-Zip\7z.exe`（不再需要额外下载工具）
