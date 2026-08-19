@@ -8,7 +8,9 @@
 #include <string>
 #include <vector>
 
+#include "core/config.h"
 #include "core/player.h"
+#include "core/playlist.h"
 #include "ui/osd.h"
 #include "video/video_renderer.h"
 
@@ -66,18 +68,50 @@ int main(int argc, char** argv) {
     }
     osd.init(vrender.renderer());
 
-    auto args = utf8Args();
+auto args = utf8Args();
+    AppConfig cfg;
+    loadConfig(configPath(), cfg);
+
+    Playlist playlist;
     if (args.size() > 1 && !args[1].empty()) {
-        if (player.openFile(args[1]))
-            std::printf("宸叉墦寮€: %s\n", args[1].c_str());
-        else
-            SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "鎵撳紑澶辫触",
-                                     player.error().c_str(), win);
+        std::vector<std::string> files;
+        for (std::size_t i = 1; i < args.size(); ++i)
+            if (!args[i].empty()) files.push_back(args[i]);
+        playlist.set(files);
+    } else if (!cfg.lastFile.empty()) {
+        playlist.set(cfg.lastFile);
     }
+
+    player.setVolume(cfg.volume);
+
+    auto openCurrent = [&]() {
+        if (playlist.empty()) return;
+        const std::string& p = playlist.current();
+        std::string base = p;
+        std::size_t slash = base.find_last_of("\\/");
+        if (slash != std::string::npos) base = base.substr(slash + 1);
+        SDL_SetWindowTitle(win, ("VPlayer - " + base).c_str());
+        if (player.openFile(p)) {
+            auto it = cfg.history.find(p);
+            if (it != cfg.history.end() && it->second > 2.0)
+                player.seek(it->second);
+        } else {
+            SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "打开失败",
+                                     player.error().c_str(), win);
+        }
+    };
+    openCurrent();
 
     bool running = true;
     bool fullscreen = false;
     Uint32 volHideAt = 0;
+
+    auto nextTrack = [&]() {
+        if (playlist.next()) openCurrent();
+    };
+    auto prevTrack = [&]() {
+        if (playlist.prev()) openCurrent();
+    };
 
     while (running) {
         SDL_Event e;
@@ -117,6 +151,12 @@ int main(int argc, char** argv) {
                     player.toggleMute();
                     volHideAt = SDL_GetTicks() + 2000;
                     break;
+                case SDLK_n:
+                    nextTrack();
+                    break;
+                case SDLK_p:
+                    prevTrack();
+                    break;
                 case SDLK_f:
                     fullscreen = !fullscreen;
                     SDL_SetWindowFullscreen(win,
@@ -139,8 +179,13 @@ int main(int argc, char** argv) {
             FramePtr f = player.pullFrame();
             if (f)
                 vrender.render(f.get());
-            else if (player.state() == Player::State::Ended)
-                vrender.clear();
+            else if (player.state() == Player::State::Ended) {
+                if (playlist.hasNext()) {
+                    nextTrack();
+                } else {
+                    vrender.clear();
+                }
+            }
 
             double pos = player.clock();
             double dur = player.duration();
@@ -160,6 +205,13 @@ int main(int argc, char** argv) {
         SDL_RenderPresent(vrender.renderer());
         SDL_Delay(8);
     }
+
+    if (!playlist.empty() && player.hasMedia())
+        cfg.history[playlist.current()] = player.clock();
+    if (!playlist.empty())
+        cfg.lastFile = playlist.current();
+    cfg.volume = player.volume();
+    saveConfig(configPath(), cfg);
 
     player.close();
     vrender.shutdown();

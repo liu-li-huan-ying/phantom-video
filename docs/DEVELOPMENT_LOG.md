@@ -17,6 +17,10 @@
 - 产物：testdata/t_keyframes.mp4（关键帧密集版冒烟素材，seek 精度测试用）；gui_events_test.cpp 在 Temp 目录
 - 教训：seek 精度 = 关键帧间隔（设计如此，av_seek_frame BACKWARD）；GUI 自动化验证可用 SDL_PushEvent 注入（按键 + DROPFILE，注意 DROPFILE 的 file 需 SDL_malloc 分配以便事件循环 SDL_free）
 
+### 阶段 M9：播放列表与记忆播放位置 🔄 进行中
+- 任务：多文件播放列表（命令行多文件 + N/P 切换 + 播完自动下一个）；记忆播放位置/音量/上次文件（exe 同目录 vplayer.ini，不碰 C 盘）
+- 设计：config 模块（极简键值行格式，UTF-8）；playlist 模块；main.cpp 集成
+
 ### 阶段 M1：环境搭建（FFmpeg + SDL2）✅ 完成
 - 任务：为 C++ 播放器安装 FFmpeg 与 SDL2 开发库
 - 困难与解决：
