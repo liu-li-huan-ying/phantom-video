@@ -128,6 +128,41 @@ auto args = utf8Args();
                                              player.error().c_str(), win);
                 SDL_free(e.drop.file);
                 break;
+            case SDL_MOUSEMOTION:
+                {
+                    int mx = e.motion.x, my = e.motion.y;
+                    vrender.onMouseMove(mx, my);
+                }
+                break;
+            case SDL_MOUSEBUTTONDOWN:
+                {
+                    int mx = e.button.x, my = e.button.y;
+                    int winW = 0, winH = 0;
+                    SDL_GetWindowSize(win, &winW, &winH);
+                    int barY = winH - 60;
+                    // Play/pause button
+                    if (mx >= 16 && mx < 40 && my >= barY+18 && my < barY+42) {
+                        player.togglePause();
+                    }
+                    // Volume up
+                    else if (mx >= winW-100 && mx < winW-76 && my >= barY+18 && my < barY+42) {
+                        player.setVolume(player.volume() + 0.1f);
+                        volHideAt = SDL_GetTicks() + 2000;
+                    }
+                    // Fullscreen
+                    else if (mx >= winW-40 && mx < winW-16 && my >= barY+18 && my < barY+42) {
+                        fullscreen = !fullscreen;
+                        SDL_SetWindowFullscreen(win,
+                            fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+                    }
+                    // Progress bar click-to-seek
+                    else if (mx >= 160 && mx < winW-60 && my >= barY+28 && my < barY+34) {
+                        float pct = (float)(mx - 160) / (winW - 220);
+                        if (pct < 0) pct = 0; if (pct > 1) pct = 1;
+                        player.seek(pct * player.duration());
+                    }
+                }
+                break;
             case SDL_KEYDOWN:
                 switch (e.key.keysym.sym) {
                 case SDLK_SPACE:
@@ -177,8 +212,21 @@ auto args = utf8Args();
 
         if (player.hasMedia()) {
             FramePtr f = player.pullFrame();
-            if (f)
-                vrender.render(f.get());
+            if (f) {
+                RenderStats stats;
+                stats.playing = (player.state() == Player::State::Playing);
+                stats.paused = (player.state() == Player::State::Paused);
+                stats.clock = player.clock();
+                stats.duration = player.duration();
+                stats.volume = player.muted() ? 0.0f : player.volume();
+                stats.muted = player.muted();
+                stats.fullscreen = fullscreen;
+                stats.onPlayPause = [&]() { player.togglePause(); return true; };
+                stats.onToggleFullscreen = [&]() { fullscreen = !fullscreen; SDL_SetWindowFullscreen(win, fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0); return true; };
+                stats.onSeekTo = [&](double p) { player.seek(p); return true; };
+                stats.onVolumeUp = [&]() { player.setVolume(player.volume() + 0.1f); volHideAt = SDL_GetTicks() + 2000; };
+                vrender.render(f.get(), stats);
+            }
             else if (player.state() == Player::State::Ended) {
                 if (playlist.hasNext()) {
                     nextTrack();
@@ -186,21 +234,8 @@ auto args = utf8Args();
                     vrender.clear();
                 }
             }
-
-            double pos = player.clock();
-            double dur = player.duration();
-            char t1[32], t2[32];
-            formatTime(t1, sizeof(t1), pos);
-            formatTime(t2, sizeof(t2), dur);
-            std::string timeText = std::string(t1) + " / " + t2;
-
-            float vol = player.muted() ? 0.0f : player.volume();
-            bool volVisible = SDL_GetTicks() < volHideAt;
-            osd.draw(timeText, pos, dur, vol, volVisible,
-                     player.state() == Player::State::Paused, true);
         } else {
             vrender.clear();
-            osd.draw("", 0.0, 0.0, 0.0f, false, false, false);
         }
         SDL_RenderPresent(vrender.renderer());
         SDL_Delay(8);
