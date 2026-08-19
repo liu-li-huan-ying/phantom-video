@@ -1,0 +1,5 @@
+vplayer.exe
+server/dist/*
+web/node_modules/
+web/out/
+*.tmp
