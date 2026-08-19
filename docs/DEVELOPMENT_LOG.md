@@ -5,6 +5,18 @@
 
 ## 2026-08-19
 
+### 阶段 M6：GUI 交互验证与稳定性测试 ✅ 完成
+- 任务：验证快捷键/全屏/拖拽等 GUI 交互（SDL_PushEvent 注入自动化），长时间播放稳定性
+- 方式：gui_events_test 程序（有窗口，复制 main.cpp 事件处理逻辑，按时间表注入按键/拖拽事件并断言结果）
+- 结果：**10/10 检查全过**——空格暂停/恢复、右箭头 seek +5s、上箭头音量 +10%、M 静音/取消、F 全屏切换（SDL_GetWindowFlags 验证）、拖拽文件重开
+- 稳定性：**120 秒随机事件压力阶段**（暂停/seek/音量/静音/全屏随机注入，64 个事件）无崩溃、无死锁，正常退出
+- 困难与解决：
+  1. **seek +5s 断言失败（误报）**：s_30s.mp4 关键帧间隔 10 秒，seek(9.7) 往回落到 0 秒 keyframe → 时钟回退是正常 seek 精度行为 → 用 ffmpeg 生成 `t_keyframes.mp4`（-g 30，关键帧每 1.2 秒）验证 seek 精确跳变 → PASS
+  2. **seek 生效有延迟**（解码线程需先解除视频 push 阻塞再处理 seek 请求）→ 断言改为轮询式（deadline + 状态轮询），不再固定 500ms
+  3. 测试逻辑自身 bug：验证轮询被下一个步骤触发覆盖 → 触发新步骤前先结算挂起的验证
+- 产物：testdata/t_keyframes.mp4（关键帧密集版冒烟素材，seek 精度测试用）；gui_events_test.cpp 在 Temp 目录
+- 教训：seek 精度 = 关键帧间隔（设计如此，av_seek_frame BACKWARD）；GUI 自动化验证可用 SDL_PushEvent 注入（按键 + DROPFILE，注意 DROPFILE 的 file 需 SDL_malloc 分配以便事件循环 SDL_free）
+
 ### 阶段 M1：环境搭建（FFmpeg + SDL2）✅ 完成
 - 任务：为 C++ 播放器安装 FFmpeg 与 SDL2 开发库
 - 困难与解决：
