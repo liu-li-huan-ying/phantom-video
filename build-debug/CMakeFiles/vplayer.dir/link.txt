@@ -1,3 +1,0 @@
-"D:\Program Files\CMake\bin\cmake.exe" -E remove -f CMakeFiles\vplayer.dir/objects.a
-D:\w64devkit\bin\ar.exe cr CMakeFiles\vplayer.dir/objects.a @CMakeFiles\vplayer.dir\objects1.rsp
-D:\w64devkit\bin\g++.exe -g   -Wl,--whole-archive CMakeFiles\vplayer.dir/objects.a -Wl,--no-whole-archive  -o vplayer.exe -Wl,--out-implib,libvplayer.dll.a -Wl,--major-image-version,0,--minor-image-version,0 @CMakeFiles\vplayer.dir\linklibs.rsp
