@@ -59,77 +59,80 @@ void VideoRenderer::drawControls(const RenderStats& stats) {
     // Bottom shadow
     SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 80);
     SDL_RenderDrawLine(renderer_, 0, winH-1, winW, winH-1);
-
-    // Play/Pause button (left)
-    const int btnX = 16, btnY = barY + 18;
+    
+    const int btnY = barY + 18;
+    
+    // Prev button
+    SDL_Rect prevBtn = {16, btnY, 20, 24};
     SDL_SetRenderDrawColor(renderer_, 51, 51, 51, 255);
-    SDL_Rect btn = {btnX, btnY, 24, 24};
-    SDL_RenderFillRect(renderer_, &btn);
+    SDL_RenderFillRect(renderer_, &prevBtn);
+    SDL_SetRenderDrawColor(renderer_, 255, 255, 255, 220);
+    // Prev icon: double left-arrow
+    SDL_RenderDrawLines(renderer_, (SDL_Point[3]){{prevBtn.x+5, prevBtn.y+4}, {prevBtn.x+13, prevBtn.y+12}, {prevBtn.x+5, prevBtn.y+20}}, 3);
+    SDL_RenderDrawLines(renderer_, (SDL_Point[3]){{prevBtn.x+8, prevBtn.y+4}, {prevBtn.x+16, prevBtn.y+12}, {prevBtn.x+8, prevBtn.y+20}}, 3);
+    
+    // Play/Pause button
+    const int playBtnX = 44;
+    SDL_Rect playBtn = {playBtnX, btnY, 24, 24};
+    SDL_SetRenderDrawColor(renderer_, 51, 51, 51, 255);
+    SDL_RenderFillRect(renderer_, &playBtn);
     SDL_SetRenderDrawColor(renderer_, 220, 220, 220, 255);
     if (stats.playing && !stats.paused) {
-        // Pause: two bars
-        SDL_Rect bar1 = {btnX+6, btnY+4, 5, 16};
-        SDL_Rect bar2 = {btnX+13, btnY+4, 5, 16};
+        SDL_Rect bar1 = {playBtnX+6, btnY+4, 5, 16};
+        SDL_Rect bar2 = {playBtnX+13, btnY+4, 5, 16};
         SDL_RenderFillRect(renderer_, &bar1);
         SDL_RenderFillRect(renderer_, &bar2);
     } else {
-        // Play: triangle (using lines)
         SDL_SetRenderDrawColor(renderer_, 255, 255, 255, 255);
-        SDL_RenderDrawLines(renderer_, 
-            (SDL_Point[3]){{btnX+7, btnY+4}, {btnX+17, btnY+12}, {btnX+7, btnY+20}}, 3);
-        SDL_RenderDrawLine(renderer_, btnX+7, btnY+4, btnX+7, btnY+20);
+        SDL_RenderDrawLines(renderer_, (SDL_Point[3]){{playBtnX+7, btnY+4}, {playBtnX+17, btnY+12}, {playBtnX+7, btnY+20}}, 3);
+        SDL_RenderDrawLine(renderer_, playBtnX+7, btnY+4, playBtnX+7, btnY+20);
     }
+    
+    // Next button
+    SDL_Rect nextBtn = {76, btnY, 20, 24};
+    SDL_SetRenderDrawColor(renderer_, 51, 51, 51, 255);
+    SDL_RenderFillRect(renderer_, &nextBtn);
+    SDL_SetRenderDrawColor(renderer_, 255, 255, 255, 220);
+    SDL_RenderDrawLines(renderer_, (SDL_Point[3]){{nextBtn.x+4, nextBtn.y+4}, {nextBtn.x+12, nextBtn.y+12}, {nextBtn.x+4, nextBtn.y+20}}, 3);
+    SDL_RenderDrawLines(renderer_, (SDL_Point[3]){{nextBtn.x+7, nextBtn.y+4}, {nextBtn.x+15, nextBtn.y+12}, {nextBtn.x+7, nextBtn.y+20}}, 3);
 
     // Progress bar
-    const int progressX = 160, progressY = barY + 28;
-    const int progressW = winW - 220;
+    const int progressX = 100, progressY = barY + 28, progressWidth = winW - 120;
     double pct = (stats.duration > 0) ? (stats.clock / stats.duration) : 0;
     if (pct < 0) pct = 0; if (pct > 1) pct = 1;
 
     // Track
     SDL_SetRenderDrawColor(renderer_, 64, 64, 64, 255);
-    SDL_Rect track = {progressX, progressY, progressW, 6};
+    SDL_Rect track = {progressX, progressY, progressWidth, 6};
     SDL_RenderFillRect(renderer_, &track);
     // Fill
-    int fillW = (int)(pct * progressW);
+    int fillW = (int)(pct * progressWidth);
     if (fillW > 0) {
         SDL_SetRenderDrawColor(renderer_, 77, 144, 255, 255);
         SDL_Rect filled = {progressX, progressY, fillW, 6};
         SDL_RenderFillRect(renderer_, &filled);
     }
 
-    // Time text (simplified - use SDL_RenderGeometry for better text later)
-    SDL_SetRenderDrawColor(renderer_, 255, 255, 255, 220);
-    char timeText[32];
-    int total = (int)(stats.clock + 0.5);
-    int curMin = total / 60, curSec = total % 60;
-    total = (int)(stats.duration + 0.5);
-    int durMin = total / 60, durSec = total % 60;
-    std::snprintf(timeText, sizeof(timeText), "%02d:%02d / %02d:%02d", curMin, curSec, durMin, durSec);
-    // Fallback: draw simple colon separator if no texture font available
-    SDL_RenderDrawLine(renderer_, progressX + 8, progressY, progressX + 8, progressY + 6);
-    SDL_RenderDrawLine(renderer_, progressX + 8, progressY + 3, progressX + 16, progressY + 3);
-
     // Volume button
-    const int volX = winW - 100, volBtnY = barY + 18;
+    const int volX = winW - 60, volBtnY = barY + 18;
     SDL_SetRenderDrawColor(renderer_, 51, 51, 51, 255);
-    SDL_Rect volBtn = {volX, volBtnY, 24, 24};
+    SDL_Rect volBtn = {volX, volBtnY, 20, 24};
     SDL_RenderFillRect(renderer_, &volBtn);
     SDL_SetRenderDrawColor(renderer_, 255, 255, 255, 220);
-    SDL_Rect volIcon1 = {volX+3, volBtnY+8, 6, 8};
+    SDL_Rect volIcon1 = {volX+3, volBtnY+8, 5, 6};
     SDL_RenderFillRect(renderer_, &volIcon1);
-    SDL_Rect volIcon2 = {volX+7, volBtnY+6, 3, 12};
+    SDL_Rect volIcon2 = {volX+6, volBtnY+6, 3, 10};
     SDL_RenderFillRect(renderer_, &volIcon2);
 
     // Fullscreen button
     const int fsX = winW - 40;
+    SDL_Rect fsBtn = {fsX, btnY, 20, 24};
     SDL_SetRenderDrawColor(renderer_, 51, 51, 51, 255);
-    SDL_Rect fsBtn = {fsX, btnY, 24, 24};
     SDL_RenderFillRect(renderer_, &fsBtn);
     SDL_SetRenderDrawColor(renderer_, 255, 255, 255, 220);
-    SDL_Rect outer = {fsX+3, btnY+3, 18, 18};
+    SDL_Rect outer = {fsX+2, btnY+4, 16, 16};
     SDL_RenderDrawRect(renderer_, &outer);
-    SDL_Rect inner = {fsX+6, btnY+6, 12, 12};
+    SDL_Rect inner = {fsX+5, btnY+7, 10, 10};
     SDL_RenderDrawRect(renderer_, &inner);
 }
 

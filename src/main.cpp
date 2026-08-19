@@ -140,27 +140,43 @@ auto args = utf8Args();
                     int winW = 0, winH = 0;
                     SDL_GetWindowSize(win, &winW, &winH);
                     int barY = winH - 60;
-                    // Play/pause button
-                    if (mx >= 16 && mx < 40 && my >= barY+18 && my < barY+42) {
-                        player.togglePause();
+                    if (my >= barY + 18 && my < barY + 42) {
+                        // Prev button (16, barY+18, 20x24)
+                        if (mx >= 16 && mx < 36) {
+                            prevTrack();
+                        }
+                        // Play/Pause button (44, barY+18, 24x24)
+                        else if (mx >= 44 && mx < 68) {
+                            player.togglePause();
+                        }
+                        // Next button (76, barY+18, 20x24)
+                        else if (mx >= 76 && mx < 96) {
+                            nextTrack();
+                        }
+                     // Volume button (winW-60, barY+18, 20x24)
+                        else if (mx >= winW - 60 && mx < winW - 40) {
+                            player.toggleMute();
+                            volHideAt = SDL_GetTicks() + 2000;
+                        }
+                        // Fullscreen button (winW-40, barY+18, 20x24)
+                        else if (mx >= winW - 40 && mx < winW - 20) {
+                            fullscreen = !fullscreen;
+                            SDL_SetWindowFullscreen(win,
+                                fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+                        }
                     }
-                    // Volume up
-                    else if (mx >= winW-100 && mx < winW-76 && my >= barY+18 && my < barY+42) {
-                        player.setVolume(player.volume() + 0.1f);
-                        volHideAt = SDL_GetTicks() + 2000;
-                    }
-                    // Fullscreen
-                    else if (mx >= winW-40 && mx < winW-16 && my >= barY+18 && my < barY+42) {
-                        fullscreen = !fullscreen;
-                        SDL_SetWindowFullscreen(win,
-                            fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
-                    }
-                    // Progress bar click-to-seek
-                    else if (mx >= 160 && mx < winW-60 && my >= barY+28 && my < barY+34) {
-                        float pct = (float)(mx - 160) / (winW - 220);
+                    // Progress bar click-to-seek (100, barY+28, progressWidthx6)
+                    if (mx >= 100 && mx < winW - 20 && my >= barY + 28 && my < barY + 34) {
+                        float pct = (float)(mx - 100) / (winW - 120);
                         if (pct < 0) pct = 0; if (pct > 1) pct = 1;
                         player.seek(pct * player.duration());
                     }
+                }
+                // Double-click for fullscreen
+                if (e.button.clicks == 2) {
+                    fullscreen = !fullscreen;
+                    SDL_SetWindowFullscreen(win,
+                        fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
                 }
                 break;
             case SDL_KEYDOWN:
@@ -225,6 +241,8 @@ auto args = utf8Args();
                 stats.onToggleFullscreen = [&]() { fullscreen = !fullscreen; SDL_SetWindowFullscreen(win, fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0); return true; };
                 stats.onSeekTo = [&](double p) { player.seek(p); return true; };
                 stats.onVolumeUp = [&]() { player.setVolume(player.volume() + 0.1f); volHideAt = SDL_GetTicks() + 2000; };
+                stats.onNextTrack = [&]() { nextTrack(); };
+                stats.onPrevTrack = [&]() { prevTrack(); };
                 vrender.render(f.get(), stats);
             }
             else if (player.state() == Player::State::Ended) {

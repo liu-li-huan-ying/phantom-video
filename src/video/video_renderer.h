@@ -15,6 +15,8 @@ struct RenderStats {
     std::function<void()> onToggleFullscreen;
     std::function<bool(double)> onSeekTo;
     std::function<void()> onVolumeUp;
+    std::function<void()> onNextTrack;
+    std::function<void()> onPrevTrack;
 };
 
 class VideoRenderer {
@@ -29,6 +31,7 @@ public:
     int frameHeight() const { return fh_; }
     void onMouseMove(int x, int y);
     void onMouseClick(int x, int y, const RenderStats& stats);
+    bool isPointInRect(int px, int py, const SDL_Rect& rect);
 
 private:
     SDL_Window* window_ = nullptr;
