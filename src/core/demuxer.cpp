@@ -18,7 +18,7 @@ bool Demuxer::open(const std::string& path) {
 }
 
 PacketPtr Demuxer::readPacket() {
-    PacketPtr pkt(av_packet_alloc());
+    PacketPtr pkt = makePacketPtr(av_packet_alloc());
     if (av_read_frame(ctx_, pkt.get()) < 0) return nullptr;
     return pkt;
 }

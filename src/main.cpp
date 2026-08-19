@@ -138,7 +138,7 @@ int main(int argc, char** argv) {
         if (player.hasMedia()) {
             FramePtr f = player.pullFrame();
             if (f)
-                ; // DEBUG: 娓叉煋鍣ㄥ凡绂佺敤
+                vrender.render(f.get());
             else if (player.state() == Player::State::Ended)
                 vrender.clear();
 
@@ -155,9 +155,9 @@ int main(int argc, char** argv) {
                      player.state() == Player::State::Paused, true);
         } else {
             vrender.clear();
-            /* DEBUG */
+            osd.draw("", 0.0, 0.0, 0.0f, false, false, false);
         }
-        /* DEBUG present */
+        SDL_RenderPresent(vrender.renderer());
         SDL_Delay(8);
     }
 

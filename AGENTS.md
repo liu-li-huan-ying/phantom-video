@@ -6,9 +6,9 @@
 - 本项目为**自研 C++ 视频播放器**：
   - 语言：C++17（g++ 15.2.0，w64devkit，位于 D:\w64devkit）
   - 构建：CMake + MinGW Makefiles（构建前需临时改名 `D:\w64devkit\bin\sh.exe`，构建完恢复）
-  - 解码：FFmpeg（libavformat/avcodec/avutil/swresample）
+  - 解码：FFmpeg 9.0.1（gyan.dev stable shared 构建，位于 `F:\dev\ffmpeg-9.0.1-full_build-shared`，libavformat/avcodec/avutil/swresample，MinGW 用 `-l:xxx.lib` 链接 COFF 导入库）
   - 渲染/音频/窗口：SDL2（SDL_MAIN_HANDLED 方案，不链接 SDL2main）
-  - 依赖定位：pkg-config（`PKG_CONFIG_PATH="F:\dev\ffmpeg\lib\pkgconfig;F:\dev\sdl2\x86_64-w64-mingw32\lib\pkgconfig"`）
+  - 依赖定位：pkg-config（`PKG_CONFIG_PATH="F:\dev\sdl2\x86_64-w64-mingw32\lib\pkgconfig"`；FFmpeg 不走 pkg-config，CMake 直接链接 `F:\dev\ffmpeg-9.0.1-full_build-shared\lib\*.lib`）
 - 已彻底放弃 Python / Go / TypeScript 技术栈，不得重新引入。
 
 ### 2. 下载与磁盘约束（2026-08-19 起强制）
@@ -39,5 +39,6 @@
 - 任何大改动前先 `git status` 确认工作区干净。
 
 ### 6. 已知问题备忘
-- **FFmpeg 库 bug**：BtbN master-latest 构建存在堆损坏问题（持帧模式即崩），需换 gyan.dev 稳定版 9.0.1（详见 DEVELOPMENT_LOG.md 阶段 M3）。
+- ~~FFmpeg 库 bug~~（M4 已推翻）：M3 曾怀疑 BtbN master 构建有堆损坏 bug，实为工程代码跨堆 free（见下条）。现用 gyan 稳定版 9.0.1（`F:\dev\ffmpeg-9.0.1-full_build-shared`）。
 - FFmpeg 头文件（如 libavutil/opt.h）必须包 `extern "C"`，否则 C++ 符号修饰导致链接失败。
+- **重大教训（M4 已定位 M3 崩溃根因）**：`shared_ptr<AVFrame>` 默认删除器是 `delete`（msvcrt 堆），但 AVFrame 由 FFmpeg DLL（UCRT 堆）分配 → 跨堆 free 导致堆损坏 0xC0000374！必须用 `makeFramePtr()`/`makePacketPtr()`（内部传 av_frame_free/av_packet_free 删除器）构造，禁止 `shared_ptr<AVFrame>(ptr)` 裸构造。

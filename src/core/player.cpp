@@ -28,8 +28,6 @@ bool Player::openFile(const std::string& path) {
     std::unique_ptr<Decoder> adec;
     std::unique_ptr<AudioOutput> audio;
     bool hasAudio = demuxer->audioIndex() >= 0;
-    bool debugNoAudio = true; // DEBUG
-    if (debugNoAudio) hasAudio = false;
     if (hasAudio) {
         adec = std::make_unique<Decoder>();
         if (adec->open(demuxer->audioCodecpar())) {

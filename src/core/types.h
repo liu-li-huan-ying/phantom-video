@@ -12,11 +12,13 @@ struct FrameDeleter {
     void operator()(AVFrame* f) const { av_frame_free(&f); }
 };
 using FramePtr = std::shared_ptr<AVFrame>;
+inline FramePtr makeFramePtr(AVFrame* f) { return FramePtr(f, FrameDeleter{}); }
 
 struct PacketDeleter {
     void operator()(AVPacket* p) const { av_packet_free(&p); }
 };
 using PacketPtr = std::shared_ptr<AVPacket>;
+inline PacketPtr makePacketPtr(AVPacket* p) { return PacketPtr(p, PacketDeleter{}); }
 
 struct AudioChunk {
     double pts = 0.0;

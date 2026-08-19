@@ -19,10 +19,16 @@ bool Decoder::send(const AVPacket* pkt) {
 }
 
 FramePtr Decoder::receive() {
-    FramePtr frame(av_frame_alloc());
-    int ret = avcodec_receive_frame(ctx_, frame.get());
-    if (ret < 0) return nullptr;
-    return frame;
+    AVFrame* src = av_frame_alloc();
+    int ret = avcodec_receive_frame(ctx_, src);
+    if (ret < 0) {
+        av_frame_free(&src);
+        return nullptr;
+    }
+    AVFrame* out = av_frame_alloc();
+    av_frame_move_ref(out, src);
+    av_frame_free(&src);
+    return makeFramePtr(out);
 }
 
 void Decoder::flush() {

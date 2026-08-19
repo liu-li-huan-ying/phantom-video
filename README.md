@@ -7,8 +7,8 @@
 | 组件 | 技术 | 说明 |
 |---|---|---|
 | 语言 | C++17 | g++ 15.2.0 (w64devkit) |
-| 构建 | CMake 3.16+ | 仅 pkg-config 定位依赖 |
-| 解封装/解码 | FFmpeg 63.6 (master) | libavformat / libavcodec / libavutil / libswresample |
+| 构建 | CMake 3.16+ | pkg-config 定位 SDL2，FFmpeg 显式链接 .lib |
+| 解封装/解码 | FFmpeg 9.0.1 (gyan.dev stable) | libavformat / libavcodec / libavutil / libswresample |
 | 窗口/渲染/音频 | SDL2 2.32.10 | SDL_Renderer + SDL_OpenAudioDevice |
 | 平台 | Windows x64 | MinGW-w64 |
 
@@ -37,8 +37,8 @@ F:\vedioplayer\
 ## 构建
 
 ```powershell
-# 环境变量（依赖位于 F:\dev）
-$env:PKG_CONFIG_PATH = "F:\dev\ffmpeg\lib\pkgconfig;F:\dev\sdl2\x86_64-w64-mingw32\lib\pkgconfig"
+# 环境变量（依赖位于 F:\dev；FFmpeg 不走 pkg-config，由 CMake 直接链接）
+$env:PKG_CONFIG_PATH = "F:\dev\sdl2\x86_64-w64-mingw32\lib\pkgconfig"
 
 cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
 cmake --build build
@@ -49,8 +49,7 @@ cmake --build build
 ## 运行
 
 ```powershell
-# DLL 需可被找到（或拷贝到 exe 同目录）
-$env:PATH = "F:\dev\ffmpeg\bin;F:\dev\sdl2\x86_64-w64-mingw32\bin;" + $env:PATH
+# DLL 已由 CMake 自动拷贝到 build 目录，直接运行即可
 .\build\vplayer.exe "视频文件.mp4"
 ```
 
@@ -81,8 +80,8 @@ $env:PATH = "F:\dev\ffmpeg\bin;F:\dev\sdl2\x86_64-w64-mingw32\bin;" + $env:PATH
 
 - [x] M1 环境搭建（FFmpeg + SDL2 安装验证）
 - [x] M2 骨架：构建系统 + 文档
-- [x] M3 播放内核：解封装 → 解码 → 渲染 + 音频
-- [x] M4 播放控制与 OSD
+- [x] M3 播放内核：解封装 → 解码 → 渲染 + 音频（含崩溃根因修复：跨堆 free）
+- [x] M4 替换稳定版 FFmpeg 9.0.1（BtbN master 构建弃用）
 - [ ] M5 硬解（DXVA2 / D3D11VA）
 - [ ] M6 字幕（ASS/SRT）
 - [ ] M7 播放列表与记忆播放位置

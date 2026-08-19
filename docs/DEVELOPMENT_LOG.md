@@ -28,8 +28,8 @@
 - 产物：vplayer.exe 编译成功（606KB）
 - 清理旧项目：已删除 Go 版 server/web/vplayer.exe/旧文档，git 提交"清理旧 Go 版本"
 
-### 阶段 M3：播放内核开发 🔴 进行中（被 FFmpeg 库 bug 卡住）
-- 任务：解封装/解码/队列/时钟/音频输出/视频渲染/播放控制 —— 代码已全部写完
+### 阶段 M3：播放内核开发（代码完成；崩溃排查有阶段性结论）✅ 完成
+- 任务：解封装/解码/队列/时钟/音频输出/视频渲染/播放控制 —— 代码全部写完并编译通过
 - 困难与解决（**重大：堆损坏崩溃 0xC0000374**）：
   - 症状：播放器启动数秒内崩溃；gdb 显示在 `av_frame_free`（释放 AVFrame）时 Windows 堆校验失败
   - 排查过程（逐层隔离）：
@@ -39,18 +39,52 @@
     4. 标准 C 用法（帧立即释放，不持有）→ 正常，748 帧全部解码成功
     5. 用 shared_ptr 持有帧（播放器标准模式）→ 崩（单线程也崩）
     6. 只持有不释放任何帧 → 也崩
-  - 结论：**BtbN master-latest 自动构建的 FFmpeg 存在 bug**——所有播放器通用的"持有帧继续解码"模式即触发堆损坏，非本工程代码问题
-  - 期间尝试 **AddressSanitizer** 定位越界，但 w64devkit 未自带 libasan → 失败，改用手工二分隔离
+  - 当时结论：**怀疑 BtbN master-latest 构建的 FFmpeg 存在 bug**（此结论在 M4 被推翻，见 M4）
+  - 期间尝试 AddressSanitizer 定位越界，但 w64devkit 未自带 libasan → 失败，改用手工二分隔离
 - 遗留清理：F:\dev 下已删除所有安装包（ffmpeg*.zip、sdl2.zip、7zr.exe、ffmpeg-9.0.1-shared.7z）；保留 ffmpeg.exe/ffplay.exe/ffprobe.exe（解压产物，调试可用）
 - 纠正：冒烟测试视频原位于 C 盘临时目录（`C:\Users\31697\AppData\Local\Temp\opencode\s_30s.mp4`），不符合"不占用 C 盘"原则 → 已移至 `F:\vedioplayer\testdata\s_30s.mp4` 并更新 AGENTS.md 引用
-  - 解决方案（待执行）：换用 gyan.dev **稳定版 FFmpeg 9.0.1 shared** 构建
-    - 下载地址：`https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-full-shared.7z`（约 100MB，唯一含 include/lib 的共享构建）
-    - 解压工具：用户本机已有 `D:\Program Files\7-Zip\7z.exe`（不再需要额外下载工具）
-    - 注意：gyan 构建为 UCRT64 工具链，与 w64devkit（msvcrt）混用需验证
-- 遗留清理：F:\dev 下已删除所有安装包（ffmpeg*.zip、sdl2.zip、7zr.exe、ffmpeg-9.0.1-shared.7z）
 
-### 待办
-- [ ] 下载稳定版 FFmpeg 9.0.1（说明理由：master 构建有 bug）
-- [ ] 解压到 F:\dev，验证持帧模式不再崩溃
-- [ ] 调整 CMake 指向新 FFmpeg，重新冒烟测试
-- [ ] M3 完成后 git 提交
+### 阶段 M4：替换稳定版 FFmpeg + 根因重新定位 ✅ 完成
+- 任务：换 gyan.dev 稳定版 9.0.1 shared 构建（当时认为 BtbN master 有 bug），结果反而把真正的根因挖了出来
+- 下载过程（已向用户说明理由并获确认）：
+  - gyan.dev 直连下载 4MB 就断（服务器限速/不稳定）→ 删除残缺文件
+  - 重试（带 UA + --retry）15 分钟超时 → 放弃直连
+  - 改用 GitHub 镜像：`GyanD/codexffmpeg` release 9.0.1 的 `ffmpeg-9.0.1-full_build-shared.zip`（97,261,187 字节），经 ghproxy.net 下载成功 ✓
+- 解压产物：`F:\dev\ffmpeg-9.0.1-full_build-shared`（bin/include/lib/doc/presets）；zip 安装包已删除 ✓
+- 库结构特点：
+  - **无 pkg-config 文件** → CMake 不再用 pkg_check_modules(FFMPEG)，改为显式 .lib 路径链接
+  - **lib 为 MSVC 风格 COFF 导入库**（avformat.lib 等），MinGW 用 `-l:avformat.lib` 语法可正常链接 ✓
+  - **DLL 版本号与 BtbN master 相同**（avcodec-63.dll / avformat-63.dll / avutil-61.dll / swresample-7.dll / swscale-10.dll）
+  - **UCRT64 工具链构建**（导入 api-ms-win-crt-*），而 w64devkit 的 exe 是 msvcrt 运行时（导入 msvcrt.dll）
+- 排查过程（**推翻 M3 结论：不是库 bug！**）：
+  1. gyan 自带 ffprobe/ffplay（UCRT exe + 同套 DLL）解码/播放 s_30s.mp4 完全正常 → **库本身没问题**
+  2. 修正测试程序文件路径后（此前测试程序里还是 C 盘旧路径导致 open fail 误判），用新库重跑单线程实验矩阵：
+     | 模式 | 结果 |
+     |---|---|
+     | 每帧新 alloc + 立即释放（vanilla） | ✅ 748 帧正常 |
+     | 每帧新 alloc + shared_ptr 持有 receive 帧（holdall） | ❌ 崩 0xC0000374 |
+     | av_frame_ref 复制后持有副本（holdref） | ❌ 崩 |
+     | av_frame_move_ref 转移持有（moveref，ffplay 同款） | ✅ 正常 |
+     | **shared_ptr 持有 move_ref 帧（sp_moveref）** | ❌ 崩（裸指针同款却正常） |
+     | shared_ptr 临时变量 + 立即 reset（bq_single） | ❌ 崩 |
+  3. 多线程对照实验：裸指针 + move_ref + 双线程 + std::deque → ✅ 正常；FramePtr 版 → ❌ 崩
+  4. gflags PageHeap：越界写发生在堆块内部（非守卫页），free 时才发现
+  5. **决定性发现（根因）**：`std::shared_ptr<AVFrame>` 默认删除器是 `delete`（msvcrt 堆 operator delete），但 AVFrame 结构是 av_frame_alloc（FFmpeg DLL，UCRT 堆）分配的 → **跨堆 free → 堆损坏 0xC0000374**！`types.h` 里定义了 `FrameDeleter`（av_frame_free）却从未生效（shared_ptr 删除器是构造参数，不是模板参数）！
+- 修复方案：
+  - `src/core/types.h`：保留 `shared_ptr<AVFrame>` 类型，新增 `makeFramePtr()`/`makePacketPtr()` 工厂（构造时显式传 av_frame_free/av_packet_free 删除器）
+  - `src/core/decoder.cpp` `receive()`：改为 move_ref 模式（receive 到 src → av_frame_move_ref 到新帧 → 释放 src），返回 `makeFramePtr(out)`
+  - `src/core/demuxer.cpp` `readPacket()`：`makePacketPtr(av_packet_alloc())`
+  - 还原 M3 调试残留：main.cpp 渲染/OSD/Present、player.cpp debugNoAudio
+  - `CMakeLists.txt`：FFmpeg 改显式 .lib 链接，DLL 拷贝改新库路径
+- 验证：vplayer.exe 播放 s_30s.mp4（音频+视频+渲染全开）10 秒 / 20 秒均无崩溃 ✓；748 帧解码测试全过 ✓
+- 教训记录（重要）：
+  1. **shared_ptr 的删除器是构造参数**（`std::shared_ptr<T>(p, deleter)`），`unique_ptr` 才是模板参数——以后凡持有 FFmpeg 对象必须走 makeFramePtr/makePacketPtr
+  2. 不能因为"两个库版本相同号就断定库没问题/有问题"——先怀疑自己的代码
+  3. 测试程序硬编码文件路径导致 open fail 误判库有问题的教训：路径修正要检查源码转义（`\\`）
+- 遗留：`F:\dev\ffmpeg`（BtbN 旧库）暂保留作对照；后续确认无问题后删除
+
+### 阶段 M5（下一步规划）
+- 全功能验证：播放/暂停/seek/音量/全屏/拖拽
+- 更多格式冒烟：本地其它视频文件
+- 性能与稳定性：长时间播放、异常文件（损坏/无音频/仅音频）
+- 考虑：M3 时发现的"只持有不释放也崩"是同一个根因（shared_ptr 跨堆 free），无额外问题
