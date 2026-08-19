@@ -44,6 +44,25 @@
 - 遗留清理：F:\dev 下已删除所有安装包（ffmpeg*.zip、sdl2.zip、7zr.exe、ffmpeg-9.0.1-shared.7z）；保留 ffmpeg.exe/ffplay.exe/ffprobe.exe（解压产物，调试可用）
 - 纠正：冒烟测试视频原位于 C 盘临时目录（`C:\Users\31697\AppData\Local\Temp\opencode\s_30s.mp4`），不符合"不占用 C 盘"原则 → 已移至 `F:\vedioplayer\testdata\s_30s.mp4` 并更新 AGENTS.md 引用
 
+### 阶段 M5：全功能验证与冒烟测试 ✅ 完成
+- 任务：播放器可运行，验证全部功能并做多格式冒烟；**过程中发现并修复了一个隐藏重大 bug（视频队列永久 closed）**
+- 冒烟测试（此轮只验证"进程存活无崩溃"，画面/音频是否真的在放当时未确认）：
+  - 生成测试文件到 testdata：t_mpeg4_noaudio.avi（MPEG-4 无音频）、t_vp9.webm（VP9）、t_x264.mp4（x264）、t_truncated.mp4（截断损坏）、t_garbage.dat（随机垃圾）
+  - 三种格式各跑 6 秒无崩溃 ✓；损坏文件打开失败但进程存活 ✓；播放到自然结束（36 秒窗口存活）✓
+- **重大 bug 发现与修复（API 级验证暴露）**：
+  - 写 player_api_test（Temp 目录）验证 openFile/state/clock/seek/volume 等 20 项
+  - 初跑 15/20：`clock after 3s = 0.00`（音频主时钟不动）、pullFrame 收不到帧、Paused 状态异常
+  - 排查过程：audio_probe 探针（SDL 回调 87 次/2 秒正常）→ audio_integ 集成测试（解码 1292 帧 + 时钟 30.00 正常）→ 逐步加日志发现 `videoQueue_.push(f)` 返回 false → gdb attach 发现 decodeLoop 线程已消失
+  - **根因**：`Player::close()` 会 `videoQueue_.close()`，而 `openFile()` 从不重置 → **BlockingQueue 一旦 close 就永久 closed** → 首次 openFile（内部先 close()）后解码线程 push 立即失败退出 → 视频/音频全部停摆
+  - **结论修正**：此前所有"播放正常"的验证（M4 的 10s/20s/36s、M5 冒烟）其实画面从未真正动过——只是进程没崩溃！真正的首次成功播放发生在修复之后
+  - 修复：BlockingQueue 新增 `reopen()`（重置 closed_ 并清空）；openFile 在 close() 后调用 `videoQueue_.reopen()`（audio_ 是 unique_ptr 每次重建不受影响）
+- API 测试最终结果：**20/20 PASS**（consumer 线程以 16ms 节奏模拟真实播放器主循环拉帧）：
+  - openFile/duration/state 流转/暂停冻结/恢复/seek(20)→21.90/volume/mute/close/无音频文件/垃圾文件拒绝/截断文件处理 ✓
+  - 音频主时钟 3 秒推进 3.02（1:1 正常播放）；seek 精度受 keyframe 间隔限制（s_30s.mp4 keyframe 每 10 秒，seek(16.9) 落到 10 秒处再继续）
+- GUI 最终验证：vplayer.exe 播放 7 秒无崩溃 + 两次截屏像素差异 50 处（画面/OSD 时钟在动）✓
+- 附注：seek 后音频时钟能自动重设（fill() 检测 chunk.pts 与 writeHead_ 偏差 >0.5s 时重设）；音频回调在无窗口环境同样正常工作（SDL 音频不依赖窗口）
+- 遗留：API 测试程序与探针程序在 `C:\Users\31697\AppData\Local\Temp\opencode\`（可清理）；旧 BtbN 库 F:\dev\ffmpeg 待删
+
 ### 阶段 M4：替换稳定版 FFmpeg + 根因重新定位 ✅ 完成
 - 任务：换 gyan.dev 稳定版 9.0.1 shared 构建（当时认为 BtbN master 有 bug），结果反而把真正的根因挖了出来
 - 下载过程（已向用户说明理由并获确认）：
@@ -84,7 +103,3 @@
 - 遗留：`F:\dev\ffmpeg`（BtbN 旧库）暂保留作对照；后续确认无问题后删除
 
 ### 阶段 M5（下一步规划）
-- 全功能验证：播放/暂停/seek/音量/全屏/拖拽
-- 更多格式冒烟：本地其它视频文件
-- 性能与稳定性：长时间播放、异常文件（损坏/无音频/仅音频）
-- 考虑：M3 时发现的"只持有不释放也崩"是同一个根因（shared_ptr 跨堆 free），无额外问题

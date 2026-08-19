@@ -69,6 +69,13 @@ public:
         notFull_.notify_all();
     }
 
+    void reopen() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        closed_ = false;
+        queue_.clear();
+        total_ = 0;
+    }
+
     bool closed() const {
         std::lock_guard<std::mutex> lock(mutex_);
         return closed_;

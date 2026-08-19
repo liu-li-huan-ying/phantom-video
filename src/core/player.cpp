@@ -8,6 +8,7 @@ Player::~Player() { close(); }
 
 bool Player::openFile(const std::string& path) {
     close();
+    videoQueue_.reopen();
 
     auto demuxer = std::make_unique<Demuxer>();
     if (!demuxer->open(path)) {
