@@ -150,8 +150,7 @@
 - 代码清理：移除 main.cpp [exit] debug 打印
 - 提交：7a75302（M9 功能）、64db432（docs）、ce21893（README）
 
-### 阶段 M10：播放速度 ✅ 完成
+### 阶段 M10：播放速度 ⏳ 规划中
 
 - 任务：S/L 快捷键控制播放速度（0.5x / 0.75x / 1.0x / 1.25x / 1.5x / 2.0x），OSD 显示倍速。
-- 实现：Player 增加 `m_speed` 成员；seek 后音频时钟不受影响；视频帧调度按 `target = base + (pts - base) / speed` 伸缩；AudioOutput 保持原速播放采样但丢弃/复制以匹配 speed（简单实现：只控制视频节奏，音频正常）。
-- 验证：播放 4.mp4 按 S/L 切换速度 OSD 正常，退出保存 speed 到 ini。
+- 计划：Player 增加 `m_speed` 成员；视频帧调度按 `target = base + (pts - base) / speed` 伸缩；音频正常播放速度（或 SWR 变速）。
