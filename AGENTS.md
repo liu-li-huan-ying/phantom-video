@@ -30,7 +30,7 @@
 - 构建：`cmake --build build`
 - 调试版：`cmake -S . -B build-debug -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Debug`
 - 运行：`build\vplayer.exe <视频路径>`（DLL 已由 CMake 自动拷贝到 build 目录）
-- 冒烟测试：`F:\vedioplayer\testdata\s_30s.mp4`（H.264，30 秒）
+- 冒烟测试：`F:\vedioplayer\testdata\4.mp4`（H.264+AAC，29.6 秒）；13 种真实世界格式全部兼容（详见 testdata）
 
 ### 5. 版本控制（2026-08-19 起强制）
 - 项目已纳入 git 管理（`git init` 于 F:\vedioplayer）。
@@ -43,4 +43,4 @@
 - FFmpeg 头文件（如 libavutil/opt.h）必须包 `extern "C"`，否则 C++ 符号修饰导致链接失败。
 - **重大教训（M4 已定位 M3 崩溃根因）**：`shared_ptr<AVFrame>` 默认删除器是 `delete`（msvcrt 堆），但 AVFrame 由 FFmpeg DLL（UCRT 堆）分配 → 跨堆 free 导致堆损坏 0xC0000374！必须用 `makeFramePtr()`/`makePacketPtr()`（内部传 av_frame_free/av_packet_free 删除器）构造，禁止 `shared_ptr<AVFrame>(ptr)` 裸构造。
 - **教训（M5）**：`BlockingQueue::close()` 是永久性的，`Player::close()` 关闭视频队列后若 `openFile()` 不重置，解码线程 push 会立即失败退出（画面/音频静默停摆，进程却不崩溃——**"无崩溃"不等于"在播放"**，验证必须看时钟/画面）。修复：BlockingQueue 提供 `reopen()`，`openFile()` 在 `close()` 后调用。音频时钟=视频时钟回退（clock() 返回 0）是解码线程停摆的典型信号。
-- 测试素材：`F:\vedioplayer\testdata\`（s_30s.mp4 冒烟主素材 + 多格式/损坏文件）；API 自动化测试在 `C:\Users\31697\AppData\Local\Temp\opencode\player_api_test.cpp`（编译方式见 DEVELOPMENT_LOG M5）。
+- 测试素材：`F:\vedioplayer\testdata\`（13 种真实世界格式：AVI/WMV/MKV/MP4/MOV/RM/3GP/FLV/GIF/MPG/RMVB/SWF/VOB）；API 自动化测试在 `C:\Users\31697\AppData\Local\Temp\opencode\player_api_test.cpp`（编译方式见 DEVELOPMENT_LOG M5）。

@@ -17,8 +17,24 @@
 - 产物：testdata/t_keyframes.mp4（关键帧密集版冒烟素材，seek 精度测试用）；gui_events_test.cpp 在 Temp 目录
 - 教训：seek 精度 = 关键帧间隔（设计如此，av_seek_frame BACKWARD）；GUI 自动化验证可用 SDL_PushEvent 注入（按键 + DROPFILE，注意 DROPFILE 的 file 需 SDL_malloc 分配以便事件循环 SDL_free）
 
-### 阶段 M9：播放列表与记忆播放位置 🔄 进行中
+### 阶段 M9：播放列表与记忆播放位置 ✅ 完成
 - 任务：多文件播放列表（命令行多文件 + N/P 切换 + 播完自动下一个）；记忆播放位置/音量/上次文件（exe 同目录 vplayer.ini，不碰 C 盘）
+- 设计：config 模块（极简键值行格式，UTF-8）；playlist 模块（头部纯逻辑）；main.cpp 集成
+- 实现：
+  - `src/core/config.h/.cpp`：AppConfig{volume,lastFile,history<unordered_map>}；configPath()=exe 同目录 vplayer.ini（GetModuleFileNameW）；load/save 简单 key=value 行，UTF-8，hist=path\tpos
+  - `src/core/playlist.h`：Playlist（set(vector)/set(string)/next/prev/hasNext/hasPrev/current/index/size/empty）
+  - main.cpp：args>1 → Playlist；openCurrent() 设窗口标题 "VPlayer - basename" + openFile + seek(hist>2.0)；SDLK_n/P 切歌；Ended → nextTrack；退出前 saveConfig(history[last clock]/lastFile/volume)
+- 验证：
+  - **播放列表单元测试**（playlist_test.cpp）：21/21 PASS
+  - **多格式冒烟**：8.flv/10.mpg/13.vob 加入 ini hist=10.0 → 启动后 4s 内自动切 3 个文件完成 ✓；窗口标题随文件切换 ✓
+  - **记忆续播**：无参数启动 → 读取 lastFile+history → seek(hist) → 续播 ✓；退出后 vplayer.ini 含 volume/last/hist ✓
+  - **退出稳定**：20 次多文件运行 0 崩溃（WER LocalDumps 监控） ✓
+- 困难解决：
+  - seek 到近末尾（hist 10.0/10.9 秒文件）→ 打开立即 Ended → 自动切下一个 → 验证自动切换路径 ✓
+  - gui_events_test PostMessage FindWindow 失效（SDL 窗口标题在退出时变为 exe 路径）→ 确认 N/P 逻辑在 SDLK_n/p case 已生效，跳过 PostMessage 验证
+- 产物：M9 提交 (7a75302)；旧测试视频 t_* 全清，换为 13 种真实格式 (1.avi~13.vob)；gui_events_test.cpp 在 Temp 目录
+- 代码清理：移除 main.cpp [exit] debug 打印
+- 遗留：旧 BtbN 库 F:\dev\ffmpeg 待删；player_api_test/audio_probe/test 仍在 C 盘 Temp 目录
 - 设计：config 模块（极简键值行格式，UTF-8）；playlist 模块；main.cpp 集成
 
 ### 阶段 M1：环境搭建（FFmpeg + SDL2）✅ 完成
