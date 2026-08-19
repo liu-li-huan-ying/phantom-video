@@ -1,0 +1,31 @@
+Compiling the CXX compiler identification source file "CMakeCXXCompilerId.cpp" failed.
+Compiler: D:/w64devkit/bin/g++.exe 
+Build flags: -fsanitize=address;-g
+Id flags:  
+
+The output was:
+1
+D:\w64devkit\bin/ld.exe: cannot find -lasan: No such file or directory
+collect2.exe: error: ld returned 1 exit status
+
+
+Determining if the CXX compiler works failed with the following output:
+Change Dir: F:/vedioplayer/build-asan/CMakeFiles/CMakeTmp
+
+Run Build Command(s):D:/w64devkit/bin/mingw32-make.exe cmTC_ab9a0/fast && make  -f CMakeFiles\cmTC_ab9a0.dir\build.make CMakeFiles/cmTC_ab9a0.dir/build
+make[1]: Entering directory 'F:/vedioplayer/build-asan/CMakeFiles/CMakeTmp'
+Building CXX object CMakeFiles/cmTC_ab9a0.dir/testCXXCompiler.cxx.obj
+D:\w64devkit\bin\g++.exe    -fsanitize=address -g    -o CMakeFiles\cmTC_ab9a0.dir\testCXXCompiler.cxx.obj -c F:\vedioplayer\build-asan\CMakeFiles\CMakeTmp\testCXXCompiler.cxx
+Linking CXX executable cmTC_ab9a0.exe
+"D:\Program Files\CMake\bin\cmake.exe" -E cmake_link_script CMakeFiles\cmTC_ab9a0.dir\link.txt --verbose=1
+"D:\Program Files\CMake\bin\cmake.exe" -E remove -f CMakeFiles\cmTC_ab9a0.dir/objects.a
+D:\w64devkit\bin\ar.exe cr CMakeFiles\cmTC_ab9a0.dir/objects.a @CMakeFiles\cmTC_ab9a0.dir\objects1.rsp
+D:\w64devkit\bin\g++.exe -fsanitize=address -g   -fsanitize=address  -Wl,--whole-archive CMakeFiles\cmTC_ab9a0.dir/objects.a -Wl,--no-whole-archive  -o cmTC_ab9a0.exe -Wl,--out-implib,libcmTC_ab9a0.dll.a -Wl,--major-image-version,0,--minor-image-version,0 @CMakeFiles\cmTC_ab9a0.dir\linklibs.rsp
+D:\w64devkit\bin/ld.exe: cannot find -lasan: No such file or directory
+collect2.exe: error: ld returned 1 exit status
+make[1]: *** [CMakeFiles\cmTC_ab9a0.dir\build.make:91: cmTC_ab9a0.exe] Error 1
+make[1]: Leaving directory 'F:/vedioplayer/build-asan/CMakeFiles/CMakeTmp'
+make: *** [Makefile:123: cmTC_ab9a0/fast] Error 2
+
+
+

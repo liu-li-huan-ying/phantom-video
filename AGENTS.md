@@ -2,30 +2,42 @@
 
 ## 强制规则（必须遵守，优先级最高）
 
-### 1. 技术栈（2026-08 架构切换后）
-- 本项目已**彻底放弃 Python / PyQt**，改用：
-  - 后端：Go 1.24.5（`go build` / `go test`）
-  - 前端：TypeScript + 原生 CSS（编译用 `npx tsc`，编译产物由 Go `embed` 打包进二进制）
-  - 播放：系统 Edge 浏览器（`--app=` 窗口模式）——**唯一播放内核**，依赖其自带 H.264/AAC 专有解码器
-- 旧 Python 代码（main.py / app/ / .venv）已删除，**不得**重新引入 Python 运行时。
-- **禁止**使用系统 Python（`E:\anaconda3\python.exe`）运行、调试项目代码。
+### 1. 技术栈（2026-08-19 起，C++ 架构）
+- 本项目为**自研 C++ 视频播放器**：
+  - 语言：C++17（g++ 15.2.0，w64devkit，位于 D:\w64devkit）
+  - 构建：CMake + MinGW Makefiles（构建前需临时改名 `D:\w64devkit\bin\sh.exe`，构建完恢复）
+  - 解码：FFmpeg（libavformat/avcodec/avutil/swresample）
+  - 渲染/音频/窗口：SDL2（SDL_MAIN_HANDLED 方案，不链接 SDL2main）
+  - 依赖定位：pkg-config（`PKG_CONFIG_PATH="F:\dev\ffmpeg\lib\pkgconfig;F:\dev\sdl2\x86_64-w64-mingw32\lib\pkgconfig"`）
+- 已彻底放弃 Python / Go / TypeScript 技术栈，不得重新引入。
 
-### 2. 磁盘与依赖约束
-- C 盘仅剩约 2GB：**严禁**往 C 盘安装任何东西（npm 全局包、Go 模块缓存等）。
-- Go：只用标准库（net/http / embed），**零第三方模块**；若需模块缓存，重定向到 E:。
-- npm：依赖仅限 `web/` 目录内 `node_modules`（typescript 一个包），项目在 F: 盘不影响 C:。
-- ffmpeg.exe（仅作 probe 元数据用，只读调用，不可替代播放）：
-  `C:\Users\31697\AppData\Roaming\Python\Python311\site-packages\imageio_ffmpeg\binaries\ffmpeg-win64-v4.2.2.exe`
-- Edge 路径：`C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`
+### 2. 下载与磁盘约束（2026-08-19 起强制）
+- **严禁**往 C 盘安装/下载任何东西（C 盘仅剩约 2GB）。
+- 一切下载**先说明理由**，再执行；不随便下载工具或库。
+- 下载文件一律放 **F 盘**（如 F:\dev\）。
+- 解压/使用完毕后**及时删除安装包**（.zip/.7z/.exe 安装器等），只保留解压产物。
+- 优先使用本机已有工具（如 7-Zip：`D:\Program Files\7-Zip\7z.exe`），不重复下载。
+- 构建产物一律放 `F:\vedioplayer\build\`。
 
-### 3. 常用命令
-- 构建后端：`go build -o vplayer.exe ./server`（项目根目录执行）
-- 前端编译：`npx tsc -p web/tsconfig.json`
-- 运行：`vplayer.exe`（自动启动本地 HTTP 服务并拉起 Edge）
-- 冒烟测试：用 `C:\Users\31697\AppData\Local\Temp\opencode\s_30s.mp4`（H.264，30 秒）
+### 3. 阶段记录（2026-08-19 起强制）
+- 每个阶段/任务开始前和完成后，**必须在 `docs/DEVELOPMENT_LOG.md` 记录**：
+  - 阶段编号与任务内容
+  - 遇到的所有困难与解决办法（哪怕最终没解决，也要记录状态）
+- 此规则贯彻在**后续每一个阶段**。
 
-### 4. 版本控制（2026-08-19 起强制）
+### 4. 常用命令
+- 配置：`cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release`（需先改名 sh.exe）
+- 构建：`cmake --build build`
+- 调试版：`cmake -S . -B build-debug -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Debug`
+- 运行：`build\vplayer.exe <视频路径>`（DLL 已由 CMake 自动拷贝到 build 目录）
+- 冒烟测试：`C:\Users\31697\AppData\Local\Temp\opencode\s_30s.mp4`（H.264，30 秒）
+
+### 5. 版本控制（2026-08-19 起强制）
 - 项目已纳入 git 管理（`git init` 于 F:\vedioplayer）。
 - 每次实现完成一个功能/修复后，**必须** `git add -A` + `git commit`（中文提交信息）。
 - 曾发生整个工作区内容被外部因素清空的事件，git 是唯一的防丢失手段。
 - 任何大改动前先 `git status` 确认工作区干净。
+
+### 6. 已知问题备忘
+- **FFmpeg 库 bug**：BtbN master-latest 构建存在堆损坏问题（持帧模式即崩），需换 gyan.dev 稳定版 9.0.1（详见 DEVELOPMENT_LOG.md 阶段 M3）。
+- FFmpeg 头文件（如 libavutil/opt.h）必须包 `extern "C"`，否则 C++ 符号修饰导致链接失败。

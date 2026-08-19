@@ -1,0 +1,169 @@
+﻿#define SDL_MAIN_HANDLED
+#include <SDL.h>
+
+#include <windows.h>
+#include <shellapi.h>
+
+#include <cstdio>
+#include <string>
+#include <vector>
+
+#include "core/player.h"
+#include "ui/osd.h"
+#include "video/video_renderer.h"
+
+static std::vector<std::string> utf8Args() {
+    std::vector<std::string> out;
+    int argc = 0;
+    LPWSTR* wargv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    if (!wargv) return out;
+    for (int i = 0; i < argc; ++i) {
+        int len = WideCharToMultiByte(CP_UTF8, 0, wargv[i], -1, nullptr, 0, nullptr, nullptr);
+        std::string s(len > 0 ? len - 1 : 0, '\0');
+        WideCharToMultiByte(CP_UTF8, 0, wargv[i], -1, s.data(), len, nullptr, nullptr);
+        out.push_back(std::move(s));
+    }
+    LocalFree(wargv);
+    return out;
+}
+
+static void formatTime(char* buf, size_t n, double sec) {
+    int s = (int)(sec + 0.5);
+    if (s < 0) s = 0;
+    int h = s / 3600, m = (s % 3600) / 60, ss = s % 60;
+    if (h > 0)
+        std::snprintf(buf, n, "%d:%02d:%02d", h, m, ss);
+    else
+        std::snprintf(buf, n, "%02d:%02d", m, ss);
+}
+
+int main(int argc, char** argv) {
+    (void)argc;
+    (void)argv;
+    SDL_SetMainReady();
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) != 0) {
+        std::printf("SDL 鍒濆鍖栧け璐? %s\n", SDL_GetError());
+        return 1;
+    }
+
+    SDL_Window* win = SDL_CreateWindow("VPlayer", SDL_WINDOWPOS_CENTERED,
+                                       SDL_WINDOWPOS_CENTERED, 960, 540,
+                                       SDL_WINDOW_RESIZABLE);
+    if (!win) {
+        std::printf("鍒涘缓绐楀彛澶辫触: %s\n", SDL_GetError());
+        SDL_Quit();
+        return 1;
+    }
+
+    Player player;
+    VideoRenderer vrender;
+    OSD osd;
+    if (!vrender.init(win)) {
+        std::printf("鍒涘缓娓叉煋鍣ㄥけ璐? %s\n", SDL_GetError());
+        SDL_DestroyWindow(win);
+        SDL_Quit();
+        return 1;
+    }
+    osd.init(vrender.renderer());
+
+    auto args = utf8Args();
+    if (args.size() > 1 && !args[1].empty()) {
+        if (player.openFile(args[1]))
+            std::printf("宸叉墦寮€: %s\n", args[1].c_str());
+        else
+            SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "鎵撳紑澶辫触",
+                                     player.error().c_str(), win);
+    }
+
+    bool running = true;
+    bool fullscreen = false;
+    Uint32 volHideAt = 0;
+
+    while (running) {
+        SDL_Event e;
+        while (SDL_PollEvent(&e)) {
+            switch (e.type) {
+            case SDL_QUIT:
+                running = false;
+                break;
+            case SDL_DROPFILE:
+                if (player.openFile(e.drop.file))
+                    std::printf("宸叉墦寮€: %s\n", e.drop.file);
+                else
+                    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "鎵撳紑澶辫触",
+                                             player.error().c_str(), win);
+                SDL_free(e.drop.file);
+                break;
+            case SDL_KEYDOWN:
+                switch (e.key.keysym.sym) {
+                case SDLK_SPACE:
+                    player.togglePause();
+                    break;
+                case SDLK_LEFT:
+                    player.seekRelative(e.key.keysym.mod & KMOD_CTRL ? -30.0 : -5.0);
+                    break;
+                case SDLK_RIGHT:
+                    player.seekRelative(e.key.keysym.mod & KMOD_CTRL ? 30.0 : 5.0);
+                    break;
+                case SDLK_UP:
+                    player.setVolume(player.volume() + 0.1f);
+                    volHideAt = SDL_GetTicks() + 2000;
+                    break;
+                case SDLK_DOWN:
+                    player.setVolume(player.volume() - 0.1f);
+                    volHideAt = SDL_GetTicks() + 2000;
+                    break;
+                case SDLK_m:
+                    player.toggleMute();
+                    volHideAt = SDL_GetTicks() + 2000;
+                    break;
+                case SDLK_f:
+                    fullscreen = !fullscreen;
+                    SDL_SetWindowFullscreen(win,
+                        fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+                    break;
+                case SDLK_ESCAPE:
+                case SDLK_q:
+                    running = false;
+                    break;
+                default:
+                    break;
+                }
+                break;
+            default:
+                break;
+            }
+        }
+
+        if (player.hasMedia()) {
+            FramePtr f = player.pullFrame();
+            if (f)
+                ; // DEBUG: 娓叉煋鍣ㄥ凡绂佺敤
+            else if (player.state() == Player::State::Ended)
+                vrender.clear();
+
+            double pos = player.clock();
+            double dur = player.duration();
+            char t1[32], t2[32];
+            formatTime(t1, sizeof(t1), pos);
+            formatTime(t2, sizeof(t2), dur);
+            std::string timeText = std::string(t1) + " / " + t2;
+
+            float vol = player.muted() ? 0.0f : player.volume();
+            bool volVisible = SDL_GetTicks() < volHideAt;
+            osd.draw(timeText, pos, dur, vol, volVisible,
+                     player.state() == Player::State::Paused, true);
+        } else {
+            vrender.clear();
+            /* DEBUG */
+        }
+        /* DEBUG present */
+        SDL_Delay(8);
+    }
+
+    player.close();
+    vrender.shutdown();
+    SDL_DestroyWindow(win);
+    SDL_Quit();
+    return 0;
+}

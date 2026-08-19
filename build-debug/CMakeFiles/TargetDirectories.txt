@@ -1,0 +1,3 @@
+F:/vedioplayer/build-debug/CMakeFiles/vplayer.dir
+F:/vedioplayer/build-debug/CMakeFiles/edit_cache.dir
+F:/vedioplayer/build-debug/CMakeFiles/rebuild_cache.dir

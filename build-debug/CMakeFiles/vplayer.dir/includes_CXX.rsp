@@ -1,0 +1,1 @@
+-IF:/dev/sdl2/x86_64-w64-mingw32/include -IF:/dev/sdl2/x86_64-w64-mingw32/include/SDL2 -IF:/dev/ffmpeg/include -IF:/vedioplayer/src 
