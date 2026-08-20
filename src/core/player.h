@@ -9,6 +9,7 @@
 #include "core/blocking_queue.h"
 #include "core/decoder.h"
 #include "core/demuxer.h"
+#include "subtitle/subtitle.h"
 
 class Player {
 public:
@@ -36,6 +37,9 @@ public:
     std::string path() const { return path_; }
     std::string error() const { return error_; }
     bool usingHardware() const { return hwDecode_.load(); }
+    bool loadExternalSubtitle(const std::string& path);
+    std::string subtitleText(double t) const;
+    bool hasSubtitle() const { return subtitleLoaded_ || subtitleIndex_ >= 0; }
 
     FramePtr pullFrame();
 
@@ -73,6 +77,11 @@ private:
 
     AVBufferRef* hwDeviceCtx_ = nullptr;
     std::atomic<bool> hwDecode_{ false };
+
+    SubtitleTrack subtitles_;
+    std::atomic<bool> subtitleLoaded_{ false };
+    int subtitleIndex_ = -1;
+    std::unique_ptr<SubtitleDecoder> subtitleDecoder_;
 
     double duration_ = 0.0;
     std::string path_;

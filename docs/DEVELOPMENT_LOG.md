@@ -133,11 +133,27 @@
   - 3.mkv（MPEG-4）/ 11.rmvb（RV40）→ hw=0 软解回退，播放正常 ✓
 - 遗留：H.265 无测试素材（可硬解但未验证）；NVDEC/CUDA 未启用（仅 D3D11VA/DXVA2）
 
-### 阶段 M8：字幕（ASS/SRT） ⏳ 规划中
+### 阶段 M8：字幕（外挂 SRT/ASS + 内嵌字幕流） ✅ 完成
 
-- 任务：解析并渲染外挂字幕（SRT）与内嵌字幕（ASS）。
-- 计划：FFmpeg subtitle 流 demux → `avcodec_decode-subtitle` → SDL_RenderGeometry+纹理渲染 OSD 层。ASS 使用 libass 渲染；SRT 简易解析。
-- 遗留：字幕渲染与 OSD 共享渲染管线设计。
+- 任务：外挂字幕（SRT/ASS）解析渲染；内嵌字幕流（MKV 等容器）解码显示。
+- 实现：
+  - `src/subtitle/subtitle.h/.cpp`：SubtitleTrack（事件列表 + textAt 查询）
+    - `loadSrt()`：序号/时间行（HH:MM:SS,mmm -->）/多行文本，自动去 BOM、归一 CRLF
+    - `loadAss()`：解析 [Events] 段 Dialogue 行（Layer,Start,End,...,Text），去 {\...} 标签与 \N
+    - SubtitleDecoder：AVCodecContext + avcodec_decode_subtitle2，SUBtitle_TEXT/ASS rect 提取文本
+  - Demuxer：新增 subtitleIndex()/subtitleStream()/subtitleCodecpar()
+  - Player：openFile 检测内嵌字幕流 → 解码线程逐个 packet 解码入 subtitles_（按容器 pts 时间，time_base 换算秒）；`loadExternalSubtitle()` / `subtitleText(t)` / `hasSubtitle()`；seek 时清空字幕并 flush 解码器
+  - main.cpp：打开视频自动查找同名 .srt/.ass/.ssa/.sub（replaceExt）；RenderStats.subtitle 传文本
+  - VideoRenderer：GDI 渲染字幕（CreateFontW 微软雅黑 32px + DrawTextW 黑描边白字 → DIB → SDL 纹理，底部居中），文本变化才重建纹理，缓存于 subtitleCache_
+- 关键技术点（踩坑）：
+  - **FFmpeg srt 解码器不设 sub.pts（NOPTS），start/end_display_time 恒 0**——时间必须从 packet pts × stream time_base 取；MKV 内嵌 srt 的 rect->ass 是 9 字段无 "Dialogue:" 前缀格式（0,0,Default,,0,0,0,,Text），需剥离前 9 字段取 Text
+- 验证（subtitle_test.cpp + subtitle_embed_test.cpp）：
+  - SRT 解析 3 事件，多行文本、UTF-8 中文、边界时间查询 12/12 全过
+  - ASS 解析 2 事件、去标签 全过
+  - 内嵌字幕：ffmpeg 生成带 srt 的 MKV → 解码事件时间 1.0/4.0/60.0 秒正确（pkt pts 方案），播放 2 秒时钟处显示 "Hello World" ✓
+  - 外挂字幕：4.mp4 + 外部 SRT，textAt(1.5/4.5) 精确匹配 ✓
+  - GUI 冒烟：内嵌字幕 MKV 与外挂字幕 GIF 各跑 6 秒无崩溃
+- 遗留：图形字幕（PGS/DVDSUB 位图）不支持；无字幕切换快捷键（单字幕轨自动取首个）；字幕样式（位置/字号/颜色）固定
 
 ### 阶段 M9：播放列表与记忆播放位置 ✅ 完成
 

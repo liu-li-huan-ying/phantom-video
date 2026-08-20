@@ -65,6 +65,16 @@ bool Player::openFile(const std::string& path) {
                     av_q2d(demuxer_->videoStream()->time_base);
     }
 
+    subtitles_.clear();
+    subtitleLoaded_.store(false);
+    subtitleIndex_ = demuxer_->subtitleIndex();
+    subtitleDecoder_.reset();
+    if (subtitleIndex_ >= 0) {
+        auto sdec = std::make_unique<SubtitleDecoder>();
+        if (sdec->open(demuxer_->subtitleCodecpar()))
+            subtitleDecoder_ = std::move(sdec);
+    }
+
     path_ = path;
     error_.clear();
     videoEnabled_.store(true);
@@ -89,6 +99,11 @@ void Player::close() {
     videoQueue_.close();
     if (audio_) audio_->closeQueue();
     if (decodeThread_.joinable()) decodeThread_.join();
+
+    subtitles_.clear();
+    subtitleLoaded_.store(false);
+    subtitleIndex_ = -1;
+    subtitleDecoder_.reset();
 
     audio_.reset();
     audioDecoder_.reset();
@@ -178,6 +193,26 @@ void Player::setSpeed(float s) {
     videoBaseTicks_ = SDL_GetPerformanceCounter();
 }
 
+bool Player::loadExternalSubtitle(const std::string& path) {
+    SubtitleTrack track;
+    bool ok = false;
+    std::string lower = path;
+    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+    if (lower.size() >= 4 && lower.compare(lower.size() - 4, 4, ".ass") == 0)
+        ok = track.loadAss(path);
+    else
+        ok = track.loadSrt(path);
+    if (!ok) return false;
+    subtitles_ = std::move(track);
+    subtitleLoaded_.store(true);
+    return true;
+}
+
+std::string Player::subtitleText(double t) const {
+    if (!subtitleLoaded_.load() && !subtitleDecoder_) return {};
+    return subtitles_.textAt(t);
+}
+
 void Player::toggleMute() {
     muted_.store(!muted_.load());
     if (audio_) audio_->setVolume(muted_.load() ? 0.0f : volume_.load());
@@ -263,6 +298,10 @@ void Player::doSeek(double t) {
     demuxer_->seek(t);
     if (videoDecoder_) videoDecoder_->flushBuffers();
     if (audioDecoder_) audioDecoder_->flushBuffers();
+    if (subtitleDecoder_) {
+        subtitles_.clear();
+        subtitleDecoder_->flushBuffers();
+    }
     dropUntil_.store(t - 0.05);
 }
 
@@ -292,6 +331,13 @@ void Player::decodeLoop() {
             while (FramePtr f = audioDecoder_->receive()) {
                 if (framePts(f) < dropUntil_.load()) continue;
                 if (!audio_ || !audio_->push(f)) return;
+            }
+        } else if (subtitleIndex_ >= 0 && pkt->stream_index == subtitleIndex_ &&
+                   !subtitleLoaded_.load()) {
+            if (subtitleDecoder_) {
+                AVStream* s = demuxer_->subtitleStream();
+                double tb = s ? av_q2d(s->time_base) : 0.001;
+                subtitleDecoder_->decode(pkt.get(), tb, subtitles_);
             }
         }
     }

@@ -39,6 +39,28 @@ static void formatTime(char* buf, size_t n, double sec) {
         std::snprintf(buf, n, "%02d:%02d", m, ss);
 }
 
+static std::string replaceExt(const std::string& path, const char* newExt) {
+    std::size_t dot = path.find_last_of('.');
+    std::size_t slash = path.find_last_of("\\/");
+    if (dot != std::string::npos && (slash == std::string::npos || dot > slash))
+        return path.substr(0, dot) + newExt;
+    return path + newExt;
+}
+
+static void loadExternalSubtitle(Player& player, const std::string& video) {
+    for (const char* ext : { ".srt", ".ass", ".ssa", ".sub" }) {
+        std::string cand = replaceExt(video, ext);
+        FILE* f = std::fopen(cand.c_str(), "rb");
+        if (f) {
+            std::fclose(f);
+            if (player.loadExternalSubtitle(cand)) {
+                std::printf("已加载字幕: %s\n", cand.c_str());
+                return;
+            }
+        }
+    }
+}
+
 int main(int argc, char** argv) {
     (void)argc;
     (void)argv;
@@ -92,6 +114,7 @@ auto args = utf8Args();
         if (slash != std::string::npos) base = base.substr(slash + 1);
         SDL_SetWindowTitle(win, ("VPlayer - " + base).c_str());
         if (player.openFile(p)) {
+            loadExternalSubtitle(player, p);
             auto it = cfg.history.find(p);
             if (it != cfg.history.end() && it->second > 2.0)
                 player.seek(it->second);
@@ -134,10 +157,12 @@ auto args = utf8Args();
                 running = false;
                 break;
             case SDL_DROPFILE:
-                if (player.openFile(e.drop.file))
-                    std::printf("宸叉墦寮€: %s\n", e.drop.file);
+                if (player.openFile(e.drop.file)) {
+                    loadExternalSubtitle(player, e.drop.file);
+                    std::printf("已打开: %s\n", e.drop.file);
+                }
                 else
-                    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "鎵撳紑澶辫触",
+                    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "打开失败",
                                              player.error().c_str(), win);
                 SDL_free(e.drop.file);
                 break;
@@ -268,6 +293,14 @@ auto args = utf8Args();
                 stats.muted = player.muted();
                 stats.fullscreen = fullscreen;
                 stats.speed = player.speed();
+                static std::string subtitleBuf;
+                if (player.hasSubtitle()) {
+                    subtitleBuf = player.subtitleText(stats.clock);
+                    stats.subtitle = subtitleBuf.c_str();
+                } else {
+                    subtitleBuf.clear();
+                    stats.subtitle = nullptr;
+                }
                 stats.onPlayPause = [&]() { player.togglePause(); return true; };
                 stats.onToggleFullscreen = [&]() { fullscreen = !fullscreen; SDL_SetWindowFullscreen(win, fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0); return true; };
                 stats.onSeekTo = [&](double p) { player.seek(p); return true; };

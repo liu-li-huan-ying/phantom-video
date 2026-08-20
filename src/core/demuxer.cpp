@@ -12,6 +12,7 @@ bool Demuxer::open(const std::string& path) {
 
     videoIndex_ = av_find_best_stream(ctx_, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
     audioIndex_ = av_find_best_stream(ctx_, AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0);
+    subtitleIndex_ = av_find_best_stream(ctx_, AVMEDIA_TYPE_SUBTITLE, -1, -1, nullptr, 0);
 
     if (ctx_->duration != AV_NOPTS_VALUE) duration_ = (double)ctx_->duration / AV_TIME_BASE;
     return true;
@@ -39,6 +40,10 @@ AVStream* Demuxer::audioStream() const {
     return audioIndex_ >= 0 ? ctx_->streams[audioIndex_] : nullptr;
 }
 
+AVStream* Demuxer::subtitleStream() const {
+    return subtitleIndex_ >= 0 ? ctx_->streams[subtitleIndex_] : nullptr;
+}
+
 const AVCodecParameters* Demuxer::videoCodecpar() const {
     AVStream* st = videoStream();
     return st ? st->codecpar : nullptr;
@@ -47,4 +52,9 @@ const AVCodecParameters* Demuxer::videoCodecpar() const {
 const AVCodecParameters* Demuxer::audioCodecpar() const {
     AVStream* st = audioStream();
     return st ? st->codecpar : nullptr;
+}
+
+const AVCodecParameters* Demuxer::subtitleCodecpar() const {
+    if (subtitleIndex_ < 0) return nullptr;
+    return ctx_->streams[subtitleIndex_]->codecpar;
 }

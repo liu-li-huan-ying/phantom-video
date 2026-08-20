@@ -179,8 +179,16 @@ while (true) {
 - 持有 `SDL_Renderer` 与 IYUV 纹理（纹理尺寸 = 视频帧尺寸，帧尺寸变化时重建）。
 - `render(AVFrame*)`：`SDL_UpdateYUVTexture` + 按窗口尺寸等比缩放 + `RenderPresent`。
 - `clear()`：黑屏。
+- 字幕渲染（M8）：Windows GDI（CreateFontW 微软雅黑 + DrawTextW 黑描边白字 → DIB → SDL 纹理），底部居中，文本变化才重建（subtitleCache_ 缓存），零新增依赖。
 
-### 5.7 OSD（ui/osd.h）
+### 5.7 字幕（subtitle/subtitle.h，M8）
+
+- `SubtitleTrack`：事件列表（start/end/text），`loadSrt()`/`loadAss()`（去 BOM、归一 CRLF、去 ASS 标签），`textAt(t)` 二分查询。
+- `SubtitleDecoder`：FFmpeg 字幕解码器（avcodec_decode_subtitle2）。**坑**：srt 解码器不设 AVSubtitle.pts（NOPTS）、start/end_display_time 恒 0，时间须取 packet pts × stream time_base；MKV 内嵌 srt 的 rect->ass 为 9 字段无 "Dialogue:" 前缀格式，需剥离前 9 字段取 Text。
+- Player：内嵌字幕流在解码线程逐包解码入 SubtitleTrack；seek 时清空 + flush；外挂字幕 `loadExternalSubtitle()` 优先于内嵌。
+- main.cpp：打开视频自动查找同名 .srt/.ass/.ssa/.sub 外挂字幕。
+
+### 5.8 OSD（ui/osd.h）
 
 - 进度条：底部 4px 高，已播部分亮色填充。
 - 时间文本：内置 5x7 位图数字字体（'0'-'9' ':' '.'），白字黑边，预渲染到纹理。

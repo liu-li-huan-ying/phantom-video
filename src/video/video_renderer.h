@@ -1,6 +1,7 @@
 #pragma once
 #include <SDL.h>
 #include <functional>
+#include <string>
 #include "core/types.h"
 
 struct RenderStats {
@@ -12,6 +13,7 @@ struct RenderStats {
     bool muted = false;
     bool fullscreen = false;
     float speed = 1.0f;
+    const char* subtitle = nullptr;
     std::function<void()> onPlayPause;
     std::function<void()> onToggleFullscreen;
     std::function<bool(double)> onSeekTo;
@@ -43,4 +45,10 @@ private:
     Uint32 lastMouseMove_ = 0;
     bool controlsVisible_ = true;
     void drawControls(const RenderStats& stats);
+    void drawSubtitle(const RenderStats& stats);
+    void destroySubtitleTexture();
+    void* subtitleTexture_ = nullptr;  // SDL_Texture*
+    int subTexW_ = 0;
+    int subTexH_ = 0;
+    std::string subtitleCache_;
 };

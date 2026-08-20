@@ -2,6 +2,10 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstring>
+#include <string>
+
+#include <windows.h>
 
 static const unsigned char kDigitFont[][7] = {
     {0x0E, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0E},  // 0
@@ -58,6 +62,7 @@ bool VideoRenderer::init(SDL_Window* window) {
 }
 
 void VideoRenderer::shutdown() {
+    destroySubtitleTexture();
     if (texture_) {
         SDL_DestroyTexture(texture_);
         texture_ = nullptr;
@@ -66,6 +71,100 @@ void VideoRenderer::shutdown() {
         SDL_DestroyRenderer(renderer_);
         renderer_ = nullptr;
     }
+}
+
+void VideoRenderer::destroySubtitleTexture() {
+    if (subtitleTexture_) {
+        SDL_DestroyTexture((SDL_Texture*)subtitleTexture_);
+        subtitleTexture_ = nullptr;
+    }
+    subtitleCache_.clear();
+}
+
+void VideoRenderer::drawSubtitle(const RenderStats& stats) {
+    if (!stats.subtitle || !*stats.subtitle) {
+        destroySubtitleTexture();
+        return;
+    }
+    std::string text = stats.subtitle;
+    if (text != subtitleCache_) {
+        destroySubtitleTexture();
+
+        // Convert UTF-8 to UTF-16
+        int wlen = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, nullptr, 0);
+        if (wlen <= 0) return;
+        std::wstring wtext(wlen - 1, L'\0');
+        MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, wtext.data(), wlen);
+
+        HDC mem = CreateCompatibleDC(nullptr);
+        if (!mem) return;
+        HFONT font = CreateFontW(-32, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+                                 DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+                                 CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                                 DEFAULT_PITCH | FF_DONTCARE, L"Microsoft YaHei");
+        HGDIOBJ oldFont = SelectObject(mem, font);
+
+        RECT rc{ 0, 0, 2000, 200 };
+        DrawTextW(mem, wtext.c_str(), -1, &rc, DT_CALCRECT | DT_NOPREFIX | DT_CENTER | DT_WORDBREAK);
+        int tw = rc.right - rc.left + 24;
+        int th = rc.bottom - rc.top + 24;
+
+        // 32-bit DIB (BGRA), bottom-up
+        BITMAPINFO bmi{};
+        bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        bmi.bmiHeader.biWidth = tw;
+        bmi.bmiHeader.biHeight = -th;  // top-down
+        bmi.bmiHeader.biPlanes = 1;
+        bmi.bmiHeader.biBitCount = 32;
+        bmi.bmiHeader.biCompression = BI_RGB;
+        void* bits = nullptr;
+        HBITMAP hbmp = CreateDIBSection(mem, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
+        if (hbmp && bits) {
+            HGDIOBJ oldBmp = SelectObject(mem, hbmp);
+            RECT trc{ 0, 0, tw, th };
+            HBRUSH black = (HBRUSH)GetStockObject(BLACK_BRUSH);
+            FillRect(mem, &trc, black);
+            SetBkMode(mem, TRANSPARENT);
+            // Draw shadow offsets then white text
+            RECT drc{ 12, 12, tw - 12, th - 12 };
+            SetTextColor(mem, RGB(0, 0, 0));
+            DrawTextW(mem, wtext.c_str(), -1, &drc, DT_NOPREFIX | DT_CENTER | DT_WORDBREAK);
+            RECT drc2{ 10, 10, tw - 10, th - 10 };
+            SetTextColor(mem, RGB(255, 255, 255));
+            DrawTextW(mem, wtext.c_str(), -1, &drc2, DT_NOPREFIX | DT_CENTER | DT_WORDBREAK);
+
+            // Convert BGRA -> SDL surface (IYUV-like copy: just create ARGB texture)
+            SDL_Texture* tex = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_ARGB8888,
+                                                 SDL_TEXTUREACCESS_STREAMING, tw, th);
+            if (tex) {
+                void* tbits = nullptr;
+                int pitch = 0;
+                if (SDL_LockTexture(tex, nullptr, &tbits, &pitch) == 0) {
+                    std::memcpy(tbits, bits, (size_t)tw * th * 4);
+                    SDL_UnlockTexture(tex);
+                    SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
+                    subtitleTexture_ = tex;
+                    subTexW_ = tw;
+                    subTexH_ = th;
+                } else {
+                    SDL_DestroyTexture(tex);
+                }
+            }
+            SelectObject(mem, oldBmp);
+            DeleteObject(hbmp);
+        }
+        SelectObject(mem, oldFont);
+        DeleteObject(font);
+        DeleteDC(mem);
+        subtitleCache_ = text;
+    }
+
+    if (!subtitleTexture_) return;
+
+    int winW = 0, winH = 0;
+    SDL_GetWindowSize(window_, &winW, &winH);
+    SDL_Rect dst{ (winW - subTexW_) / 2, winH - 60 - subTexH_ - 8, subTexW_, subTexH_ };
+    SDL_RenderCopy(renderer_, (SDL_Texture*)subtitleTexture_, nullptr, &dst);
 }
 
 void VideoRenderer::onMouseMove(int x, int y) {
@@ -213,10 +312,12 @@ void VideoRenderer::render(const AVFrame* frame, const RenderStats& stats) {
     SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255);
     SDL_RenderClear(renderer_);
     SDL_RenderCopy(renderer_, texture_, nullptr, &dst);
+    drawSubtitle(stats);
     drawControls(stats);
 }
 
 void VideoRenderer::clear() {
+    destroySubtitleTexture();
     if (renderer_) {
         SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255);
         SDL_RenderClear(renderer_);

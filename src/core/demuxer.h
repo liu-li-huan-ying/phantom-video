@@ -12,15 +12,19 @@ public:
 
     int videoIndex() const { return videoIndex_; }
     int audioIndex() const { return audioIndex_; }
+    int subtitleIndex() const { return subtitleIndex_; }
     double duration() const { return duration_; }
     AVStream* videoStream() const;
     AVStream* audioStream() const;
+    AVStream* subtitleStream() const;
     const AVCodecParameters* videoCodecpar() const;
     const AVCodecParameters* audioCodecpar() const;
+    const AVCodecParameters* subtitleCodecpar() const;
 
 private:
     AVFormatContext* ctx_ = nullptr;
     int videoIndex_ = -1;
     int audioIndex_ = -1;
+    int subtitleIndex_ = -1;
     double duration_ = 0.0;
 };
