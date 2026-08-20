@@ -13,6 +13,7 @@ struct RenderStats {
     bool muted = false;
     bool fullscreen = false;
     float speed = 1.0f;
+    bool draggingVolume = false;
     const char* subtitle = nullptr;
     std::function<void()> onPlayPause;
     std::function<void()> onToggleFullscreen;
@@ -35,6 +36,8 @@ public:
     void onMouseMove(int x, int y);
     void onMouseClick(int x, int y, const RenderStats& stats);
     bool isPointInRect(int px, int py, const SDL_Rect& rect);
+    bool controlsVisible() const { return controlsVisible_; }
+    void showControls();
 
 private:
     SDL_Window* window_ = nullptr;
@@ -44,6 +47,9 @@ private:
     int fh_ = 0;
     Uint32 lastMouseMove_ = 0;
     bool controlsVisible_ = true;
+    int mouseX_ = -1;
+    int mouseY_ = -1;
+    int controlsAlpha_ = 255;
     void drawControls(const RenderStats& stats);
     void drawSubtitle(const RenderStats& stats);
     void destroySubtitleTexture();

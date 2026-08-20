@@ -189,7 +189,7 @@
   - 9.gif（纯视频）@2x：时钟 3 秒 = 6.24（≈6.0，纯视频时钟按倍速推进）✓
 - 遗留：音频保持原速（未做 SWR 变速），有音频文件倍速时音视频不同步属已知限制
 
-### 阶段 M11：现代化 UI 外观 🔄 进行中（v0.2 临时凑合用）
+### 阶段 M11：现代化 UI 外观  ✅ 完成
 
 - 任务：提升播放器外观可用性——暗色主题、悬浮控制栏、鼠标悬移显示/隐藏控件、点击交互。
 - **状态说明：v0.2 为临时可用版本（凑合用），未达"现代化美观"标准，不可标记完成。** 后续迭代：圆角按钮、图标纹理化、控件栏动画、鼠标悬停高亮、播放/暂停/音量滑块、视觉细节打磨等。
@@ -206,3 +206,10 @@
 - 验证：构建成功，smoketest 运行 4 秒无崩溃 ✓
 - 提交：0907e6e（v0.1 基础控件栏）、55c0293（按钮布局+点击+双击全屏）、后续（滑块拖动）
 - 遗留：控件栏图标仍为几何图形绘制 (未来可改为位图纹理)
+
+- **v0.3 正式版（现代化 UI 重构，2026-08-20）**：
+  - ideo_renderer.h/.cpp 整体重写：矢量图标系统（Icon 枚举：Play/Pause/Prev/Next/Volume/Mute/Fullscreen/ExitFullscreen，SDL_RenderDrawLine/FillRect 按 24x24 坐标系缩放，无位图依赖）；illRoundedRect() 用 SDL_RenderGeometry 三角扇形画圆角矩形（8 段弧 + 中心四边形 + 4 边）；控件栏 64px，顶部垂直渐变背景（alpha 0.25→0.85）；布局 gap=12/btnSize=40：Prev(12)/Play(64)/Next(116)/Vol(winW-104)/FS(winW-52)，进度条 x=180 起 y=barY+29 高 6px（track 灰 80,80,80、fill 蓝 77,144,255），hover 显示 14px 白色 thumb；音量弹层为 Vol 上方 6x90 竖条可拖动（stats.draggingVolume）；淡入淡出动画 controlsAlpha_ 每帧 ±30，鼠标 700ms 无动作自动隐藏；倍速文本 x%.2g 在进度条右侧、时间文本 mm:ss / mm:ss 在进度条下方右侧
+  - main.cpp：鼠标事件改为新布局坐标；新增 draggingVolume 拖动状态；音量置 0 时写 0.0001 避免静音误判
+  - 踩坑：SDL_Vertex 用 SDL_Color（Uint8）而非 SDL_FColor；SDL_RenderGeometry 签名带 SDL_Texture* 参数（传 nullptr）；嵌套 brace-init-list 无法推导需显式构造 SDL_Vertex
+  - 验证：构建通过；GUI 冒烟 4.mp4/9.gif 各 5-6s 无崩溃；截图测试（SDL_RenderReadPixels→BMP）验证进度条蓝/灰、渐变控件栏、Prev/Play/FS 白色矢量图标、视频画面均正确渲染
+  - 提交：M11 正式版（待提交）

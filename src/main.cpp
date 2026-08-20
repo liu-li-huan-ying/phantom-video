@@ -129,6 +129,7 @@ auto args = utf8Args();
     bool fullscreen = false;
     Uint32 volHideAt = 0;
     bool draggingProgress = false;
+    bool draggingVolume = false;
 
     static const float kSpeeds[] = { 0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f };
     static const int kSpeedCount = (int)(sizeof(kSpeeds) / sizeof(kSpeeds[0]));
@@ -173,9 +174,21 @@ auto args = utf8Args();
                     if (draggingProgress) {
                         int winW = 0;
                         SDL_GetWindowSize(win, &winW, nullptr);
-                        float pct = (float)(mx - 100) / (winW - 120);
+                        const int fsX = winW - 52;
+                        const int progX = 180;
+                        const int progW = fsX - progX - 24 - 96;
+                        float pct = (float)(mx - progX) / progW;
                         if (pct < 0) pct = 0; if (pct > 1) pct = 1;
                         player.seek(pct * player.duration());
+                    } else if (draggingVolume) {
+                        int winH = 0;
+                        SDL_GetWindowSize(win, nullptr, &winH);
+                        const int barY = winH - 64;
+                        const int ph = 90, py = barY - ph - 12;
+                        float v = 1.0f - (float)(my - py - 6) / (ph - 12);
+                        if (v < 0) v = 0; if (v > 1) v = 1;
+                        player.setVolume(v);
+                        if (v == 0) { player.setVolume(0.0001f); }
                     }
                 }
                 break;
@@ -184,35 +197,45 @@ auto args = utf8Args();
                     int mx = e.button.x, my = e.button.y;
                     int winW = 0, winH = 0;
                     SDL_GetWindowSize(win, &winW, &winH);
-                    int barY = winH - 60;
-                    if (my >= barY + 18 && my < barY + 42) {
-                        // Prev button (16, barY+18, 20x24)
-                        if (mx >= 16 && mx < 36) {
-                            prevTrack();
-                        }
-                        // Play/Pause button (44, barY+18, 24x24)
-                        else if (mx >= 44 && mx < 68) {
-                            player.togglePause();
-                        }
-                        // Next button (76, barY+18, 20x24)
-                        else if (mx >= 76 && mx < 96) {
-                            nextTrack();
-                        }
-                     // Volume button (winW-60, barY+18, 20x24)
-                        else if (mx >= winW - 60 && mx < winW - 40) {
-                            player.toggleMute();
-                            volHideAt = SDL_GetTicks() + 2000;
-                        }
-                        // Fullscreen button (winW-40, barY+18, 20x24)
-                        else if (mx >= winW - 40 && mx < winW - 20) {
-                            fullscreen = !fullscreen;
-                            SDL_SetWindowFullscreen(win,
-                                fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
-                        }
+                    const int barY = winH - 64;
+                    const int btnY = barY + 12;
+                    // Prev (12, btnY, 40x40)
+                    if (mx >= 12 && mx < 52 && my >= btnY && my < btnY + 40) {
+                        prevTrack();
                     }
-                    // Progress bar click-to-seek (100, barY+28, progressWidthx6)
-                    if (mx >= 100 && mx < winW - 20 && my >= barY + 28 && my < barY + 34) {
-                        float pct = (float)(mx - 100) / (winW - 120);
+                    // Play/Pause (64, btnY, 40x40)
+                    else if (mx >= 64 && mx < 104 && my >= btnY && my < btnY + 40) {
+                        player.togglePause();
+                    }
+                    // Next (116, btnY, 40x40)
+                    else if (mx >= 116 && mx < 156 && my >= btnY && my < btnY + 40) {
+                        nextTrack();
+                    }
+                    // Volume button (winW-104, btnY, 40x40) + popup area
+                    else if (mx >= winW - 104 && mx < winW - 64 && my >= btnY && my < btnY + 40) {
+                        // click toggles mute; drag handled via popup
+                        if (!draggingVolume) player.toggleMute();
+                        volHideAt = SDL_GetTicks() + 2000;
+                    }
+                    // Fullscreen button (winW-52, btnY, 40x40)
+                    else if (mx >= winW - 52 && mx < winW - 12 && my >= btnY && my < btnY + 40) {
+                        fullscreen = !fullscreen;
+                        SDL_SetWindowFullscreen(win,
+                            fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+                    }
+                    // Volume popup drag (above vol button)
+                    const int ph = 90, py = barY - ph - 12, vx = winW - 104 + 20 - 3;
+                    if (mx >= vx && mx < vx + 6 && my >= py && my < py + ph) {
+                        draggingVolume = true;
+                        float v = 1.0f - (float)(my - py - 6) / (ph - 12);
+                        if (v < 0) v = 0; if (v > 1) v = 1;
+                        player.setVolume(v == 0 ? 0.0001f : v);
+                    }
+                    // Progress bar click-to-seek
+                    const int progX = 180, progY = barY + 29;
+                    const int progW = (winW - 52) - progX - 24 - 96;
+                    if (mx >= progX && mx < progX + progW && my >= progY - 6 && my < progY + 12) {
+                        float pct = (float)(mx - progX) / progW;
                         if (pct < 0) pct = 0; if (pct > 1) pct = 1;
                         player.seek(pct * player.duration());
                         draggingProgress = true;
@@ -227,6 +250,7 @@ auto args = utf8Args();
                 break;
             case SDL_MOUSEBUTTONUP:
                 draggingProgress = false;
+                draggingVolume = false;
                 break;
             case SDL_KEYDOWN:
                 switch (e.key.keysym.sym) {
@@ -293,6 +317,7 @@ auto args = utf8Args();
                 stats.muted = player.muted();
                 stats.fullscreen = fullscreen;
                 stats.speed = player.speed();
+                stats.draggingVolume = draggingVolume;
                 static std::string subtitleBuf;
                 if (player.hasSubtitle()) {
                     subtitleBuf = player.subtitleText(stats.clock);
