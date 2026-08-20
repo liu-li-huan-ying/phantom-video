@@ -38,6 +38,9 @@ bool loadConfig(const std::string& path, AppConfig& out) {
             out.volume = (float)std::atof(line.c_str() + 7);
         } else if (line.rfind("last=", 0) == 0) {
             out.lastFile = line.substr(5);
+        } else if (line.rfind("playmode=", 0) == 0) {
+            int m = std::atoi(line.c_str() + 9);
+            if (m >= 0 && m <= 2) out.playMode = m;
         } else if (line.rfind("hist=", 0) == 0) {
             std::size_t tab = line.find('\t', 5);
             if (tab != std::string::npos) {
@@ -56,6 +59,7 @@ bool saveConfig(const std::string& path, const AppConfig& cfg) {
     out << "# vplayer config (UTF-8)\n";
     out << "volume=" << cfg.volume << "\n";
     out << "last=" << cfg.lastFile << "\n";
+    out << "playmode=" << cfg.playMode << "\n";
     for (const auto& kv : cfg.history) {
         out << "hist=" << kv.first << "\t" << kv.second << "\n";
     }

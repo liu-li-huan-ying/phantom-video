@@ -95,14 +95,18 @@ auto args = utf8Args();
     loadConfig(configPath(), cfg);
 
     Playlist playlist;
-    if (args.size() > 1 && !args[1].empty()) {
+    bool multiArgs = args.size() > 1 && !args[1].empty();
+    if (multiArgs) {
         std::vector<std::string> files;
         for (std::size_t i = 1; i < args.size(); ++i)
             if (!args[i].empty()) files.push_back(args[i]);
         playlist.set(files);
     } else if (!cfg.lastFile.empty()) {
-        playlist.set(cfg.lastFile);
+        // single file: auto-scan its directory into a playlist
+        if (!playlist.scanDirectory(cfg.lastFile))
+            playlist.set(cfg.lastFile);
     }
+    playlist.setMode(static_cast<PlayMode>(cfg.playMode));
 
     player.setVolume(cfg.volume);
 
@@ -112,7 +116,13 @@ auto args = utf8Args();
         std::string base = p;
         std::size_t slash = base.find_last_of("\\/");
         if (slash != std::string::npos) base = base.substr(slash + 1);
-        SDL_SetWindowTitle(win, ("VPlayer - " + base).c_str());
+        char title[512];
+        if (playlist.size() > 1)
+            std::snprintf(title, sizeof(title), "VPlayer - %s (%d/%d)", base.c_str(),
+                          playlist.index() + 1, playlist.size());
+        else
+            std::snprintf(title, sizeof(title), "VPlayer - %s", base.c_str());
+        SDL_SetWindowTitle(win, title);
         if (player.openFile(p)) {
             loadExternalSubtitle(player, p);
             auto it = cfg.history.find(p);
@@ -149,6 +159,13 @@ auto args = utf8Args();
     auto prevTrack = [&]() {
         if (playlist.prev()) openCurrent();
     };
+    auto cyclePlayMode = [&]() {
+        int m = ((int)playlist.mode() + 1) % 3;
+        playlist.setMode(static_cast<PlayMode>(m));
+        const char* names[] = { "单独播放", "循环播放", "随机播放" };
+        std::printf("播放模式: %s\n", names[m]);
+        volHideAt = SDL_GetTicks() + 2000;
+    };
 
     while (running) {
         SDL_Event e;
@@ -160,6 +177,13 @@ auto args = utf8Args();
             case SDL_DROPFILE:
                 if (player.openFile(e.drop.file)) {
                     loadExternalSubtitle(player, e.drop.file);
+                    playlist.scanDirectory(e.drop.file);
+                    std::string base = e.drop.file;
+                    std::size_t slash = base.find_last_of("\\/");
+                    if (slash != std::string::npos) base = base.substr(slash + 1);
+                    char title[512];
+                    std::snprintf(title, sizeof(title), "VPlayer - %s", base.c_str());
+                    SDL_SetWindowTitle(win, title);
                     std::printf("已打开: %s\n", e.drop.file);
                 }
                 else
@@ -281,6 +305,9 @@ auto args = utf8Args();
                 case SDLK_p:
                     prevTrack();
                     break;
+                case SDLK_x:
+                    cyclePlayMode();
+                    break;
                 case SDLK_f:
                     fullscreen = !fullscreen;
                     SDL_SetWindowFullscreen(win,
@@ -352,6 +379,7 @@ auto args = utf8Args();
         cfg.history[playlist.current()] = player.clock();
     if (!playlist.empty())
         cfg.lastFile = playlist.current();
+    cfg.playMode = (int)playlist.mode();
     cfg.volume = player.volume();
     saveConfig(configPath(), cfg);
 
