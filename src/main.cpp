@@ -101,8 +101,8 @@ auto args = utf8Args();
         for (std::size_t i = 1; i < args.size(); ++i)
             if (!args[i].empty()) files.push_back(args[i]);
         playlist.set(files);
-    } else if (!cfg.lastFile.empty()) {
-        // single file: auto-scan its directory into a playlist
+    } else if (cfg.resume && !cfg.lastFile.empty()) {
+        // resume=1: reopen last file with its directory playlist
         if (!playlist.scanDirectory(cfg.lastFile))
             playlist.set(cfg.lastFile);
     }
@@ -111,7 +111,11 @@ auto args = utf8Args();
     player.setVolume(cfg.volume);
 
     auto openCurrent = [&]() {
-        if (playlist.empty()) return;
+        if (playlist.empty()) {
+            SDL_SetWindowTitle(win, "VPlayer");
+            vrender.clear();
+            return;
+        }
         const std::string& p = playlist.current();
         std::string base = p;
         std::size_t slash = base.find_last_of("\\/");
@@ -127,8 +131,10 @@ auto args = utf8Args();
             loadExternalSubtitle(player, p);
             if (cfg.resume) {
                 auto it = cfg.history.find(p);
-                if (it != cfg.history.end() && it->second > 2.0)
+                if (it != cfg.history.end() && it->second > 2.0) {
                     player.seek(it->second);
+                    vrender.showToast("已从上次位置续播 (按 R 关闭)");
+                }
             }
         } else {
             SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "打开失败",
@@ -152,6 +158,9 @@ auto args = utf8Args();
             if (kSpeeds[i] == cur) { idx = i; break; }
         idx = (idx + dir + kSpeedCount) % kSpeedCount;
         player.setSpeed(kSpeeds[idx]);
+        char msg[32];
+        std::snprintf(msg, sizeof(msg), "倍速: x%.2g", kSpeeds[idx]);
+        vrender.showToast(msg);
         volHideAt = SDL_GetTicks() + 2000;
     };
 
@@ -166,12 +175,14 @@ auto args = utf8Args();
         playlist.setMode(static_cast<PlayMode>(m));
         const char* names[] = { "单独播放", "循环播放", "随机播放" };
         std::printf("播放模式: %s\n", names[m]);
+        vrender.showToast(std::string("播放模式: ").append(names[m]).c_str());
         volHideAt = SDL_GetTicks() + 2000;
     };
 
     auto cycleResume = [&]() {
         cfg.resume = cfg.resume ? 0 : 1;
         std::printf("恢复播放位置: %s\n", cfg.resume ? "开启" : "关闭");
+        vrender.showToast(cfg.resume ? "恢复播放位置: 开启" : "恢复播放位置: 关闭");
         volHideAt = SDL_GetTicks() + 2000;
     };
 
@@ -243,6 +254,14 @@ auto args = utf8Args();
                     else if (mx >= 116 && mx < 156 && my >= btnY && my < btnY + 40) {
                         nextTrack();
                     }
+                    // Play mode (168, btnY, 40x40)
+                    else if (mx >= 168 && mx < 208 && my >= btnY && my < btnY + 40) {
+                        cyclePlayMode();
+                    }
+                    // Speed (220, btnY, 40x40)
+                    else if (mx >= 220 && mx < 260 && my >= btnY && my < btnY + 40) {
+                        cycleSpeed(1);
+                    }
                     // Volume button (winW-104, btnY, 40x40) + popup area
                     else if (mx >= winW - 104 && mx < winW - 64 && my >= btnY && my < btnY + 40) {
                         // click toggles mute; drag handled via popup
@@ -264,7 +283,7 @@ auto args = utf8Args();
                         player.setVolume(v == 0 ? 0.0001f : v);
                     }
                     // Progress bar click-to-seek
-                    const int progX = 180, progY = barY + 29;
+                    const int progX = 284, progY = barY + 29;
                     const int progW = (winW - 52) - progX - 24 - 96;
                     if (mx >= progX && mx < progX + progW && my >= progY - 6 && my < progY + 12) {
                         float pct = (float)(mx - progX) / progW;
@@ -355,6 +374,7 @@ auto args = utf8Args();
                 stats.muted = player.muted();
                 stats.fullscreen = fullscreen;
                 stats.speed = player.speed();
+                stats.playMode = (int)playlist.mode();
                 stats.draggingVolume = draggingVolume;
                 static std::string subtitleBuf;
                 if (player.hasSubtitle()) {
@@ -370,6 +390,8 @@ auto args = utf8Args();
                 stats.onVolumeUp = [&]() { player.setVolume(player.volume() + 0.1f); volHideAt = SDL_GetTicks() + 2000; };
                 stats.onNextTrack = [&]() { nextTrack(); };
                 stats.onPrevTrack = [&]() { prevTrack(); };
+                stats.onCycleMode = [&]() { cyclePlayMode(); };
+                stats.onCycleSpeed = [&]() { cycleSpeed(1); };
                 vrender.render(f.get(), stats);
             }
             else if (player.state() == Player::State::Ended) {

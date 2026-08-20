@@ -13,6 +13,7 @@ struct RenderStats {
     bool muted = false;
     bool fullscreen = false;
     float speed = 1.0f;
+    int playMode = 1;  // PlayMode: 0=Single 1=Loop 2=Shuffle
     bool draggingVolume = false;
     const char* subtitle = nullptr;
     std::function<void()> onPlayPause;
@@ -21,6 +22,8 @@ struct RenderStats {
     std::function<void()> onVolumeUp;
     std::function<void()> onNextTrack;
     std::function<void()> onPrevTrack;
+    std::function<void()> onCycleMode;
+    std::function<void()> onCycleSpeed;
 };
 
 class VideoRenderer {
@@ -38,6 +41,7 @@ public:
     bool isPointInRect(int px, int py, const SDL_Rect& rect);
     bool controlsVisible() const { return controlsVisible_; }
     void showControls();
+    void showToast(const char* text);
 
 private:
     SDL_Window* window_ = nullptr;
@@ -58,9 +62,12 @@ private:
     int controlsAlpha_ = 255;
     void drawControls(const RenderStats& stats);
     void drawSubtitle(const RenderStats& stats);
+    void drawToast();
     void destroySubtitleTexture();
     void* subtitleTexture_ = nullptr;  // SDL_Texture*
     int subTexW_ = 0;
     int subTexH_ = 0;
     std::string subtitleCache_;
+    std::string toastText_;
+    Uint32 toastUntil_ = 0;
 };
