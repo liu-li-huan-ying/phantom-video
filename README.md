@@ -67,6 +67,7 @@ cmake --build build
 - [x] 异常文件容错（截断/损坏文件打开失败不崩溃）
 - [x] 播放列表（命令行多文件 / N / P / 播完自动下一曲）+ 记忆播放位置（vplayer.ini）
 - [x] 播放速度（S/L 0.5x~2.0x，控件栏显示倍速）
+- [x] 硬件解码（D3D11VA/DXVA2，H.264/MPEG-2 硬解，不支持自动回退软解）
 
 ### 快捷键
 
@@ -91,7 +92,7 @@ cmake --build build
 - [x] M4 替换稳定版 FFmpeg 9.0.1 + 根因修复（shared_ptr 跨堆 free 0xC0000374）
 - [x] M5 全功能验证：API 自动化测试 20/20、多格式冒烟、修复 BlockingQueue 永久 closed bug
 - [x] M6 GUI 交互验证（全屏/拖拽/快捷键）+ 120 秒随机事件压力测试
-- [ ] M7 硬解（DXVA2 / D3D11VA）
+- [x] M7 硬解（DXVA2 / D3D11VA）
 - [ ] M8 字幕（ASS/SRT）
 - [x] M9 播放列表与记忆播放位置
 - [x] M10 倍速播放（S/L 0.5x~2.0x）

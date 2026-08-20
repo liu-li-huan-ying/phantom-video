@@ -135,6 +135,7 @@ IDLE ──打开文件──▶ DECODING ──首帧就绪──▶ PLAYING �
 ### 5.3 Decoder
 
 - 统一封装 `VideoDecoder` / `AudioDecoder`：`open(codecpar)` → `send(pkt)` → `receive()`（receive 用 av_frame_move_ref 转移后经 makeFramePtr 持有，避免跨堆 free——见 AGENTS.md M4 教训）。
+- 硬件解码（M7）：`open(codecpar, hwDeviceCtx)` 重载——`avcodec_get_hw_config` 检查 codec 是否支持设备类型，支持则设置 `ctx_->hw_device_ctx`；`receive()` 检测硬件帧（hw_frames_ctx）后 `av_hwframe_transfer_data` 转回软件帧（复制 pts/best_effort_timestamp），渲染层零改动。不支持的 codec 自动回退软解。
 - 内部维护 `AVCodecContext`（线程安全由解码线程独占保证）。
 - `flush()`：send(nullptr) 排空所有剩余帧（EOF 用）；`flushBuffers()`：`avcodec_flush_buffers`（seek 用）。
 

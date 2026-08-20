@@ -119,11 +119,19 @@
   3. 测试逻辑自身 bug：验证轮询被下一个步骤触发覆盖 → 触发新步骤前先结算挂起的验证
 - 教训：seek 精度 = 关键帧间隔（设计如此，av_seek_frame BACKWARD）；GUI 自动化验证可用 SDL_PushEvent 注入（按键 + DROPFILE，注意 DROPFILE 的 file 需 SDL_malloc 分配以便事件循环 SDL_free）
 
-### 阶段 M7：硬解（DXVA2 / D3D11VA） ⏳ 规划中
+### 阶段 M7：硬解（D3D11VA / DXVA2） ✅ 完成
 
-- 任务：使用 FFmpeg 硬解接口提升解码性能（特别是 MKV/MP4 H.264 1280×720）。
-- 计划：`av_hwdevice_ctx_create` 初始化 D3D11 设备 → `AVCodecContext.hw_device_ctx + hw_frames_ctx` → 解码后 `av_hwframe_transfer_data` 到软件帧供渲染。
-- 遗留：需在 Windows 环境下调试（当前 WSL/Linux 未适配）；优先于 M8 实现。
+- 任务：使用 FFmpeg 硬件解码接口降低 CPU 占用（H.264/H.265/MPEG-2 等可硬解格式）。
+- 实现：
+  - `Decoder::open(par, hwDeviceCtx)` 重载：`avcodec_get_hw_config` 检查 codec 是否支持设备类型（`AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX`）→ 设置 `ctx_->hw_device_ctx = av_buffer_ref(...)` → `hw_` 标志
+  - `receive()`：解码帧为硬件帧时（`hw_frames_ctx`）→ `av_hwframe_transfer_data` 转回软件帧 + 手动复制 pts/best_effort_timestamp → 渲染层零改动
+  - `Player`：`hwDeviceCtx_` 成员，openFile 时依次尝试 D3D11VA → DXVA2 创建设备，传给 videoDecoder_；close() 释放；`usingHardware()` 暴露状态
+  - 不支持硬解的 codec（如 MPEG-4/RV40）自动回退软解（supportsHwType 检查失败 → 不带 hw 打开）
+- 验证（hw_test.cpp）：
+  - 4.mp4（H.264）→ hw=1，3 秒时钟 2.97 ✓
+  - 13.vob（MPEG-2）→ hw=1，3 秒时钟 3.21 ✓
+  - 3.mkv（MPEG-4）/ 11.rmvb（RV40）→ hw=0 软解回退，播放正常 ✓
+- 遗留：H.265 无测试素材（可硬解但未验证）；NVDEC/CUDA 未启用（仅 D3D11VA/DXVA2）
 
 ### 阶段 M8：字幕（ASS/SRT） ⏳ 规划中
 

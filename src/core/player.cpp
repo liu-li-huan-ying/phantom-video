@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include <libavutil/hwcontext.h>
 #include <libavutil/mathematics.h>
 
 Player::~Player() { close(); }
@@ -20,11 +21,19 @@ bool Player::openFile(const std::string& path) {
         return false;
     }
 
+    if (!hwDeviceCtx_) {
+        for (enum AVHWDeviceType t : { AV_HWDEVICE_TYPE_D3D11VA, AV_HWDEVICE_TYPE_DXVA2 }) {
+            if (av_hwdevice_ctx_create(&hwDeviceCtx_, t, nullptr, nullptr, 0) >= 0)
+                break;
+        }
+    }
+
     auto vdec = std::make_unique<Decoder>();
-    if (!vdec->open(demuxer->videoCodecpar())) {
+    if (!vdec->open(demuxer->videoCodecpar(), hwDeviceCtx_)) {
         error_ = "视频解码器初始化失败";
         return false;
     }
+    hwDecode_.store(vdec->usingHardware());
 
     std::unique_ptr<Decoder> adec;
     std::unique_ptr<AudioOutput> audio;
@@ -86,10 +95,15 @@ void Player::close() {
     videoDecoder_.reset();
     demuxer_.reset();
     lastFrame_.reset();
+    if (hwDeviceCtx_) {
+        av_buffer_unref(&hwDeviceCtx_);
+        hwDeviceCtx_ = nullptr;
+    }
 
     hasMedia_.store(false);
     videoEnabled_.store(false);
     audioEnabled_.store(false);
+    hwDecode_.store(false);
     state_.store(State::Idle);
     paused_.store(false);
     playing_ = false;

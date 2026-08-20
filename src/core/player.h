@@ -35,6 +35,7 @@ public:
     bool hasMedia() const { return hasMedia_.load(); }
     std::string path() const { return path_; }
     std::string error() const { return error_; }
+    bool usingHardware() const { return hwDecode_.load(); }
 
     FramePtr pullFrame();
 
@@ -69,6 +70,9 @@ private:
     std::mutex seekMutex_;
     bool seekPending_ = false;
     double seekTarget_ = 0.0;
+
+    AVBufferRef* hwDeviceCtx_ = nullptr;
+    std::atomic<bool> hwDecode_{ false };
 
     double duration_ = 0.0;
     std::string path_;
