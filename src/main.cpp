@@ -125,9 +125,11 @@ auto args = utf8Args();
         SDL_SetWindowTitle(win, title);
         if (player.openFile(p)) {
             loadExternalSubtitle(player, p);
-            auto it = cfg.history.find(p);
-            if (it != cfg.history.end() && it->second > 2.0)
-                player.seek(it->second);
+            if (cfg.resume) {
+                auto it = cfg.history.find(p);
+                if (it != cfg.history.end() && it->second > 2.0)
+                    player.seek(it->second);
+            }
         } else {
             SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "打开失败",
                                      player.error().c_str(), win);
@@ -164,6 +166,12 @@ auto args = utf8Args();
         playlist.setMode(static_cast<PlayMode>(m));
         const char* names[] = { "单独播放", "循环播放", "随机播放" };
         std::printf("播放模式: %s\n", names[m]);
+        volHideAt = SDL_GetTicks() + 2000;
+    };
+
+    auto cycleResume = [&]() {
+        cfg.resume = cfg.resume ? 0 : 1;
+        std::printf("恢复播放位置: %s\n", cfg.resume ? "开启" : "关闭");
         volHideAt = SDL_GetTicks() + 2000;
     };
 
@@ -307,6 +315,9 @@ auto args = utf8Args();
                     break;
                 case SDLK_x:
                     cyclePlayMode();
+                    break;
+                case SDLK_r:
+                    cycleResume();
                     break;
                 case SDLK_f:
                     fullscreen = !fullscreen;
