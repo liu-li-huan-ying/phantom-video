@@ -45,6 +45,12 @@ private:
     SDL_Texture* texture_ = nullptr;
     int fw_ = 0;
     int fh_ = 0;
+    int pixFmt_ = 0;  // AVPixelFormat of current texture
+    void* swsCtx_ = nullptr;     // SwsContext* for format conversion fallback
+    void* convFrame_ = nullptr;  // AVFrame* converted to YUV420P
+    int convW_ = 0;
+    int convH_ = 0;
+    int convSrcFmt_ = 0;
     Uint32 lastMouseMove_ = 0;
     bool controlsVisible_ = true;
     int mouseX_ = -1;

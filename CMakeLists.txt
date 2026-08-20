@@ -17,7 +17,8 @@ set(FFMPEG_LIBS
   "${FFMPEG_ROOT}/lib/avformat.lib"
   "${FFMPEG_ROOT}/lib/avcodec.lib"
   "${FFMPEG_ROOT}/lib/avutil.lib"
-  "${FFMPEG_ROOT}/lib/swresample.lib")
+  "${FFMPEG_ROOT}/lib/swresample.lib"
+  "${FFMPEG_ROOT}/lib/swscale.lib")
 
 file(GLOB_RECURSE PLAYER_SOURCES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/src/*.cpp")
 

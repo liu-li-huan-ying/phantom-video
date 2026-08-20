@@ -212,4 +212,12 @@
   - main.cpp：鼠标事件改为新布局坐标；新增 draggingVolume 拖动状态；音量置 0 时写 0.0001 避免静音误判
   - 踩坑：SDL_Vertex 用 SDL_Color（Uint8）而非 SDL_FColor；SDL_RenderGeometry 签名带 SDL_Texture* 参数（传 nullptr）；嵌套 brace-init-list 无法推导需显式构造 SDL_Vertex
   - 验证：构建通过；GUI 冒烟 4.mp4/9.gif 各 5-6s 无崩溃；截图测试（SDL_RenderReadPixels→BMP）验证进度条蓝/灰、渐变控件栏、Prev/Play/FS 白色矢量图标、视频画面均正确渲染
-  - 提交：M11 正式版（待提交）
+  - 
+
+- **M11 修复（2026-08-20，v0.3.1）**：
+  - 绿屏 bug 根因：硬解（D3D11VA/DXVA2）transfer 出的帧是 NV12（fmt=23），但渲染器固定用 SDL_PIXELFORMAT_IYUV + SDL_UpdateYUVTexture（YUV420P 三平面），NV12 半平面数据按 IYUV 读 → 全绿（软解 YUV420P 正常所以此前未发现）
+  - 修复：render() 按帧格式分支——YUV420P 走原路径、NV12 用 SDL_UpdateNVTexture + SDL_PIXELFORMAT_NV12 纹理、其他格式 swscale 兜底转 YUV420P（新增 swscale.lib 链接 + extern "C" 包裹，踩 M2 同样的坑）
+  - 验证：4.mp4 硬解 hw=1 fmt=23(NV12)，截图像素不再是纯绿 (0,136,0) 而是真实视频内容色；4.mp4/13.vob 冒烟各 5-6s 无崩溃
+  - Prev/Next 图标方向反了：Prev 画成指向右的三角、Next 画成指向左的（原实现 line 88-101）
+  - 修复：Prev = 左三角+右竖线 (◀|)，Next = 左竖线+右三角 (|▶)；截图像素验证 Prev 顶点在左、Next 顶点在右均白色
+  - 提交：M11 修复（待提交）提交：M11 正式版（待提交）

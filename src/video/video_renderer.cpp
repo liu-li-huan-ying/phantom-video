@@ -1,5 +1,10 @@
 ﻿#include "video/video_renderer.h"
 
+extern "C" {
+#include <libswscale/swscale.h>
+#include <libavutil/imgutils.h>
+}
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -86,17 +91,17 @@ static void drawIcon(SDL_Renderer* r, Icon icon, int cx, int cy, int size, int a
         break;
     }
     case Icon::Prev: {
-        SDL_RenderDrawLine(r, px(-9), py(-8), px(-9), py(8));
-        SDL_RenderDrawLine(r, px(-8), py(-8), px(5), py(0));
-        SDL_RenderDrawLine(r, px(-8), py(8), px(5), py(0));
-        SDL_RenderDrawLine(r, px(5), py(-8), px(5), py(8));
+        // triangle pointing left, bar on the right
+        SDL_RenderDrawLine(r, px(7), py(-8), px(7), py(8));
+        SDL_RenderDrawLine(r, px(-6), py(0), px(7), py(-8));
+        SDL_RenderDrawLine(r, px(-6), py(0), px(7), py(8));
         break;
     }
     case Icon::Next: {
-        SDL_RenderDrawLine(r, px(-5), py(-8), px(-5), py(8));
-        SDL_RenderDrawLine(r, px(8), py(-8), px(-5), py(0));
-        SDL_RenderDrawLine(r, px(8), py(8), px(-5), py(0));
-        SDL_RenderDrawLine(r, px(9), py(-8), px(9), py(8));
+        // bar on the left, triangle pointing right
+        SDL_RenderDrawLine(r, px(-7), py(-8), px(-7), py(8));
+        SDL_RenderDrawLine(r, px(6), py(0), px(-7), py(-8));
+        SDL_RenderDrawLine(r, px(6), py(0), px(-7), py(8));
         break;
     }
     case Icon::Volume: {
@@ -226,6 +231,14 @@ void VideoRenderer::shutdown() {
     if (texture_) {
         SDL_DestroyTexture(texture_);
         texture_ = nullptr;
+    }
+    if (swsCtx_) {
+        sws_freeContext((SwsContext*)swsCtx_);
+        swsCtx_ = nullptr;
+    }
+    if (convFrame_) {
+        av_frame_free((AVFrame**)&convFrame_);
+        convFrame_ = nullptr;
     }
     if (renderer_) {
         SDL_DestroyRenderer(renderer_);
@@ -468,19 +481,61 @@ void VideoRenderer::drawControls(const RenderStats& stats) {
 void VideoRenderer::render(const AVFrame* frame, const RenderStats& stats) {
     if (!renderer_ || !frame) return;
 
-    if (frame->width != fw_ || frame->height != fh_) {
+    int fmt = frame->format;
+    if (frame->width != fw_ || frame->height != fh_ || fmt != pixFmt_) {
         if (texture_) SDL_DestroyTexture(texture_);
         fw_ = frame->width;
         fh_ = frame->height;
-        texture_ = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_IYUV,
+        pixFmt_ = fmt;
+        Uint32 pf = SDL_PIXELFORMAT_IYUV;
+        if (fmt == AV_PIX_FMT_NV12) pf = SDL_PIXELFORMAT_NV12;
+        texture_ = SDL_CreateTexture(renderer_, pf,
                                      SDL_TEXTUREACCESS_STREAMING, fw_, fh_);
         if (!texture_) return;
     }
 
-    SDL_UpdateYUVTexture(texture_, nullptr,
-                         frame->data[0], frame->linesize[0],
-                         frame->data[1], frame->linesize[1],
-                         frame->data[2], frame->linesize[2]);
+    const AVFrame* up = frame;
+    AVFrame* conv = nullptr;
+    if (fmt == AV_PIX_FMT_YUV420P) {
+        SDL_UpdateYUVTexture(texture_, nullptr,
+                             frame->data[0], frame->linesize[0],
+                             frame->data[1], frame->linesize[1],
+                             frame->data[2], frame->linesize[2]);
+    } else if (fmt == AV_PIX_FMT_NV12) {
+        SDL_UpdateNVTexture(texture_, nullptr,
+                            frame->data[0], frame->linesize[0],
+                            frame->data[1], frame->linesize[1]);
+    } else {
+        // fallback: convert to YUV420P with swscale
+        if (!swsCtx_ || convW_ != fw_ || convH_ != fh_ || convSrcFmt_ != fmt) {
+            if (swsCtx_) sws_freeContext((SwsContext*)swsCtx_);
+            if (convFrame_) av_frame_free((AVFrame**)&convFrame_);
+            swsCtx_ = sws_getContext(fw_, fh_, (AVPixelFormat)fmt,
+                                     fw_, fh_, AV_PIX_FMT_YUV420P,
+                                     SWS_BILINEAR, nullptr, nullptr, nullptr);
+            convFrame_ = av_frame_alloc();
+            if (convFrame_) {
+                ((AVFrame*)convFrame_)->format = AV_PIX_FMT_YUV420P;
+                ((AVFrame*)convFrame_)->width = fw_;
+                ((AVFrame*)convFrame_)->height = fh_;
+                av_frame_get_buffer((AVFrame*)convFrame_, 32);
+            }
+            convW_ = fw_;
+            convH_ = fh_;
+            convSrcFmt_ = fmt;
+        }
+        if (swsCtx_ && convFrame_) {
+            sws_scale((SwsContext*)swsCtx_, frame->data, frame->linesize, 0, fh_,
+                      ((AVFrame*)convFrame_)->data, ((AVFrame*)convFrame_)->linesize);
+            conv = (AVFrame*)convFrame_;
+        }
+        if (conv) {
+            SDL_UpdateYUVTexture(texture_, nullptr,
+                                 conv->data[0], conv->linesize[0],
+                                 conv->data[1], conv->linesize[1],
+                                 conv->data[2], conv->linesize[2]);
+        }
+    }
 
     int winW = 0, winH = 0;
     SDL_GetWindowSize(window_, &winW, &winH);
