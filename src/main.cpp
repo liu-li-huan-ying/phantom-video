@@ -107,6 +107,18 @@ auto args = utf8Args();
     Uint32 volHideAt = 0;
     bool draggingProgress = false;
 
+    static const float kSpeeds[] = { 0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f };
+    static const int kSpeedCount = (int)(sizeof(kSpeeds) / sizeof(kSpeeds[0]));
+    auto cycleSpeed = [&](int dir) {
+        float cur = player.speed();
+        int idx = 1;
+        for (int i = 0; i < kSpeedCount; ++i)
+            if (kSpeeds[i] == cur) { idx = i; break; }
+        idx = (idx + dir + kSpeedCount) % kSpeedCount;
+        player.setSpeed(kSpeeds[idx]);
+        volHideAt = SDL_GetTicks() + 2000;
+    };
+
     auto nextTrack = [&]() {
         if (playlist.next()) openCurrent();
     };
@@ -225,6 +237,12 @@ auto args = utf8Args();
                     SDL_SetWindowFullscreen(win,
                         fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
                     break;
+                case SDLK_s:
+                    cycleSpeed(-1);
+                    break;
+                case SDLK_l:
+                    cycleSpeed(1);
+                    break;
                 case SDLK_ESCAPE:
                 case SDLK_q:
                     running = false;
@@ -249,6 +267,7 @@ auto args = utf8Args();
                 stats.volume = player.muted() ? 0.0f : player.volume();
                 stats.muted = player.muted();
                 stats.fullscreen = fullscreen;
+                stats.speed = player.speed();
                 stats.onPlayPause = [&]() { player.togglePause(); return true; };
                 stats.onToggleFullscreen = [&]() { fullscreen = !fullscreen; SDL_SetWindowFullscreen(win, fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0); return true; };
                 stats.onSeekTo = [&](double p) { player.seek(p); return true; };

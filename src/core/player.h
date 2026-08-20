@@ -26,6 +26,8 @@ public:
     float volume() const { return volume_.load(std::memory_order_relaxed); }
     void toggleMute();
     bool muted() const { return muted_.load(); }
+    void setSpeed(float s);
+    float speed() const { return speed_.load(std::memory_order_relaxed); }
 
     State state() const { return state_.load(); }
     double clock() const;
@@ -62,6 +64,7 @@ private:
     std::atomic<double> videoPtsScale_{ 1.0 };
     std::atomic<float> volume_{ 0.8f };
     std::atomic<bool> muted_{ false };
+    std::atomic<float> speed_{ 1.0f };
 
     std::mutex seekMutex_;
     bool seekPending_ = false;

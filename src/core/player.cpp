@@ -158,6 +158,12 @@ void Player::setVolume(float v) {
     if (audio_) audio_->setVolume(v);
 }
 
+void Player::setSpeed(float s) {
+    s = std::clamp(s, 0.5f, 2.0f);
+    speed_.store(s);
+    videoBaseTicks_ = SDL_GetPerformanceCounter();
+}
+
 void Player::toggleMute() {
     muted_.store(!muted_.load());
     if (audio_) audio_->setVolume(muted_.load() ? 0.0f : volume_.load());
@@ -175,7 +181,7 @@ double Player::videoClock() const {
     if (!playing_) return videoBasePts_;
     double elapsed = (double)(SDL_GetPerformanceCounter() - videoBaseTicks_) /
                      (double)SDL_GetPerformanceFrequency();
-    return videoBasePts_ + elapsed;
+    return videoBasePts_ + elapsed * speed_.load();
 }
 
 double Player::clock() const {
@@ -191,6 +197,8 @@ FramePtr Player::pullFrame() {
     if (paused_.load()) return lastFrame_;
 
     double c = clock();
+    float spd = speed_.load();
+    double target = audioEnabled_.load() ? c * spd : c;
     FramePtr f;
 
     if (!videoQueue_.peek(f)) {
@@ -208,8 +216,9 @@ FramePtr Player::pullFrame() {
     }
 
     double pts = framePts(f);
-    if (pts - c > 0.05) {
-        int delay = std::min((int)((pts - c) * 1000.0), 50);
+    if (pts - target > 0.05) {
+        double remain = (pts - target) / spd;
+        int delay = std::min((int)(remain * 1000.0), 50);
         SDL_Delay(delay);
         return lastFrame_;
     }

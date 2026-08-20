@@ -11,6 +11,7 @@ struct RenderStats {
     float volume = 1.0f;
     bool muted = false;
     bool fullscreen = false;
+    float speed = 1.0f;
     std::function<void()> onPlayPause;
     std::function<void()> onToggleFullscreen;
     std::function<bool(double)> onSeekTo;

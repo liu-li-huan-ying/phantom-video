@@ -3,6 +3,47 @@
 #include <algorithm>
 #include <cstdio>
 
+static const unsigned char kDigitFont[][7] = {
+    {0x0E, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0E},  // 0
+    {0x04, 0x0C, 0x04, 0x04, 0x04, 0x04, 0x0E},  // 1
+    {0x0E, 0x11, 0x01, 0x02, 0x04, 0x08, 0x1F},  // 2
+    {0x1F, 0x02, 0x04, 0x02, 0x01, 0x11, 0x0E},  // 3
+    {0x02, 0x06, 0x0A, 0x12, 0x1F, 0x02, 0x02},  // 4
+    {0x1F, 0x10, 0x1E, 0x01, 0x01, 0x11, 0x0E},  // 5
+    {0x06, 0x08, 0x10, 0x1E, 0x11, 0x11, 0x0E},  // 6
+    {0x1F, 0x01, 0x02, 0x04, 0x08, 0x08, 0x08},  // 7
+    {0x0E, 0x11, 0x11, 0x0E, 0x11, 0x11, 0x0E},  // 8
+    {0x0E, 0x11, 0x11, 0x0F, 0x01, 0x02, 0x0C},  // 9
+    {0x00, 0x0C, 0x0C, 0x00, 0x0C, 0x0C, 0x00},  // :
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x0C, 0x0C},  // .
+    {0x11, 0x12, 0x04, 0x08, 0x10, 0x11, 0x12},  // x
+};
+
+static void drawFontGlyph(SDL_Renderer* r, int x, int y, int scale, const unsigned char* glyph) {
+    for (int row = 0; row < 7; ++row) {
+        for (int col = 0; col < 5; ++col) {
+            if (glyph[row] & (0x10 >> col)) {
+                SDL_Rect px{ x + col * scale, y + row * scale, scale, scale };
+                SDL_RenderFillRect(r, &px);
+            }
+        }
+    }
+}
+
+static void drawFontText(SDL_Renderer* r, int x, int y, int scale, const char* text) {
+    for (const char* p = text; *p; ++p) {
+        const unsigned char* g = nullptr;
+        if (*p >= '0' && *p <= '9') g = kDigitFont[*p - '0'];
+        else if (*p == ':') g = kDigitFont[10];
+        else if (*p == '.') g = kDigitFont[11];
+        else if (*p == 'x') g = kDigitFont[12];
+        else if (*p == ' ') { x += 3 * scale + 1; continue; }
+        else continue;
+        drawFontGlyph(r, x, y, scale, g);
+        x += 6 * scale;
+    }
+}
+
 VideoRenderer::~VideoRenderer() { shutdown(); }
 
 bool VideoRenderer::init(SDL_Window* window) {
@@ -112,6 +153,12 @@ void VideoRenderer::drawControls(const RenderStats& stats) {
         SDL_Rect filled = {progressX, progressY, fillW, 6};
         SDL_RenderFillRect(renderer_, &filled);
     }
+
+    // Speed indicator (right of progress bar)
+    char spdText[16];
+    std::snprintf(spdText, sizeof(spdText), "x%.2g", stats.speed);
+    SDL_SetRenderDrawColor(renderer_, 255, 255, 255, 220);
+    drawFontText(renderer_, progressX + progressWidth + 8, barY + 24, 2, spdText);
 
     // Volume button
     const int volX = winW - 60, volBtnY = barY + 18;
