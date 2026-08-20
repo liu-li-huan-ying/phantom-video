@@ -57,6 +57,11 @@ public:
     bool controlsVisible() const { return controlsVisible_; }
     void showControls();
     void showToast(const char* text);
+    void toggleSpeedMenu();
+    bool speedMenuOpen() const { return speedMenuOpen_; }
+    void setSpeedMenuOpen(bool b) { speedMenuOpen_ = b; }
+    // 倍速菜单项矩形（供 main.cpp 命中检测）
+    static SDL_Rect speedMenuItemRect(const ControlLayout& lay, int index);
 
 private:
     SDL_Window* window_ = nullptr;
@@ -85,6 +90,7 @@ private:
     std::string subtitleCache_;
     std::string toastText_;
     Uint32 toastUntil_ = 0;
+    bool speedMenuOpen_ = false;
     SDL_Texture* iconTex_[12] = {};  // Icon enum -> PNG texture (loaded lazily)
     void ensureIcon(Icon icon);
     SDL_Texture* iconTexture(Icon icon);

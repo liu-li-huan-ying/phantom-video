@@ -7,12 +7,20 @@ extern "C" {
 #include <libavutil/opt.h>
 }
 
+AudioOutput::AudioOutput() {
+    inLayout_ = {};  // AV_CHANNEL_ORDER_UNSPEC，av_channel_layout_uninit 安全
+}
+
 AudioOutput::~AudioOutput() {
     if (dev_) {
         SDL_PauseAudioDevice(dev_, 1);
         SDL_CloseAudioDevice(dev_);
     }
-    if (swr_) swr_free(&swr_);
+    {
+        std::lock_guard<std::mutex> lock(swrMutex_);
+        if (swr_) swr_free(&swr_);
+        av_channel_layout_uninit(&inLayout_);
+    }
 }
 
 bool AudioOutput::open(const AVCodecParameters* par, double ptsScale) {
@@ -28,15 +36,19 @@ bool AudioOutput::open(const AVCodecParameters* par, double ptsScale) {
     dev_ = SDL_OpenAudioDevice(nullptr, 0, &want, &spec_, 0);
     if (!dev_) return false;
 
-    bytesPerSec_ = (double)spec_.freq * spec_.channels * 2;
+    std::lock_guard<std::mutex> lock(swrMutex_);
+    inSampleRate_ = par->sample_rate;
+    av_channel_layout_uninit(&inLayout_);
+    av_channel_layout_copy(&inLayout_, &par->ch_layout);
+    inFmt_ = (AVSampleFormat)par->format;
 
     AVChannelLayout outLayout;
     av_channel_layout_default(&outLayout, spec_.channels);
     swr_ = swr_alloc();
     if (!swr_) return false;
-    av_opt_set_chlayout(swr_, "in_chlayout", &par->ch_layout, 0);
-    av_opt_set_int(swr_, "in_sample_rate", par->sample_rate, 0);
-    av_opt_set_sample_fmt(swr_, "in_sample_fmt", (AVSampleFormat)par->format, 0);
+    av_opt_set_chlayout(swr_, "in_chlayout", &inLayout_, 0);
+    av_opt_set_int(swr_, "in_sample_rate", inSampleRate_, 0);
+    av_opt_set_sample_fmt(swr_, "in_sample_fmt", inFmt_, 0);
     av_opt_set_chlayout(swr_, "out_chlayout", &outLayout, 0);
     av_opt_set_int(swr_, "out_sample_rate", spec_.freq, 0);
     av_opt_set_sample_fmt(swr_, "out_sample_fmt", AV_SAMPLE_FMT_S16, 0);
@@ -47,6 +59,33 @@ bool AudioOutput::open(const AVCodecParameters* par, double ptsScale) {
     ok_ = true;
     SDL_PauseAudioDevice(dev_, 0);
     return true;
+}
+
+void AudioOutput::setSpeed(float spd) {
+    if (spd <= 0.01f) spd = 0.01f;
+    speed_.store(spd, std::memory_order_relaxed);
+    std::lock_guard<std::mutex> lock(swrMutex_);
+    if (!swr_) return;
+    AVChannelLayout outLayout;
+    av_channel_layout_default(&outLayout, spec_.channels);
+    SwrContext* nswr = swr_alloc();
+    if (!nswr) return;
+    av_opt_set_chlayout(nswr, "in_chlayout", &inLayout_, 0);
+    av_opt_set_int(nswr, "in_sample_rate", inSampleRate_, 0);
+    av_opt_set_sample_fmt(nswr, "in_sample_fmt", inFmt_, 0);
+    av_opt_set_chlayout(nswr, "out_chlayout", &outLayout, 0);
+    av_opt_set_int(nswr, "out_sample_rate", (int)(spec_.freq / spd + 0.5f), 0);
+    av_opt_set_sample_fmt(nswr, "out_sample_fmt", AV_SAMPLE_FMT_S16, 0);
+    int ret = swr_init(nswr);
+    av_channel_layout_uninit(&outLayout);
+    if (ret < 0) {
+        swr_free(&nswr);
+        return;
+    }
+    swr_free(&swr_);
+    swr_ = nswr;
+    // 变速后旧缓冲按旧采样率推进会污染时钟：标记由 fill 回调内清空（无锁安全）
+    clearPending_.store(true);
 }
 
 bool AudioOutput::push(const FramePtr& frame) {
@@ -64,10 +103,14 @@ bool AudioOutput::tryPush(const FramePtr& frame) {
 }
 
 bool AudioOutput::convert(const FramePtr& frame, AudioChunk& chunk) {
+    std::lock_guard<std::mutex> lock(swrMutex_);
+    if (!swr_) return false;
     int outChannels = spec_.channels;
+    float spd = speed_.load(std::memory_order_relaxed);
+    int outRate = (int)(spec_.freq / spd + 0.5f);
     int outSamples = (int)av_rescale_rnd(
         swr_get_delay(swr_, frame->sample_rate) + frame->nb_samples,
-        spec_.freq, frame->sample_rate, AV_ROUND_UP);
+        outRate, frame->sample_rate, AV_ROUND_UP);
 
     uint8_t* outBuf = nullptr;
     if (av_samples_alloc(&outBuf, nullptr, outChannels, outSamples,
@@ -82,6 +125,7 @@ bool AudioOutput::convert(const FramePtr& frame, AudioChunk& chunk) {
         int bytes = av_samples_get_buffer_size(nullptr, outChannels, converted,
                                                AV_SAMPLE_FMT_S16, 1);
         chunk.data.assign(outBuf, outBuf + bytes);
+        chunk.outRate = outRate;
         chunk.pts = frame->pts == AV_NOPTS_VALUE ? 0.0 : frame->pts * ptsScale_;
         if (chunk.pts < 0.0) chunk.pts = 0.0;
     }
@@ -121,6 +165,11 @@ void SDLCALL AudioOutput::sdlCallback(void* userdata, Uint8* stream, int len) {
 }
 
 void AudioOutput::fill(Uint8* stream, int len) {
+    if (clearPending_.exchange(false)) {
+        queue_.clear();
+        current_.data.clear();
+        offset_ = 0;
+    }
     SDL_memset(stream, 0, len);
     int space = len;
     Uint8* dst = stream;
@@ -145,12 +194,13 @@ void AudioOutput::fill(Uint8* stream, int len) {
         dst += n;
         space -= n;
         if (offset_ >= current_.data.size()) current_.data.clear();
+        {
+            std::lock_guard<std::mutex> lock(clockMutex_);
+            // 该 chunk 按自身输出采样率换算内容秒：n 字节 = n/4 采样（S16 双声道）
+            writeHead_ += (double)n / 4.0 / current_.outRate;
+        }
     }
 
-    {
-        std::lock_guard<std::mutex> lock(clockMutex_);
-        if (space != len) writeHead_ += (double)(len - space) / bytesPerSec_;
-    }
     applyVolume(stream, len);
 }
 

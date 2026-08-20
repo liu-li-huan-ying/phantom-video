@@ -11,12 +11,12 @@ bool Player::openFile(const std::string& path) {
     close();
     videoQueue_.reopen();
 
-    auto demuxer = std::make_unique<Demuxer>();
-    if (!demuxer->open(path)) {
+    auto vdemux = std::make_unique<Demuxer>();
+    if (!vdemux->open(path)) {
         error_ = "无法打开文件或格式不受支持";
         return false;
     }
-    if (demuxer->videoIndex() < 0) {
+    if (vdemux->videoIndex() < 0) {
         error_ = "文件中没有视频流";
         return false;
     }
@@ -29,21 +29,29 @@ bool Player::openFile(const std::string& path) {
     }
 
     auto vdec = std::make_unique<Decoder>();
-    if (!vdec->open(demuxer->videoCodecpar(), hwDeviceCtx_)) {
+    if (!vdec->open(vdemux->videoCodecpar(), hwDeviceCtx_)) {
         error_ = "视频解码器初始化失败";
         return false;
     }
     hwDecode_.store(vdec->usingHardware());
 
+    std::unique_ptr<Demuxer> ademux;
     std::unique_ptr<Decoder> adec;
     std::unique_ptr<AudioOutput> audio;
-    bool hasAudio = demuxer->audioIndex() >= 0;
+    bool hasAudio = vdemux->audioIndex() >= 0;
+    if (hasAudio) {
+        ademux = std::make_unique<Demuxer>();
+        if (!ademux->open(path)) {
+            ademux.reset();
+            hasAudio = false;
+        }
+    }
     if (hasAudio) {
         adec = std::make_unique<Decoder>();
-        if (adec->open(demuxer->audioCodecpar())) {
+        if (adec->open(ademux->audioCodecpar())) {
             audio = std::make_unique<AudioOutput>();
-            double aScale = av_q2d(demuxer->audioStream()->time_base);
-            if (!audio->open(demuxer->audioCodecpar(), aScale)) {
+            double aScale = av_q2d(ademux->audioStream()->time_base);
+            if (!audio->open(ademux->audioCodecpar(), aScale)) {
                 audio.reset();
                 hasAudio = false;
             }
@@ -52,26 +60,29 @@ bool Player::openFile(const std::string& path) {
             hasAudio = false;
         }
     }
+    if (hasAudio && !ademux) hasAudio = false;
 
-    demuxer_ = std::move(demuxer);
+    videoDemuxer_ = std::move(vdemux);
+    audioDemuxer_ = std::move(ademux);
     videoDecoder_ = std::move(vdec);
     audioDecoder_ = std::move(adec);
     audio_ = std::move(audio);
 
-    videoPtsScale_.store(av_q2d(demuxer_->videoStream()->time_base));
-    duration_ = demuxer_->duration();
-    if (duration_ <= 0.0 && demuxer_->videoStream()->duration != AV_NOPTS_VALUE) {
-        duration_ = demuxer_->videoStream()->duration *
-                    av_q2d(demuxer_->videoStream()->time_base);
+    videoPtsIdx_ = videoDemuxer_->videoIndex();
+    videoPtsScale_.store(av_q2d(videoDemuxer_->videoStream()->time_base));
+    duration_ = videoDemuxer_->duration();
+    if (duration_ <= 0.0 && videoDemuxer_->videoStream()->duration != AV_NOPTS_VALUE) {
+        duration_ = videoDemuxer_->videoStream()->duration *
+                    av_q2d(videoDemuxer_->videoStream()->time_base);
     }
 
     subtitles_.clear();
     subtitleLoaded_.store(false);
-    subtitleIndex_ = demuxer_->subtitleIndex();
+    subtitleIndex_ = videoDemuxer_->subtitleIndex();
     subtitleDecoder_.reset();
     if (subtitleIndex_ >= 0) {
         auto sdec = std::make_unique<SubtitleDecoder>();
-        if (sdec->open(demuxer_->subtitleCodecpar()))
+        if (sdec->open(videoDemuxer_->subtitleCodecpar()))
             subtitleDecoder_ = std::move(sdec);
     }
 
@@ -90,6 +101,8 @@ bool Player::openFile(const std::string& path) {
     videoBaseTicks_ = SDL_GetPerformanceCounter();
     state_.store(State::Playing);
 
+    if (audio_) audio_->setSpeed(speed_.load(std::memory_order_relaxed));
+    audioThread_ = std::thread(&Player::audioLoop, this);
     decodeThread_ = std::thread(&Player::decodeLoop, this);
     return true;
 }
@@ -98,6 +111,7 @@ void Player::close() {
     stop_.store(true);
     videoQueue_.close();
     if (audio_) audio_->closeQueue();
+    if (audioThread_.joinable()) audioThread_.join();
     if (decodeThread_.joinable()) decodeThread_.join();
 
     subtitles_.clear();
@@ -108,8 +122,10 @@ void Player::close() {
     audio_.reset();
     audioDecoder_.reset();
     videoDecoder_.reset();
-    demuxer_.reset();
+    audioDemuxer_.reset();
+    videoDemuxer_.reset();
     lastFrame_.reset();
+    videoPtsIdx_ = -1;
     if (hwDeviceCtx_) {
         av_buffer_unref(&hwDeviceCtx_);
         hwDeviceCtx_ = nullptr;
@@ -193,8 +209,15 @@ void Player::setVolume(float v) {
 }
 
 void Player::setSpeed(float s) {
-    s = std::clamp(s, 0.5f, 2.0f);
+    s = std::clamp(s, 0.05f, 3.0f);
     speed_.store(s);
+    if (audio_) {
+        audio_->setSpeed(s);
+        // 变速清空缓冲后，音频线程供给位置超前播放位置 → 让音频线程 seek 回当前
+        // 播放位置，chunk pts 与时钟对齐，避免 fill 的 pts 同步把时钟拉到缓冲位置
+        audioSeekPending_.store(true);
+        audioSeekTarget_.store(clock());
+    }
     videoBaseTicks_ = SDL_GetPerformanceCounter();
 }
 
@@ -252,7 +275,7 @@ FramePtr Player::pullFrame() {
 
     double c = clock();
     float spd = speed_.load();
-    double target = audioEnabled_.load() ? c * spd : c;
+    double target = c;  // 音频时钟已含变速；无音频时 videoClock 也含变速
     FramePtr f;
 
     if (!videoQueue_.peek(f)) {
@@ -312,7 +335,7 @@ FramePtr Player::pullFrame() {
 }
 
 void Player::doSeek(double t) {
-    if (!demuxer_) return;
+    if (!videoDemuxer_) return;
     if (audio_) {
         audio_->clearQueue();
         audio_->pauseDevice();
@@ -323,9 +346,10 @@ void Player::doSeek(double t) {
     videoBasePts_ = t;
     videoBaseTicks_ = SDL_GetPerformanceCounter();
     audioWait_ = true;
-    demuxer_->seek(t);
+    audioSeekPending_.store(true);
+    audioSeekTarget_.store(t);
+    videoDemuxer_->seek(t);
     if (videoDecoder_) videoDecoder_->flushBuffers();
-    if (audioDecoder_) audioDecoder_->flushBuffers();
     if (subtitleDecoder_) {
         subtitles_.clear();
         subtitleDecoder_->flushBuffers();
@@ -345,10 +369,10 @@ void Player::decodeLoop() {
             }
         }
 
-        PacketPtr pkt = demuxer_->readPacket();
+        PacketPtr pkt = videoDemuxer_->readPacket();
         if (!pkt) break;
 
-        if (pkt->stream_index == demuxer_->videoIndex()) {
+        if (pkt->stream_index == videoPtsIdx_) {
             if (!videoDecoder_ || !videoDecoder_->send(pkt.get())) continue;
             while (FramePtr f = videoDecoder_->receive()) {
                 if (seekRequested() || stop_.load()) break;
@@ -359,21 +383,10 @@ void Player::decodeLoop() {
                 }
                 if (seekRequested() || stop_.load()) break;
             }
-        } else if (pkt->stream_index == demuxer_->audioIndex()) {
-            if (!audioDecoder_ || !audioDecoder_->send(pkt.get())) continue;
-            while (FramePtr f = audioDecoder_->receive()) {
-                if (seekRequested() || stop_.load()) break;
-                if (framePts(f) < dropUntil_.load()) continue;
-                while (!audio_ || !audio_->tryPush(f)) {
-                    if (seekRequested() || stop_.load()) break;
-                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-                }
-                if (seekRequested() || stop_.load()) break;
-            }
         } else if (subtitleIndex_ >= 0 && pkt->stream_index == subtitleIndex_ &&
                    !subtitleLoaded_.load()) {
             if (subtitleDecoder_) {
-                AVStream* s = demuxer_->subtitleStream();
+                AVStream* s = videoDemuxer_->subtitleStream();
                 double tb = s ? av_q2d(s->time_base) : 0.001;
                 subtitleDecoder_->decode(pkt.get(), tb, subtitles_);
             }
@@ -389,13 +402,37 @@ void Player::decodeLoop() {
             if (!videoQueue_.push(f)) return;
         }
     }
+    videoQueue_.close();
+}
+
+void Player::audioLoop() {
+    while (!stop_.load()) {
+        if (!audioDemuxer_ || !audioEnabled_.load()) break;
+        if (audioSeekPending_.exchange(false)) {
+            audioDemuxer_->seek(audioSeekTarget_.load());
+            if (audioDecoder_) audioDecoder_->flushBuffers();
+        }
+        PacketPtr pkt = audioDemuxer_->readPacket();
+        if (!pkt) break;
+        if (pkt->stream_index != audioDemuxer_->audioIndex()) continue;
+        if (!audioDecoder_ || !audioDecoder_->send(pkt.get())) continue;
+        while (FramePtr f = audioDecoder_->receive()) {
+            if (seekRequested() || stop_.load()) break;
+            if (framePts(f) < dropUntil_.load()) continue;
+            while (!audio_ || !audio_->tryPush(f)) {
+                if (seekRequested() || stop_.load()) break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            if (seekRequested() || stop_.load()) break;
+        }
+    }
+    if (stop_.load()) return;
     if (audioDecoder_) {
         audioDecoder_->flush();
         while (FramePtr f = audioDecoder_->receive()) {
             if (framePts(f) < dropUntil_.load()) continue;
-            if (!audio_ || !audio_->push(f)) return;
+            if (!audio_ || !audio_->push(f)) break;
         }
     }
-    videoQueue_.close();
     if (audio_) audio_->closeQueue();
 }

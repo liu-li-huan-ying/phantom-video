@@ -355,6 +355,21 @@ void VideoRenderer::showToast(const char* text) {
     toastUntil_ = SDL_GetTicks() + 2200;
 }
 
+void VideoRenderer::toggleSpeedMenu() {
+    speedMenuOpen_ = !speedMenuOpen_;
+    showControls();
+}
+
+SDL_Rect VideoRenderer::speedMenuItemRect(const ControlLayout& lay, int index) {
+    int itemH = 28;
+    int menuW = 92;
+    int count = 8;
+    int menuX = lay.speedX + lay.btnSize / 2 - menuW / 2;
+    int menuBottom = lay.barY - 8;
+    int menuY = menuBottom - count * itemH;
+    return SDL_Rect{ menuX, menuY + index * itemH, menuW, itemH };
+}
+
 void VideoRenderer::drawToast() {
     Uint32 now = SDL_GetTicks();
     if (now >= toastUntil_ || toastText_.empty()) return;
@@ -683,6 +698,30 @@ void VideoRenderer::drawControls(const RenderStats& stats) {
     }
     SDL_SetRenderDrawColor(renderer_, 255, 255, 255, (Uint8)(220 * a / 255));
     drawFontText(renderer_, speedBtn.x + 7, speedBtn.y + 16, 2, spdText);
+
+    // ---- speed menu (popup above speed button) ----
+    if (speedMenuOpen_) {
+        const int count = 8;
+        float speeds[8] = { 0.25f, 0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f, 3.0f };
+        int itemH = 28, menuW = 92;
+        int menuX = speedBtn.x + speedBtn.w / 2 - menuW / 2;
+        int menuBottom = lay.barY - 8;
+        int menuY = menuBottom - count * itemH;
+        fillRoundedRect(renderer_, menuX - 4, menuY - 4, menuW + 8, count * itemH + 8, 10,
+                        20, 20, 20, (Uint8)(235 * a / 255));
+        for (int i = 0; i < count; ++i) {
+            SDL_Rect r = speedMenuItemRect(lay, i);
+            bool cur = std::abs(stats.speed - speeds[i]) < 0.001f;
+            if (cur) {
+                fillRoundedRect(renderer_, r.x + 2, r.y + 2, r.w - 4, r.h - 4, 6,
+                                77, 144, 255, (Uint8)(230 * a / 255));
+            }
+            char txt[16];
+            std::snprintf(txt, sizeof(txt), "x%.2g", speeds[i]);
+            SDL_SetRenderDrawColor(renderer_, 255, 255, 255, (Uint8)(220 * a / 255));
+            drawFontText(renderer_, menuX + 28, r.y + 10, 2, txt);
+        }
+    }
 }
 
 void VideoRenderer::render(const AVFrame* frame, const RenderStats& stats) {

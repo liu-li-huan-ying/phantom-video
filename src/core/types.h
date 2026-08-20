@@ -22,6 +22,7 @@ inline PacketPtr makePacketPtr(AVPacket* p) { return PacketPtr(p, PacketDeleter{
 
 struct AudioChunk {
     double pts = 0.0;
+    int outRate = 44100;  // 变速时该 chunk 的输出采样率（内容采样/内容秒）
     std::vector<uint8_t> data;
 };
 

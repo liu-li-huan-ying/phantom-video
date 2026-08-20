@@ -149,7 +149,7 @@ auto args = utf8Args();
     bool draggingProgress = false;
     bool draggingVolume = false;
 
-    static const float kSpeeds[] = { 0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f };
+    static const float kSpeeds[] = { 0.25f, 0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f, 3.0f };
     static const int kSpeedCount = (int)(sizeof(kSpeeds) / sizeof(kSpeeds[0]));
     auto cycleSpeed = [&](int dir) {
         float cur = player.speed();
@@ -257,9 +257,29 @@ auto args = utf8Args();
                     else if (mx >= lay.modeX && mx < lay.modeX + bs && my >= btnY && my < btnY + bs) {
                         cyclePlayMode(); hitControl = true;
                     }
-                    // Speed
+                    // Speed button toggles popup menu
                     else if (mx >= lay.speedX && mx < lay.speedX + bs && my >= btnY && my < btnY + bs) {
-                        cycleSpeed(1); hitControl = true;
+                        vrender.toggleSpeedMenu();
+                        volHideAt = SDL_GetTicks() + 2000;
+                        hitControl = true;
+                    }
+                    // Speed menu item selection
+                    else if (vrender.speedMenuOpen()) {
+                        bool inMenu = false;
+                        for (int i = 0; i < 8; ++i) {
+                            SDL_Rect r = VideoRenderer::speedMenuItemRect(lay, i);
+                            if (mx >= r.x && mx < r.x + r.w && my >= r.y && my < r.y + r.h) {
+                                player.setSpeed(kSpeeds[i]);
+                                vrender.setSpeedMenuOpen(false);
+                                char msg[32];
+                                std::snprintf(msg, sizeof(msg), "倍速: x%.2g", kSpeeds[i]);
+                                vrender.showToast(msg);
+                                hitControl = true;
+                                inMenu = true;
+                                break;
+                            }
+                        }
+                        if (!inMenu) vrender.setSpeedMenuOpen(false);
                     }
                     // Volume button (click toggles mute; drag handled via popup)
                     else if (mx >= lay.volX && mx < lay.volX + bs && my >= btnY && my < btnY + bs) {

@@ -45,6 +45,7 @@ public:
 
 private:
     void decodeLoop();
+    void audioLoop();
     void doSeek(double t);
     void requestSeek(double t);
     bool seekRequested();
@@ -53,13 +54,17 @@ private:
     double videoClock() const;
     double framePts(const FramePtr& f) const;
 
-    std::unique_ptr<Demuxer> demuxer_;
+    std::unique_ptr<Demuxer> videoDemuxer_;
+    std::unique_ptr<Demuxer> audioDemuxer_;
     std::unique_ptr<Decoder> videoDecoder_;
     std::unique_ptr<Decoder> audioDecoder_;
     std::unique_ptr<AudioOutput> audio_;
-    BlockingQueue<FramePtr> videoQueue_{ 8 };
+    BlockingQueue<FramePtr> videoQueue_{ 60 };
 
     std::thread decodeThread_;
+    std::thread audioThread_;
+    std::atomic<bool> audioSeekPending_{ false };
+    std::atomic<double> audioSeekTarget_{ 0.0 };
     std::atomic<bool> stop_{ false };
     std::atomic<bool> videoEnabled_{ false };
     std::atomic<bool> audioEnabled_{ false };
@@ -88,6 +93,7 @@ private:
     double duration_ = 0.0;
     std::string path_;
     std::string error_;
+    int videoPtsIdx_ = -1;
 
     FramePtr lastFrame_;
     double videoBasePts_ = 0.0;
