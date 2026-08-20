@@ -26,6 +26,21 @@ struct RenderStats {
     std::function<void()> onCycleSpeed;
 };
 
+// 控件图标（Material Icons 贴图，加载失败时回退矢量绘制）
+enum class Icon { Play, Pause, Prev, Next, Volume, Mute, Fullscreen, ExitFullscreen,
+                  Single, Loop, Shuffle };
+
+// 统一控件布局：进度条贴底独立全宽，按钮行在其上方
+struct ControlLayout {
+    int barY = 0;      // 按钮行上边缘
+    int btnY = 0;      // 按钮上边缘
+    int btnSize = 40;
+    int gap = 12;
+    int prevX = 0, playX = 0, nextX = 0, modeX = 0, speedX = 0, volX = 0, fsX = 0;
+    int progX = 0, progY = 0, progW = 0;  // 进度条（贴底全宽）
+    static ControlLayout compute(int winW, int winH);
+};
+
 class VideoRenderer {
 public:
     ~VideoRenderer();
@@ -70,4 +85,7 @@ private:
     std::string subtitleCache_;
     std::string toastText_;
     Uint32 toastUntil_ = 0;
+    SDL_Texture* iconTex_[12] = {};  // Icon enum -> PNG texture (loaded lazily)
+    void ensureIcon(Icon icon);
+    SDL_Texture* iconTexture(Icon icon);
 };

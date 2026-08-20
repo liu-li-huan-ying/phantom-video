@@ -1,5 +1,7 @@
 ﻿#include "video/video_renderer.h"
 
+#include <SDL_image.h>
+
 extern "C" {
 #include <libswscale/swscale.h>
 #include <libavutil/imgutils.h>
@@ -67,9 +69,6 @@ static void formatTimeText(char* buf, size_t n, double sec) {
 }
 
 // ---- vector icon drawing ----
-
-enum class Icon { Play, Pause, Prev, Next, Volume, Mute, Fullscreen, ExitFullscreen,
-                   Single, Loop, Shuffle };
 
 static void drawIcon(SDL_Renderer* r, Icon icon, int cx, int cy, int size, int alpha) {
     SDL_SetRenderDrawColor(r, 255, 255, 255, alpha);
@@ -184,6 +183,63 @@ static void drawIcon(SDL_Renderer* r, Icon icon, int cx, int cy, int size, int a
         SDL_RenderDrawLine(r, px(8), py(-6), px(9), py(-3));
         break;
     }
+    }
+}
+
+// ---- icon PNG textures (Material Icons, Apache 2.0) ----
+
+static const char* kIconFile(Icon icon) {
+    switch (icon) {
+    case Icon::Play: return "play_arrow.png";
+    case Icon::Pause: return "pause.png";
+    case Icon::Prev: return "skip_previous.png";
+    case Icon::Next: return "skip_next.png";
+    case Icon::Volume: return "volume_up.png";
+    case Icon::Mute: return "volume_off.png";
+    case Icon::Fullscreen: return "fullscreen.png";
+    case Icon::ExitFullscreen: return "fullscreen_exit.png";
+    case Icon::Single: return "repeat_one.png";
+    case Icon::Loop: return "repeat.png";
+    case Icon::Shuffle: return "shuffle.png";
+    }
+    return nullptr;
+}
+
+void VideoRenderer::ensureIcon(Icon icon) {
+    int idx = (int)icon;
+    if (idx < 0 || idx >= 12 || iconTex_[idx]) return;
+    const char* file = kIconFile(icon);
+    if (!file || !renderer_) return;
+
+    char dir[MAX_PATH] = {};
+    GetModuleFileNameA(nullptr, dir, MAX_PATH);
+    char* slash = std::strrchr(dir, '\\');
+    if (!slash) return;
+    *(slash + 1) = '\0';
+    std::string path = std::string(dir) + "assets\\icons\\" + file;
+
+    SDL_Surface* surf = IMG_Load(path.c_str());
+    if (!surf) return;
+    SDL_Texture* tex = SDL_CreateTextureFromSurface(renderer_, surf);
+    SDL_FreeSurface(surf);
+    if (!tex) return;
+    SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
+    iconTex_[idx] = tex;
+}
+
+SDL_Texture* VideoRenderer::iconTexture(Icon icon) {
+    ensureIcon(icon);
+    return iconTex_[(int)icon];
+}
+
+static void drawIconOrTexture(SDL_Renderer* r, SDL_Texture* tex, Icon icon,
+                              int cx, int cy, int size, int alpha) {
+    if (tex) {
+        SDL_SetTextureAlphaMod(tex, (Uint8)alpha);
+        SDL_Rect dst{ cx - size / 2, cy - size / 2, size, size };
+        SDL_RenderCopy(r, tex, nullptr, &dst);
+    } else {
+        drawIcon(r, icon, cx, cy, size, alpha);
     }
 }
 
@@ -463,11 +519,34 @@ void VideoRenderer::drawSubtitle(const RenderStats& stats) {
     SDL_RenderCopy(renderer_, (SDL_Texture*)subtitleTexture_, nullptr, &dst);
 }
 
+ControlLayout ControlLayout::compute(int winW, int winH) {
+    ControlLayout l;
+    l.btnSize = 40;
+    l.gap = 12;
+    // 进度条贴底全宽（独立一行），控制按钮行在进度条上方
+    l.progX = 8;
+    l.progY = winH - 5;
+    l.progW = winW - 16;
+    l.barY = winH - 5 - 4 - 64;  // 控制栏 64px 高，位于进度条上方
+    l.btnY = l.barY + (64 - l.btnSize) / 2;
+    // 左侧播放控制组
+    l.prevX = 16;
+    l.playX = l.prevX + l.btnSize + l.gap;
+    l.nextX = l.playX + l.btnSize + l.gap;
+    // 右侧功能组（右对齐）
+    l.fsX = winW - 16 - l.btnSize;
+    l.volX = l.fsX - l.btnSize - l.gap;
+    l.speedX = l.volX - l.btnSize - l.gap;
+    l.modeX = l.speedX - l.btnSize - l.gap;
+    return l;
+}
+
 void VideoRenderer::drawControls(const RenderStats& stats) {
     int winW = 0, winH = 0;
     SDL_GetWindowSize(window_, &winW, &winH);
+    ControlLayout lay = ControlLayout::compute(winW, winH);
     const int h = 64;
-    const int barY = winH - h;
+    const int barY = lay.barY;
 
     Uint32 now = SDL_GetTicks();
     if (now - lastMouseMove_ > 700 && !stats.draggingVolume) {
@@ -500,19 +579,18 @@ void VideoRenderer::drawControls(const RenderStats& stats) {
     SDL_RenderGeometry(renderer_, nullptr, gv.data(), (int)gv.size(), nullptr, 0);
 
     // ---- layout ----
-    const int btnSize = 40;
-    const int btnY = barY + (h - btnSize) / 2;
-    const int gap = 12;
-    int cx = gap + btnSize / 2;  // center of Prev
+    const int btnSize = lay.btnSize;
+    const int btnY = lay.btnY;
+    const int gap = lay.gap;
 
     struct Btn { int x, y, w, h; };
-    Btn prevBtn{ gap, btnY, btnSize, btnSize };
-    Btn playBtn{ gap + btnSize + gap, btnY, btnSize, btnSize };
-    Btn nextBtn{ gap + 2 * (btnSize + gap), btnY, btnSize, btnSize };
-    Btn modeBtn{ gap + 3 * (btnSize + gap), btnY, btnSize, btnSize };
-    Btn speedBtn{ gap + 4 * (btnSize + gap), btnY, btnSize, btnSize };
-    Btn volBtn{ winW - gap - 2 * (btnSize + gap) + gap, btnY, btnSize, btnSize };
-    Btn fsBtn{ winW - gap - btnSize, btnY, btnSize, btnSize };
+    Btn prevBtn{ lay.prevX, btnY, btnSize, btnSize };
+    Btn playBtn{ lay.playX, btnY, btnSize, btnSize };
+    Btn nextBtn{ lay.nextX, btnY, btnSize, btnSize };
+    Btn modeBtn{ lay.modeX, btnY, btnSize, btnSize };
+    Btn speedBtn{ lay.speedX, btnY, btnSize, btnSize };
+    Btn volBtn{ lay.volX, btnY, btnSize, btnSize };
+    Btn fsBtn{ lay.fsX, btnY, btnSize, btnSize };
 
     auto hit = [&](const Btn& b) {
         return mouseX_ >= b.x && mouseX_ < b.x + b.w && mouseY_ >= b.y && mouseY_ < b.y + b.h;
@@ -523,48 +601,52 @@ void VideoRenderer::drawControls(const RenderStats& stats) {
             fillRoundedRect(renderer_, b.x, b.y, b.w, b.h, 8,
                             255, 255, 255, (Uint8)(hover ? 40 * a / 255 : 60 * a / 255));
         }
-        drawIcon(renderer_, icon, b.x + b.w / 2, b.y + b.h / 2, 24,
-                 (int)((hover ? 255 : 200) * a / 255));
+        drawIconOrTexture(renderer_, iconTexture(icon), icon,
+                          b.x + b.w / 2, b.y + b.h / 2, 24,
+                          (int)((hover ? 255 : 200) * a / 255));
     };
 
-    // ---- progress bar (left of volume group) ----
-    int timeW = 96;
-    int progressW = fsBtn.x - (speedBtn.x + speedBtn.w + gap) - 24 - timeW;
-    if (progressW < 100) progressW = 100;
-    const int progY = barY + (h - 6) / 2;
-    const int progX = speedBtn.x + speedBtn.w + gap + 12;
+    // ---- progress bar: full-width slim bar at the very bottom ----
+    const int progX = lay.progX;
+    const int progY = lay.progY;
+    const int progressW = lay.progW;
 
     double pct = (stats.duration > 0) ? (stats.clock / stats.duration) : 0;
     if (pct < 0) pct = 0; if (pct > 1) pct = 1;
 
-    bool progHover = mouseX_ >= progX - 6 && mouseX_ < progX + progressW + 6 &&
-                     mouseY_ >= progY - 8 && mouseY_ < progY + 14;
+    bool progHover = mouseX_ >= progX && mouseX_ < progX + progressW &&
+                     mouseY_ >= progY - 10 && mouseY_ < progY + 12;
+    int trackH = (progHover || stats.draggingVolume) ? 8 : 4;
+    int trackY = progY - trackH / 2;
 
     // track
-    fillRoundedRect(renderer_, progX, progY, progressW, 6, 3,
+    fillRoundedRect(renderer_, progX, trackY, progressW, trackH, 2,
                     80, 80, 80, (Uint8)(180 * a / 255));
     // fill
     int fillW = (int)(pct * progressW);
     if (fillW > 0) {
-        fillRoundedRect(renderer_, progX, progY, fillW, 6, 3,
+        fillRoundedRect(renderer_, progX, trackY, fillW, trackH, 2,
                         77, 144, 255, (Uint8)(255 * a / 255));
     }
     // hover thumb
     if (progHover || stats.draggingVolume) {
-        int thumbX = progX + fillW - 5;
+        int thumbX = progX + fillW - 6;
         SDL_SetRenderDrawColor(renderer_, 255, 255, 255, (Uint8)(255 * a / 255));
-        SDL_Rect thumb{ thumbX, progY - 4, 14, 14 };
+        SDL_Rect thumb{ thumbX, trackY - 3, 12, trackH + 6 };
         SDL_RenderFillRect(renderer_, &thumb);
     }
 
-    // time text (current / total) below progress bar
+    // time text centered in the control row
     char curText[16], durText[16];
     formatTimeText(curText, sizeof(curText), stats.clock);
     formatTimeText(durText, sizeof(durText), stats.duration);
     char timeText[40];
     std::snprintf(timeText, sizeof(timeText), "%s / %s", curText, durText);
+    int tw = 0;
+    for (const char* p = timeText; *p; ++p) tw += 6 * 2;
+    int timeX = (winW - tw) / 2;
     SDL_SetRenderDrawColor(renderer_, 255, 255, 255, (Uint8)(220 * a / 255));
-    drawFontText(renderer_, progX + progressW + 10, barY + 26, 2, timeText);
+    drawFontText(renderer_, timeX, barY + 22, 2, timeText);
 
     // ---- volume popup (above vol button) ----
     bool volHover = hit(volBtn);

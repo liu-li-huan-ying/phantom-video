@@ -306,3 +306,9 @@
 - 续播彻底修复：resume=0 时启动不自动打开 lastFile（空白窗口像第一次打开软件），只有 resume=1 才自动打开并续播；启动续播时 toast 提示"已从上次位置续播（按 R 关闭）"。
 - UI 更新：新增 播放模式按钮（单独/循环/随机 三态图标，位于 Next 右侧）和 倍速按钮（显示 x0.5~x2 文本，点击循环切换）；进度条左移为新增按钮让位（progX=284，main.cpp 与 renderer 坐标公式一致）；新增 toast 提示系统（顶部居中中文提示，2.2s 淡出，用于模式/倍速/续播操作反馈）。
 - 构建成功（vplayer.exe），无新警告。
+
+### M13 补充 3（2026-08-20）UI 布局重排 + Material 贴图 + 双击修复
+- 布局重排（主流播放器风格）：进度条独立贴底全宽细线（hover 加粗+thumb），控制按钮分左右两组（左：上/播/下，右：模式/倍速/音量/全屏），时间文本居中。坐标统一收敛到 ControlLayout::compute()，main.cpp 与 renderer 共用，顺带修复拖动进度条坐标错位旧 bug（MOUSEMOTION 曾用旧 progX=180）。
+- 贴图资源：引入 SDL_image 2.8.2（下载 F:\dev，~15MB，dll 仅依赖 SDL2.dll），Material Icons（Apache 2.0，白色 48dp，11 个共 2.6KB）存于 assets/icons/，IMG_Load 加载纹理，失败回退矢量绘制。CMake 自动拷贝 DLL+assets。
+- 双击修复：点击按钮/进度条/音量条（hitControl=true）时双击不触发全屏，只在画面空白处双击放大。
+- 验证：icon_test 11/11 加载 PASS；ui_smoke2 真实播放+渲染+贴图+toast 110 帧无崩溃 exit=0。

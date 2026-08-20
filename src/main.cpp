@@ -215,19 +215,17 @@ auto args = utf8Args();
                     int mx = e.motion.x, my = e.motion.y;
                     vrender.onMouseMove(mx, my);
                     if (draggingProgress) {
-                        int winW = 0;
-                        SDL_GetWindowSize(win, &winW, nullptr);
-                        const int fsX = winW - 52;
-                        const int progX = 180;
-                        const int progW = fsX - progX - 24 - 96;
-                        float pct = (float)(mx - progX) / progW;
+                        int winW = 0, winH = 0;
+                        SDL_GetWindowSize(win, &winW, &winH);
+                        ControlLayout lay = ControlLayout::compute(winW, winH);
+                        float pct = (float)(mx - lay.progX) / lay.progW;
                         if (pct < 0) pct = 0; if (pct > 1) pct = 1;
                         player.seek(pct * player.duration());
                     } else if (draggingVolume) {
-                        int winH = 0;
-                        SDL_GetWindowSize(win, nullptr, &winH);
-                        const int barY = winH - 64;
-                        const int ph = 90, py = barY - ph - 12;
+                        int winW = 0, winH = 0;
+                        SDL_GetWindowSize(win, &winW, &winH);
+                        ControlLayout lay = ControlLayout::compute(winW, winH);
+                        const int ph = 90, py = lay.barY - ph - 12;
                         float v = 1.0f - (float)(my - py - 6) / (ph - 12);
                         if (v < 0) v = 0; if (v > 1) v = 1;
                         player.setVolume(v);
@@ -240,63 +238,66 @@ auto args = utf8Args();
                     int mx = e.button.x, my = e.button.y;
                     int winW = 0, winH = 0;
                     SDL_GetWindowSize(win, &winW, &winH);
-                    const int barY = winH - 64;
-                    const int btnY = barY + 12;
-                    // Prev (12, btnY, 40x40)
-                    if (mx >= 12 && mx < 52 && my >= btnY && my < btnY + 40) {
-                        prevTrack();
+                    ControlLayout lay = ControlLayout::compute(winW, winH);
+                    const int btnY = lay.btnY, bs = lay.btnSize;
+                    bool hitControl = false;
+                    // Prev
+                    if (mx >= lay.prevX && mx < lay.prevX + bs && my >= btnY && my < btnY + bs) {
+                        prevTrack(); hitControl = true;
                     }
-                    // Play/Pause (64, btnY, 40x40)
-                    else if (mx >= 64 && mx < 104 && my >= btnY && my < btnY + 40) {
-                        player.togglePause();
+                    // Play/Pause
+                    else if (mx >= lay.playX && mx < lay.playX + bs && my >= btnY && my < btnY + bs) {
+                        player.togglePause(); hitControl = true;
                     }
-                    // Next (116, btnY, 40x40)
-                    else if (mx >= 116 && mx < 156 && my >= btnY && my < btnY + 40) {
-                        nextTrack();
+                    // Next
+                    else if (mx >= lay.nextX && mx < lay.nextX + bs && my >= btnY && my < btnY + bs) {
+                        nextTrack(); hitControl = true;
                     }
-                    // Play mode (168, btnY, 40x40)
-                    else if (mx >= 168 && mx < 208 && my >= btnY && my < btnY + 40) {
-                        cyclePlayMode();
+                    // Play mode
+                    else if (mx >= lay.modeX && mx < lay.modeX + bs && my >= btnY && my < btnY + bs) {
+                        cyclePlayMode(); hitControl = true;
                     }
-                    // Speed (220, btnY, 40x40)
-                    else if (mx >= 220 && mx < 260 && my >= btnY && my < btnY + 40) {
-                        cycleSpeed(1);
+                    // Speed
+                    else if (mx >= lay.speedX && mx < lay.speedX + bs && my >= btnY && my < btnY + bs) {
+                        cycleSpeed(1); hitControl = true;
                     }
-                    // Volume button (winW-104, btnY, 40x40) + popup area
-                    else if (mx >= winW - 104 && mx < winW - 64 && my >= btnY && my < btnY + 40) {
-                        // click toggles mute; drag handled via popup
+                    // Volume button (click toggles mute; drag handled via popup)
+                    else if (mx >= lay.volX && mx < lay.volX + bs && my >= btnY && my < btnY + bs) {
                         if (!draggingVolume) player.toggleMute();
                         volHideAt = SDL_GetTicks() + 2000;
+                        hitControl = true;
                     }
-                    // Fullscreen button (winW-52, btnY, 40x40)
-                    else if (mx >= winW - 52 && mx < winW - 12 && my >= btnY && my < btnY + 40) {
+                    // Fullscreen button
+                    else if (mx >= lay.fsX && mx < lay.fsX + bs && my >= btnY && my < btnY + bs) {
                         fullscreen = !fullscreen;
                         SDL_SetWindowFullscreen(win,
                             fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+                        hitControl = true;
                     }
                     // Volume popup drag (above vol button)
-                    const int ph = 90, py = barY - ph - 12, vx = winW - 104 + 20 - 3;
+                    const int ph = 90, py = lay.barY - ph - 12, vx = lay.volX + bs / 2 - 3;
                     if (mx >= vx && mx < vx + 6 && my >= py && my < py + ph) {
                         draggingVolume = true;
                         float v = 1.0f - (float)(my - py - 6) / (ph - 12);
                         if (v < 0) v = 0; if (v > 1) v = 1;
                         player.setVolume(v == 0 ? 0.0001f : v);
+                        hitControl = true;
                     }
-                    // Progress bar click-to-seek
-                    const int progX = 284, progY = barY + 29;
-                    const int progW = (winW - 52) - progX - 24 - 96;
-                    if (mx >= progX && mx < progX + progW && my >= progY - 6 && my < progY + 12) {
-                        float pct = (float)(mx - progX) / progW;
+                    // Progress bar click-to-seek (full-width bottom bar)
+                    if (mx >= lay.progX && mx < lay.progX + lay.progW &&
+                        my >= lay.progY - 10 && my < lay.progY + 12) {
+                        float pct = (float)(mx - lay.progX) / lay.progW;
                         if (pct < 0) pct = 0; if (pct > 1) pct = 1;
                         player.seek(pct * player.duration());
                         draggingProgress = true;
+                        hitControl = true;
                     }
-                }
-                // Double-click for fullscreen
-                if (e.button.clicks == 2) {
-                    fullscreen = !fullscreen;
-                    SDL_SetWindowFullscreen(win,
-                        fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+                    // Double-click for fullscreen only outside controls
+                    if (e.button.clicks == 2 && !hitControl) {
+                        fullscreen = !fullscreen;
+                        SDL_SetWindowFullscreen(win,
+                            fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+                    }
                 }
                 break;
             case SDL_MOUSEBUTTONUP:
