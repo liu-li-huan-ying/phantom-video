@@ -155,7 +155,7 @@
 - 任务：S/L 快捷键控制播放速度（0.5x / 0.75x / 1.0x / 1.25x / 1.5x / 2.0x），OSD 显示倍速。
 - 计划：Player 增加 `m_speed` 成员；视频帧调度按 `target = base + (pts - base) / speed` 伸缩；音频正常播放速度（或 SWR 变速）。
 
-### 阶段 M11：现代化 UI 外观 ✅ 进行中 (v0.1)
+### 阶段 M11：现代化 UI 外观 ✅ 完成 (v0.2)
 
 - 任务：提升播放器外观可用性——暗色主题、悬浮控制栏、鼠标悬移显示/隐藏控件、点击交互。
 - 实现：
@@ -166,7 +166,8 @@
   - 进度条：6px 轨道 + 蓝色填充 (`#4D90FF`)
   - 鼠标悬移 500ms 无活动 → 控件栏自动隐藏
   - **鼠标点击支持**: Prev/Play-Pause/Next/Volume-mute/Fullscreen 按钮 + 进度条点击跳转 + 双击全屏 (clicks==2)
-  - main.cpp：SDL_MOUSEMOTION/MOUSEBUTTONDOWN 事件传递给 VideoRenderer
+  - **滑块拖动**: 进度条按下→拖动实时 seek→松开 (MOUSEMOTION 期间持续 seek)
+  - main.cpp：SDL_MOUSEMOTION/MOUSEBUTTONDOWN/UP 事件传递给 VideoRenderer
 - 验证：构建成功，smoketest 运行 4 秒无崩溃 ✓
-- 遗留：控件栏图标仍为几何图形绘制 (未来可改为位图纹理)；缺少滑块拖动 (只有点击跳转)
-- 遗留：SDL 渲染默认白底 → 改为深灰 `#181818` 背景；字体改为更清晰的位图或 FreeType 加载。
+- 提交：0907e6e（v0.1 基础控件栏）、55c0293（按钮布局+点击+双击全屏）、后续（滑块拖动）
+- 遗留：控件栏图标仍为几何图形绘制 (未来可改为位图纹理)

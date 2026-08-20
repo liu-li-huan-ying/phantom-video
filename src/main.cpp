@@ -105,6 +105,7 @@ auto args = utf8Args();
     bool running = true;
     bool fullscreen = false;
     Uint32 volHideAt = 0;
+    bool draggingProgress = false;
 
     auto nextTrack = [&]() {
         if (playlist.next()) openCurrent();
@@ -132,6 +133,13 @@ auto args = utf8Args();
                 {
                     int mx = e.motion.x, my = e.motion.y;
                     vrender.onMouseMove(mx, my);
+                    if (draggingProgress) {
+                        int winW = 0;
+                        SDL_GetWindowSize(win, &winW, nullptr);
+                        float pct = (float)(mx - 100) / (winW - 120);
+                        if (pct < 0) pct = 0; if (pct > 1) pct = 1;
+                        player.seek(pct * player.duration());
+                    }
                 }
                 break;
             case SDL_MOUSEBUTTONDOWN:
@@ -170,6 +178,7 @@ auto args = utf8Args();
                         float pct = (float)(mx - 100) / (winW - 120);
                         if (pct < 0) pct = 0; if (pct > 1) pct = 1;
                         player.seek(pct * player.duration());
+                        draggingProgress = true;
                     }
                 }
                 // Double-click for fullscreen
@@ -178,6 +187,9 @@ auto args = utf8Args();
                     SDL_SetWindowFullscreen(win,
                         fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
                 }
+                break;
+            case SDL_MOUSEBUTTONUP:
+                draggingProgress = false;
                 break;
             case SDL_KEYDOWN:
                 switch (e.key.keysym.sym) {
