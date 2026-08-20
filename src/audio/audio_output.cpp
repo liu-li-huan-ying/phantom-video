@@ -13,7 +13,6 @@ AudioOutput::~AudioOutput() {
         SDL_CloseAudioDevice(dev_);
     }
     if (swr_) swr_free(&swr_);
-    if (mixTemp_) SDL_free(mixTemp_);
 }
 
 bool AudioOutput::open(const AVCodecParameters* par, double ptsScale) {
@@ -30,8 +29,6 @@ bool AudioOutput::open(const AVCodecParameters* par, double ptsScale) {
     if (!dev_) return false;
 
     bytesPerSec_ = (double)spec_.freq * spec_.channels * 2;
-    mixTemp_ = (Uint8*)SDL_malloc(spec_.size > 0 ? spec_.size : 8192);
-    if (!mixTemp_) return false;
 
     AVChannelLayout outLayout;
     av_channel_layout_default(&outLayout, spec_.channels);
@@ -145,7 +142,16 @@ void AudioOutput::fill(Uint8* stream, int len) {
 void AudioOutput::applyVolume(Uint8* stream, int len) {
     float v = volume_.load(std::memory_order_relaxed);
     if (v >= 1.0f) return;
-    int vol = (int)(v * 128.0f);
-    SDL_memcpy(mixTemp_, stream, len);
-    SDL_MixAudioFormat(stream, mixTemp_, AUDIO_S16SYS, len, vol);
+    if (v <= 0.0f) {
+        SDL_memset(stream, 0, len);
+        return;
+    }
+    int16_t* p = (int16_t*)stream;
+    int n = len / 2;
+    for (int i = 0; i < n; ++i) {
+        int32_t s = (int32_t)(p[i] * v);
+        if (s > 32767) s = 32767;
+        if (s < -32768) s = -32768;
+        p[i] = (int16_t)s;
+    }
 }

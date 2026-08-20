@@ -46,5 +46,4 @@ private:
     double writeHead_ = -1.0;
 
     std::atomic<float> volume_{ 0.8f };
-    Uint8* mixTemp_ = nullptr;
 };
