@@ -51,7 +51,19 @@ bool AudioOutput::open(const AVCodecParameters* par, double ptsScale) {
 
 bool AudioOutput::push(const FramePtr& frame) {
     if (!ok_) return false;
+    AudioChunk chunk;
+    if (!convert(frame, chunk)) return true;
+    return queue_.push(std::move(chunk));
+}
 
+bool AudioOutput::tryPush(const FramePtr& frame) {
+    if (!ok_) return false;
+    AudioChunk chunk;
+    if (!convert(frame, chunk)) return true;
+    return queue_.tryPush(std::move(chunk));
+}
+
+bool AudioOutput::convert(const FramePtr& frame, AudioChunk& chunk) {
     int outChannels = spec_.channels;
     int outSamples = (int)av_rescale_rnd(
         swr_get_delay(swr_, frame->sample_rate) + frame->nb_samples,
@@ -66,7 +78,6 @@ bool AudioOutput::push(const FramePtr& frame) {
                                 (const uint8_t**)frame->extended_data,
                                 frame->nb_samples);
 
-    AudioChunk chunk;
     if (converted > 0) {
         int bytes = av_samples_get_buffer_size(nullptr, outChannels, converted,
                                                AV_SAMPLE_FMT_S16, 1);
@@ -75,8 +86,7 @@ bool AudioOutput::push(const FramePtr& frame) {
         if (chunk.pts < 0.0) chunk.pts = 0.0;
     }
     av_freep(&outBuf);
-    if (chunk.data.empty()) return true;
-    return queue_.push(std::move(chunk));
+    return !chunk.data.empty();
 }
 
 void AudioOutput::closeQueue() { queue_.close(); }
@@ -94,6 +104,11 @@ void AudioOutput::resumeDevice() { SDL_PauseAudioDevice(dev_, 0); }
 void AudioOutput::resetClock() {
     std::lock_guard<std::mutex> lock(clockMutex_);
     writeHead_ = -1.0;
+}
+
+void AudioOutput::setClock(double t) {
+    std::lock_guard<std::mutex> lock(clockMutex_);
+    writeHead_ = t;
 }
 
 double AudioOutput::clock() const {

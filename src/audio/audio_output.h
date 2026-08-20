@@ -17,6 +17,7 @@ public:
     ~AudioOutput();
     bool open(const AVCodecParameters* par, double ptsScale);
     bool push(const FramePtr& frame);
+    bool tryPush(const FramePtr& frame);
     void closeQueue();
     void clearQueue();
     void pauseDevice();
@@ -24,12 +25,14 @@ public:
     void setVolume(float v) { volume_.store(v, std::memory_order_relaxed); }
     float volume() const { return volume_.load(std::memory_order_relaxed); }
     void resetClock();
+    void setClock(double t);
     double clock() const;
 
 private:
     static void SDLCALL sdlCallback(void* userdata, Uint8* stream, int len);
     void fill(Uint8* stream, int len);
     void applyVolume(Uint8* stream, int len);
+    bool convert(const FramePtr& frame, AudioChunk& chunk);
 
     SDL_AudioDeviceID dev_ = 0;
     SDL_AudioSpec spec_{};

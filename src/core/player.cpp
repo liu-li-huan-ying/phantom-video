@@ -180,6 +180,11 @@ void Player::requestSeek(double t) {
     seekTarget_ = std::clamp(t, 0.0, duration_ > 0.0 ? duration_ : t);
 }
 
+bool Player::seekRequested() {
+    std::lock_guard<std::mutex> lock(seekMutex_);
+    return seekPending_;
+}
+
 void Player::setVolume(float v) {
     v = std::clamp(v, 0.0f, 1.0f);
     volume_.store(v);
@@ -265,6 +270,17 @@ FramePtr Player::pullFrame() {
     }
 
     double pts = framePts(f);
+    if (audioWait_.load()) {
+        // seek 后立即出首帧并恢复音频，避免 delay 死锁
+        videoQueue_.pop(f);
+        lastFrame_ = f;
+        videoBasePts_ = pts;
+        videoBaseTicks_ = SDL_GetPerformanceCounter();
+        playing_ = !paused_.load();
+        if (audioWait_.exchange(false) && audio_ && !paused_.load())
+            audio_->resumeDevice();
+        return f;
+    }
     if (pts - target > 0.05) {
         double remain = (pts - target) / spd;
         int delay = std::min((int)(remain * 1000.0), 50);
@@ -282,6 +298,10 @@ FramePtr Player::pullFrame() {
     videoBaseTicks_ = SDL_GetPerformanceCounter();
     playing_ = !paused_.load();
 
+    // seek: audio was paused + clock set to target; resume once video catches up
+    if (audioWait_.exchange(false) && audio_ && !paused_.load())
+        audio_->resumeDevice();
+
     while (videoQueue_.peek(f) && f) {
         if (framePts(f) <= c - 0.05)
             videoQueue_.pop(f);
@@ -293,8 +313,16 @@ FramePtr Player::pullFrame() {
 
 void Player::doSeek(double t) {
     if (!demuxer_) return;
-    if (audio_) audio_->clearQueue();
+    if (audio_) {
+        audio_->clearQueue();
+        audio_->pauseDevice();
+        audio_->setClock(t);
+    }
     videoQueue_.clear();
+    videoClockStarted_ = true;
+    videoBasePts_ = t;
+    videoBaseTicks_ = SDL_GetPerformanceCounter();
+    audioWait_ = true;
     demuxer_->seek(t);
     if (videoDecoder_) videoDecoder_->flushBuffers();
     if (audioDecoder_) audioDecoder_->flushBuffers();
@@ -323,14 +351,24 @@ void Player::decodeLoop() {
         if (pkt->stream_index == demuxer_->videoIndex()) {
             if (!videoDecoder_ || !videoDecoder_->send(pkt.get())) continue;
             while (FramePtr f = videoDecoder_->receive()) {
+                if (seekRequested() || stop_.load()) break;
                 if (framePts(f) < dropUntil_.load()) continue;
-                if (!videoQueue_.push(f)) return;
+                while (!videoQueue_.tryPush(f)) {
+                    if (seekRequested() || stop_.load()) break;
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                }
+                if (seekRequested() || stop_.load()) break;
             }
         } else if (pkt->stream_index == demuxer_->audioIndex()) {
             if (!audioDecoder_ || !audioDecoder_->send(pkt.get())) continue;
             while (FramePtr f = audioDecoder_->receive()) {
+                if (seekRequested() || stop_.load()) break;
                 if (framePts(f) < dropUntil_.load()) continue;
-                if (!audio_ || !audio_->push(f)) return;
+                while (!audio_ || !audio_->tryPush(f)) {
+                    if (seekRequested() || stop_.load()) break;
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                }
+                if (seekRequested() || stop_.load()) break;
             }
         } else if (subtitleIndex_ >= 0 && pkt->stream_index == subtitleIndex_ &&
                    !subtitleLoaded_.load()) {

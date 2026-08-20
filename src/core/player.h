@@ -47,6 +47,7 @@ private:
     void decodeLoop();
     void doSeek(double t);
     void requestSeek(double t);
+    bool seekRequested();
     void setPaused(bool p);
     void reopenFromStart();
     double videoClock() const;
@@ -70,6 +71,7 @@ private:
     std::atomic<float> volume_{ 0.8f };
     std::atomic<bool> muted_{ false };
     std::atomic<float> speed_{ 1.0f };
+    std::atomic<bool> audioWait_{ false };
 
     std::mutex seekMutex_;
     bool seekPending_ = false;

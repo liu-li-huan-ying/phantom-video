@@ -252,3 +252,46 @@
   - 配置：vplayer.ini 新增 playmode=（0=Single 1=Loop 2=Shuffle，默认 1），退出保存
   - 踩坑：set() 曾丢失 idx_ 重置（新对象 idx_=-1 时 next() 永假 + current() 越界 order_[-1]），-O0 侥幸运行、-O2 崩溃 0xC0000005——测试驱动暴露；已修复并加单测
   - 验证：playlist_test 24/24 PASS（testdata 13 文件扫描排序、索引定位、三种模式边界/环绕/保持当前、rescan 位置保持）；GUI 冒烟 4.mp4 6s 无崩溃；配置读写 last=/playmode= 验证通过
+
+### 阶段 M13：长视频 seek 性能 + 大型目录承压 🔄 进行中（2026-08-20）
+
+- **用户反馈**：1 分钟以上视频拖动进度条卡顿，拖完后声音恢复快但视频卡好几秒
+
+- **用户测试场景**：1-2GB / 2-4 小时长视频；数千个视频的文件夹（可靠性与承压测试）
+
+- **根因分析（已定位）**：
+  1. seek 后解码线程从目标前最近关键帧开始解码，视频要解到 dropUntil 才出帧（大 GOP 视频解码追赶需数秒）
+  2. 音频 dropUntil 丢弃后立即有数据（AAC 解码快）→ 音频先播，writeHead_ 跳到目标时间
+  3. 视频队列空 → pullFrame 返回 lastFrame_（旧画面冻结），视频解码追赶期间画面卡住，音频却先走了 → A/V 撕裂
+  4. seek 后音频时钟未设为目标时间，pullFrame 的 target 是旧时钟，视频首帧 pts-target 差值大 → delay 等待（加重卡顿）
+
+- **修复方案**：
+  1. AudioOutput 新增 setClock(t)（直接设 writeHead_ = t，带锁）
+  2. doSeek：audio pauseDevice() + setClock(t)——音频暂停等待视频，时钟指向目标时间，pullFrame target 立即正确
+  3. pullFrame 拿到 seek 后首帧（pts≈t）时 resumeDevice() 恢复音频 → A/V 同步同时启动，画面不再卡住等音频
+  4. 纯视频文件走 videoClock 路径，seek 后首帧即出，无此问题（顺带确认）
+
+- **验证计划**：
+  1. ffmpeg 生成 2 小时长视频（低码率）测 seek 精度与恢复时间
+  2. 大 GOP（-g 300）视频模拟稀疏关键帧，测视频追赶耗时
+  3. 3000+ 文件目录测 scanDirectory 性能与播放器启动
+  4. seek 循环压力（随机位置连续 seek 100 次无崩溃）
+
+#### M13 进度更新（2026-08-20，测试阶段完成）
+
+- **修复 1：seek 请求被饿死的死锁（根因）**：decodeLoop 用阻塞式 `push()` 填满 8 帧队列后永远卡在 push，到不了循环顶部检查 `seekPending_` → seek 永不执行。
+  - 修复：BlockingQueue 新增 `tryPush()`；decodeLoop 的视频/音频 receive 循环改 1ms 轮询式 tryPush，且每帧检查 `seekRequested() || stop_`
+- **修复 2：seek 后 audioWait 死锁**：seek 后音频时钟设为目标、设备暂停，pullFrame 用冻结时钟做 delay 判断 → 视频帧 pts 恒大于 target → 永不 pop → 队列满 → 解码线程饿死。
+  - 修复：`audioWait_` 期间 pullFrame 对首帧立即 pop（不 delay）并恢复音频
+- **修复 3：close() 死锁（顺带发现）**：tryPush 轮询循环不检查 stop_，close() 关队列后 tryPush 恒失败 → 死循环 → join() 卡死。修复：轮询循环加 `stop_` 检查
+
+- **用户素材验证（不再构造数据）**：
+  - `F:\影视资料\鉴赏` 3.5h 长视频（12635s，P2破解魁真咲塾28小时完全痴.mp4）：10 次随机 seek 全部 8~302ms 内时钟+帧到位，画面无卡顿
+  - `F:\影视资料\X` 3198 个视频（480p~4K，最大 1.4GB/81 分钟）：scanDirectory 134~166ms；1.38GB 文件 5 次 seek 0~20ms
+  - 13 种真实格式 testdata 回归全 PASS；播放+close 冒烟通过（frames=60 clock=1.4 closed 正常退出）
+  - 备注：命令行直接传中文路径会因 PowerShell→argv 编码损坏导致 std::filesystem 抛 conversion_error 崩溃（测试环境问题，非播放器 bug；真实播放器路径来自宽字符 API）
+
+- **结论**：M13 核心目标达成——长视频 seek 卡顿根因（seek 请求被饿死+音频时钟撕裂）已修复，数千文件目录承压通过。
+- **待办**：真机体验验证（拖动进度条手感）、X 目录全量播放巡检（可选）、文档+README 收尾、git 提交
+
+- **UI 冒烟确认（真机路径）**：鉴赏目录真实长视频 pre-seek 210 帧/clock 2.9s → seek 50% 后 68 帧/clock 5009.9s，画面持续出帧不冻结，时钟正确跳到目标，close 正常退出。M13 完成。

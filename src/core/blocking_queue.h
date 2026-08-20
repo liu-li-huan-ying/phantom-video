@@ -27,6 +27,17 @@ public:
         return true;
     }
 
+    bool tryPush(T item) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        size_t sz = sizeOf_(item);
+        if (closed_) return false;
+        if (total_ + sz > max_) return false;
+        queue_.push_back(std::move(item));
+        total_ += sz;
+        notEmpty_.notify_one();
+        return true;
+    }
+
     bool pop(T& out) {
         std::unique_lock<std::mutex> lock(mutex_);
         notEmpty_.wait(lock, [&] { return closed_ || !queue_.empty(); });
