@@ -340,6 +340,15 @@
   - main.cpp 集成 CustomTitlebar 实例，文件打开时同步更新标题
 - **验证**：cmake 构建成功，vplayer.exe 启动 5 秒正常退出无崩溃
 - **结论**：M14 阶段 B 完成，自定义标题栏可拖动，按钮 hover 高亮正常
+
+### M14 进度更新（2026-08-21）— 阶段 C：自定义背景 + 主题绘制
+- **改动**：
+  - video_renderer.h 新增 `drawBackground()` 声明
+  - video_renderer.cpp 实现 `drawBackground()`：深色主题背景 (18,18,18)，圆角半径 8px，使用 `fillRoundedRect` 绘制
+  - `render()` 方法：在 SDL_RenderClear 后、SDL_RenderCopy 前调用 drawBackground()，视频画面覆盖在深色背景上
+  - `clear()` 方法：无视频时也绘制深色背景（不再纯黑）
+- **验证**：cmake 构建成功，vplayer.exe 启动 5 秒正常退出无崩溃
+- **结论**：M14 阶段 C 完成，深色主题圆角背景已启用
 ### 阶段 M15：音量标准化 + 关键帧预览（已合并自原 M14）
 - 任务：EBU R128 音量标准化实现 + 进度条关键帧预览功能
 - 内容已合并自原 M14 阶段：

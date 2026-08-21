@@ -83,6 +83,7 @@ private:
     void drawControls(const RenderStats& stats);
     void drawSubtitle(const RenderStats& stats);
     void drawToast();
+    void drawBackground();  // M14-C: 深色主题圆角背景
     void destroySubtitleTexture();
     void* subtitleTexture_ = nullptr;  // SDL_Texture*
     int subTexW_ = 0;

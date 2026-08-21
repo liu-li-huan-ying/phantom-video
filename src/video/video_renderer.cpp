@@ -724,6 +724,14 @@ void VideoRenderer::drawControls(const RenderStats& stats) {
     }
 }
 
+void VideoRenderer::drawBackground() {
+    if (!renderer_) return;
+    int w = 0, h = 0;
+    SDL_GetWindowSize(window_, &w, &h);
+    // 深色主题背景 (18,18,18)，圆角半径 8px
+    fillRoundedRect(renderer_, 0, 0, w, h, 8, 18, 18, 18, 255);
+}
+
 void VideoRenderer::render(const AVFrame* frame, const RenderStats& stats) {
     if (!renderer_ || !frame) return;
 
@@ -794,6 +802,7 @@ void VideoRenderer::render(const AVFrame* frame, const RenderStats& stats) {
 
     SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255);
     SDL_RenderClear(renderer_);
+    drawBackground();
     SDL_RenderCopy(renderer_, texture_, nullptr, &dst);
     drawSubtitle(stats);
     drawToast();
@@ -805,5 +814,6 @@ void VideoRenderer::clear() {
     if (renderer_) {
         SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255);
         SDL_RenderClear(renderer_);
+        drawBackground();
     }
 }
