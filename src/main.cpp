@@ -481,6 +481,13 @@ auto args = utf8Args();
                 case SDLK_l:
                     cycleSpeed(1);
                     break;
+                case SDLK_a: {
+                    bool on = !player.audio().normalization();
+                    player.audio().setNormalization(on);
+                    vrender.showToast(on ? "音量标准化: 开启" : "音量标准化: 关闭");
+                    volHideAt = SDL_GetTicks() + 2000;
+                    break;
+                }
                 case SDLK_ESCAPE:
                 case SDLK_q:
                     running = false;

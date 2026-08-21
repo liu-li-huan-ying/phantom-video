@@ -40,6 +40,7 @@ public:
     bool loadExternalSubtitle(const std::string& path);
     std::string subtitleText(double t) const;
     bool hasSubtitle() const { return subtitleLoaded_ || subtitleIndex_ >= 0; }
+    AudioOutput& audio() { return *audio_; }
 
     FramePtr pullFrame();
 

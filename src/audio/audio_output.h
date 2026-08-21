@@ -25,6 +25,9 @@ public:
     void resumeDevice();
     void setVolume(float v) { volume_.store(v, std::memory_order_relaxed); }
     float volume() const { return volume_.load(std::memory_order_relaxed); }
+    void setNormalization(bool on) { normalization_.store(on, std::memory_order_relaxed); }
+    bool normalization() const { return normalization_.load(std::memory_order_relaxed); }
+    float normalizationGain() const { return normGain_.load(std::memory_order_relaxed); }
     void setSpeed(float spd);
     void resetClock();
     void setClock(double t);
@@ -56,4 +59,8 @@ private:
     std::atomic<float> volume_{ 0.8f };
     std::atomic<float> speed_{ 1.0f };
     std::atomic<bool> clearPending_{ false };
+    std::atomic<bool> normalization_{ false };
+    std::atomic<float> normGain_{ 1.0f };
+    float peakTracker_ = 0.0f;       // 峰值追踪器（滑动最大值）
+    Uint32 peakDecayTime_ = 0;       // 峰值衰减计时
 };

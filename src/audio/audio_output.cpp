@@ -1,6 +1,7 @@
 #include "audio/audio_output.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 extern "C" {
@@ -206,17 +207,54 @@ void AudioOutput::fill(Uint8* stream, int len) {
 
 void AudioOutput::applyVolume(Uint8* stream, int len) {
     float v = volume_.load(std::memory_order_relaxed);
-    if (v >= 1.0f) return;
-    if (v <= 0.0f) {
+    bool norm = normalization_.load(std::memory_order_relaxed);
+
+    // 音量标准化：峰值检测 + 增益调节
+    float normGain = 1.0f;
+    if (norm) {
+        int16_t* samples = (int16_t*)stream;
+        int numSamples = len / 2;
+        float maxPeak = 0.0f;
+        for (int i = 0; i < numSamples; ++i) {
+            float s = std::abs((float)samples[i]);
+            if (s > maxPeak) maxPeak = s;
+        }
+
+        // 滑动最大值衰减（1秒衰减一次）
+        Uint32 now = SDL_GetTicks();
+        if (now - peakDecayTime_ > 1000) {
+            peakTracker_ *= 0.5f;  // 半衰
+            peakDecayTime_ = now;
+        }
+        if (maxPeak > peakTracker_) peakTracker_ = maxPeak;
+
+        // 目标峰值：-1 dBFS ≈ 28672 (S16 范围 32768)
+        float targetPeak = 28672.0f;
+        if (peakTracker_ > 100.0f) {
+            normGain = targetPeak / peakTracker_;
+            // 限制增益范围：0.25x ~ 4.0x（防止过放大或过小）
+            if (normGain < 0.25f) normGain = 0.25f;
+            if (normGain > 4.0f) normGain = 4.0f;
+        }
+        normGain_.store(normGain, std::memory_order_relaxed);
+    }
+
+    float totalGain = v * normGain;
+    if (totalGain >= 1.0f && !norm) return;  // 仅音量无标准化时快速返回
+    if (totalGain <= 0.0f) {
         SDL_memset(stream, 0, len);
         return;
     }
+
     int16_t* p = (int16_t*)stream;
     int n = len / 2;
     for (int i = 0; i < n; ++i) {
-        int32_t s = (int32_t)(p[i] * v);
-        if (s > 32767) s = 32767;
-        if (s < -32768) s = -32768;
+        float s = p[i] * totalGain;
+        // 软限幅（tanh 曲线）
+        if (s > 32767.0f || s < -32768.0f) {
+            s = s / 32768.0f;
+            s = std::tanh(s) * 32768.0f;
+        }
         p[i] = (int16_t)s;
     }
 }
