@@ -54,15 +54,37 @@ bool ThumbnailExtractor::getFrame(double seconds, uint8_t** outPixels, int& outW
     *outPixels = nullptr;
     outW = outH = 0;
 
-    // Seek 到目标时间（用流的 time_base，不用 AV_TIME_BASE）
+    // Seek 到目标时间 — 多策略兼容不同格式
     AVStream* vs = ctx_->streams[videoStreamIdx_];
-    double durationSec = (double)vs->duration * av_q2d(vs->time_base);
+
+    // 边界保护
+    double durationSec = 0;
+    if (vs->duration != AV_NOPTS_VALUE && vs->duration > 0)
+        durationSec = vs->duration * av_q2d(vs->time_base);
+    else if (ctx_->duration != AV_NOPTS_VALUE)
+        durationSec = (double)ctx_->duration / AV_TIME_BASE;
     if (seconds < 0) seconds = 0;
     if (durationSec > 0 && seconds > durationSec) seconds = durationSec * 0.95;
 
-    // 正确转换：seconds → 流 time_base 的时间戳
-    int64_t ts = (int64_t)(seconds / av_q2d(vs->time_base));
-    av_seek_frame(ctx_, videoStreamIdx_, ts, AVSEEK_FLAG_BACKWARD);
+    // 策略1：用流 time_base seek
+    // 策略2：用 AV_TIME_BASE seek（某些格式如 FLV/SWF 更可靠）
+    // 策略3：用 avformat_seek_file 带 min_ts/max_ts 精确定位
+    int seekOk = -1;
+
+    // 先尝试 avformat_seek_file（最精确，带范围约束）
+    int64_t targetTs = (int64_t)(seconds / av_q2d(vs->time_base));
+    int64_t minTs = targetTs - (int64_t)(1.0 / av_q2d(vs->time_base));  // 目标前 1 秒
+    int64_t maxTs = targetTs + (int64_t)(1.0 / av_q2d(vs->time_base));  // 目标后 1 秒
+    seekOk = avformat_seek_file(ctx_, videoStreamIdx_, minTs, targetTs, maxTs, 0);
+
+    // 回退：av_seek_frame + 流 time_base
+    if (seekOk < 0)
+        seekOk = av_seek_frame(ctx_, videoStreamIdx_, targetTs, AVSEEK_FLAG_BACKWARD);
+
+    // 回退：av_seek_frame + AV_TIME_BASE
+    if (seekOk < 0)
+        seekOk = av_seek_frame(ctx_, -1, (int64_t)(seconds * AV_TIME_BASE), AVSEEK_FLAG_BACKWARD);
+
     avcodec_flush_buffers(codecCtx_);
 
     // 读包 + 解码
