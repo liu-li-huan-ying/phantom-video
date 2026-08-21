@@ -49,6 +49,8 @@ private:
     int scrollOffset_ = 0;
     int hoverIndex_ = -1;
     bool toggleHover_ = false;
+    bool closeHover_ = false;
+    int mx_ = 0, my_ = 0;  // 鼠标位置（供 draw 关闭按钮 hover 检测）
     int clickedIdx_ = -1;
     bool dragStarted_ = false;
 

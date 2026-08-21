@@ -97,21 +97,46 @@ void PlaylistPanel::draw(int currentIndex, int winW, int winH) {
     else if (!open_ && openAnim_ > 0.0f)
         openAnim_ = std::max(0.0f, openAnim_ - 0.10f);
 
-    // 切换按钮：始终绘制在窗口右边缘（全高，方便点击）
-    SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
-    SDL_SetRenderDrawColor(renderer_,
-        toggleHover_ ? 100 : 50, toggleHover_ ? 100 : 50,
-        toggleHover_ ? 100 : 50, toggleHover_ ? 180 : 100);
-    SDL_Rect toggleBtn{ winW - kEdgeW, 0, kEdgeW, winH };
-    SDL_RenderFillRect(renderer_, &toggleBtn);
+    // 面板关闭按钮（面板打开时绘制在左边界）
+    if (open_ && openAnim_ > 0.5f) {
+        int pw = (int)(baseWidth_ * openAnim_);
+        int panelX = winW - pw;
+        // 关闭按钮：面板左上角 X 图标
+        SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+        bool closeHover = (mx_ >= panelX && mx_ < panelX + 28 && my_ >= titleH && my_ < titleH + kHeaderH);
+        if (closeHover) {
+            SDL_SetRenderDrawColor(renderer_, 80, 40, 40, 200);
+            SDL_Rect hoverBg{ panelX, titleH, 28, kHeaderH };
+            SDL_RenderFillRect(renderer_, &hoverBg);
+        }
+        // X 图标
+        SDL_SetRenderDrawColor(renderer_, closeHover ? 255 : 160, closeHover ? 80 : 80, closeHover ? 80 : 80, 220);
+        int cx = panelX + 14;
+        int cy = titleH + kHeaderH / 2;
+        for (int d = -5; d <= 5; ++d) {
+            SDL_RenderDrawLine(renderer_, cx + d, cy + d, cx + d + 1, cy + d + 1);
+            SDL_RenderDrawLine(renderer_, cx + d, cy - d, cx + d + 1, cy - d - 1);
+        }
+        closeHover_ = closeHover;
+    } else {
+        closeHover_ = false;
+    }
 
-    // 按钮上的箭头指示
-    int cx = winW - kEdgeW / 2;
-    int cy = (titleH + barY) / 2;  // 在面板区域内居中
-    SDL_SetRenderDrawColor(renderer_, 200, 200, 200, toggleHover_ ? 220 : 140);
-    for (int i = -3; i <= 3; ++i) {
-        int dx = open_ ? -1 : 1;
-        SDL_RenderDrawPoint(renderer_, cx + dx * abs(i), cy + i);
+    // 切换按钮：面板关闭时绘制在窗口右边缘
+    if (!open_) {
+        SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(renderer_,
+            toggleHover_ ? 100 : 50, toggleHover_ ? 100 : 50,
+            toggleHover_ ? 100 : 50, toggleHover_ ? 180 : 100);
+        SDL_Rect toggleBtn{ winW - kEdgeW, 0, kEdgeW, winH };
+        SDL_RenderFillRect(renderer_, &toggleBtn);
+
+        int cx = winW - kEdgeW / 2;
+        int cy = (titleH + barY) / 2;
+        SDL_SetRenderDrawColor(renderer_, 200, 200, 200, toggleHover_ ? 220 : 140);
+        for (int i = -3; i <= 3; ++i) {
+            SDL_RenderDrawPoint(renderer_, cx + abs(i), cy + i);
+        }
     }
 
     if (openAnim_ < 0.01f) return;
@@ -238,6 +263,7 @@ void PlaylistPanel::drawItem(int baseX, int y, int index, const std::string& fil
 }
 
 bool PlaylistPanel::handleMouseMove(int mx, int my, int winW, int winH) {
+    mx_ = mx; my_ = my;
     const int titleH = 32;
     const int barH = 64;
     const int progH = 9;
@@ -245,12 +271,28 @@ bool PlaylistPanel::handleMouseMove(int mx, int my, int winW, int winH) {
     int panelTop = titleH;
     int panelBot = barY;
 
-    // 切换按钮 hover（始终检测，无论面板开关状态）
-    toggleHover_ = (mx >= winW - kEdgeW && mx < winW && my >= 0 && my < winH);
+    // 面板关闭时：右边缘切换按钮 hover
+    if (!open_) {
+        toggleHover_ = (mx >= winW - kEdgeW && mx < winW && my >= 0 && my < winH);
+        if (toggleHover_) {
+            SDL_SetCursor(SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_HAND));
+            return true;
+        }
+        return false;
+    }
 
     int w = width();
     if (w == 0) return false;
     int panelX = winW - w;
+
+    // 面板关闭按钮 hover
+    if (open_ && mx >= panelX && mx < panelX + 28 && my >= panelTop && my < panelTop + kHeaderH) {
+        closeHover_ = true;
+        SDL_SetCursor(SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_HAND));
+        return true;
+    } else {
+        closeHover_ = false;
+    }
 
     // 拖拽调整宽度手柄
     if (open_ && mx >= panelX && mx < panelX + kResizeW && my >= panelTop && my < panelBot) {
@@ -287,34 +329,45 @@ bool PlaylistPanel::handleMouseDown(int mx, int my, int winW, int winH) {
     int panelTop = titleH;
     int panelBot = barY;
 
-    // 切换按钮点击（始终优先检测，无论面板开关状态）
-    if (mx >= winW - kEdgeW && mx < winW && my >= 0 && my < winH) {
+    int w = width();
+
+    // 面板关闭按钮（左边界 X 图标）
+    if (open_ && w > 0) {
+        int panelX = winW - w;
+        if (mx >= panelX && mx < panelX + 28 && my >= panelTop && my < panelTop + kHeaderH) {
+            toggle();
+            return true;
+        }
+    }
+
+    // 面板打开时的拖拽/点击在面板区域内处理
+    if (w > 0) {
+        int panelX = winW - w;
+        // 拖拽调整宽度
+        if (open_ && mx >= panelX && mx < panelX + kResizeW && my >= panelTop && my < panelBot) {
+            resizing_ = true;
+            resizeStartX_ = mx;
+            resizeStartW_ = baseWidth_;
+            return true;
+        }
+        // 列表项点击
+        if (mx >= panelX && mx < panelX + w && my >= panelTop + kHeaderH && my < panelBot) {
+            int idx = (my - panelTop - kHeaderH + scrollOffset_) / kItemH;
+            if (playlist_ && idx >= 0 && idx < (int)playlist_->size()) {
+                clickedIdx_ = idx;
+            }
+            return true;
+        }
+        if (mx >= panelX && my >= panelTop && my < panelBot) return true;
+    }
+
+    // 面板关闭时：右边缘切换按钮
+    if (!open_ && mx >= winW - kEdgeW && mx < winW && my >= 0 && my < winH) {
         toggle();
         return true;
     }
 
-    int w = width();
-    if (w == 0) return false;
-    int panelX = winW - w;
-
-    // 拖拽调整宽度
-    if (open_ && mx >= panelX && mx < panelX + kResizeW && my >= panelTop && my < panelBot) {
-        resizing_ = true;
-        resizeStartX_ = mx;
-        resizeStartW_ = baseWidth_;
-        return true;
-    }
-
-    // 列表项点击
-    if (mx >= panelX && mx < panelX + w && my >= panelTop + kHeaderH && my < panelBot) {
-        int idx = (my - panelTop - kHeaderH + scrollOffset_) / kItemH;
-        if (playlist_ && idx >= 0 && idx < (int)playlist_->size()) {
-            clickedIdx_ = idx;
-        }
-        return true;
-    }
-
-    return mx >= panelX && my >= panelTop && my < panelBot;
+    return false;
 }
 
 bool PlaylistPanel::handleMouseUp(int mx, int my) {

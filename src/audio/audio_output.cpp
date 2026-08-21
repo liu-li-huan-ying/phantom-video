@@ -167,36 +167,11 @@ bool AudioOutput::convert(const FramePtr& frame, AudioChunk& chunk) {
     std::lock_guard<std::mutex> lock(swrMutex_);
     if (!swr_) return false;
 
-    // 确保滤镜图存在
-    if (!filterGraph_) {
-        buildFilterGraph(speed_.load(std::memory_order_relaxed));
-        if (!filterGraph_) return false;
-    }
-
-    // 速度变化时：flush 旧滤镜图剩余样本 → 重建
+    // 速度变化时：重建滤镜图（旧 chunks 在队列中自然播放完毕，无噪点）
     if (speedChanged_.exchange(false)) {
-        // flush 旧滤镜图
-        if (bufferSrcCtx_) {
-            av_buffersrc_add_frame_flags(bufferSrcCtx_, nullptr, AV_BUFFERSRC_FLAG_PUSH);
-            while (true) {
-                int ret = av_buffersink_get_frame(bufferSinkCtx_, filterOutFrame_);
-                if (ret < 0) break;
-                int bytes = av_samples_get_buffer_size(nullptr, spec_.channels,
-                    filterOutFrame_->nb_samples, AV_SAMPLE_FMT_FLT, 1);
-                if (bytes > 0) {
-                    AudioChunk c;
-                    c.data.assign(filterOutFrame_->data[0],
-                                  filterOutFrame_->data[0] + bytes);
-                    c.outRate = spec_.freq;
-                    c.pts = filterOutFrame_->pts == AV_NOPTS_VALUE ? 0.0 :
-                            filterOutFrame_->pts * av_q2d(bufferSinkCtx_->inputs[0]->time_base);
-                    if (c.pts < 0.0) c.pts = 0.0;
-                    queue_.tryPush(std::move(c));
-                }
-                av_frame_unref(filterOutFrame_);
-            }
-        }
-        // 重建滤镜图
+        buildFilterGraph(speed_.load(std::memory_order_relaxed));
+    }
+    if (!filterGraph_) {
         buildFilterGraph(speed_.load(std::memory_order_relaxed));
         if (!filterGraph_) return false;
     }
@@ -208,43 +183,38 @@ bool AudioOutput::convert(const FramePtr& frame, AudioChunk& chunk) {
     if (ret < 0) return false;
 
     // 从滤镜图接收处理后的帧
-    while (true) {
-        ret = av_buffersink_get_frame(bufferSinkCtx_, filterOutFrame_);
-        if (ret < 0) break;
+    ret = av_buffersink_get_frame(bufferSinkCtx_, filterOutFrame_);
+    if (ret < 0) return false;
 
-        // float → S16 转换
-        int nb = filterOutFrame_->nb_samples;
-        int ch = spec_.channels;
-        int bytes = av_samples_get_buffer_size(nullptr, ch, nb, AV_SAMPLE_FMT_FLT, 1);
-        int s16Bytes = av_samples_get_buffer_size(nullptr, ch, nb, AV_SAMPLE_FMT_S16, 1);
+    // float → S16 转换
+    int nb = filterOutFrame_->nb_samples;
+    int ch = spec_.channels;
+    int s16Bytes = av_samples_get_buffer_size(nullptr, ch, nb, AV_SAMPLE_FMT_S16, 1);
 
-        uint8_t* s16Buf = nullptr;
-        if (av_samples_alloc(&s16Buf, nullptr, ch, nb, AV_SAMPLE_FMT_S16, 0) < 0) {
-            av_frame_unref(filterOutFrame_);
-            continue;
-        }
-
-        const float* src = (const float*)filterOutFrame_->data[0];
-        int16_t* dst = (int16_t*)s16Buf;
-        int total = nb * ch;
-        for (int i = 0; i < total; ++i) {
-            float s = src[i] * 32768.0f;
-            s = std::clamp(s, -32768.0f, 32767.0f);
-            dst[i] = (int16_t)s;
-        }
-
-        chunk.data.assign(s16Buf, s16Buf + s16Bytes);
-        chunk.outRate = spec_.freq;
-        chunk.pts = filterOutFrame_->pts == AV_NOPTS_VALUE ? 0.0 :
-                    filterOutFrame_->pts * av_q2d(bufferSinkCtx_->inputs[0]->time_base);
-        if (chunk.pts < 0.0) chunk.pts = 0.0;
-
-        av_freep(&s16Buf);
+    uint8_t* s16Buf = nullptr;
+    if (av_samples_alloc(&s16Buf, nullptr, ch, nb, AV_SAMPLE_FMT_S16, 0) < 0) {
         av_frame_unref(filterOutFrame_);
-        return !chunk.data.empty();
+        return false;
     }
 
-    return false;
+    const float* src = (const float*)filterOutFrame_->data[0];
+    int16_t* dst = (int16_t*)s16Buf;
+    int total = nb * ch;
+    for (int i = 0; i < total; ++i) {
+        float s = src[i] * 32768.0f;
+        s = std::clamp(s, -32768.0f, 32767.0f);
+        dst[i] = (int16_t)s;
+    }
+
+    chunk.data.assign(s16Buf, s16Buf + s16Bytes);
+    chunk.outRate = spec_.freq;
+    chunk.pts = filterOutFrame_->pts == AV_NOPTS_VALUE ? 0.0 :
+                filterOutFrame_->pts * av_q2d(bufferSinkCtx_->inputs[0]->time_base);
+    if (chunk.pts < 0.0) chunk.pts = 0.0;
+
+    av_freep(&s16Buf);
+    av_frame_unref(filterOutFrame_);
+    return !chunk.data.empty();
 }
 
 void AudioOutput::closeQueue() { queue_.close(); }
