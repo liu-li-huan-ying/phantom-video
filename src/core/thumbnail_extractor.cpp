@@ -54,27 +54,27 @@ bool ThumbnailExtractor::getFrame(double seconds, uint8_t** outPixels, int& outW
     *outPixels = nullptr;
     outW = outH = 0;
 
-    // Seek 到目标时间
+    // Seek 到目标时间（用流的 time_base，不用 AV_TIME_BASE）
     AVStream* vs = ctx_->streams[videoStreamIdx_];
-    double durationSec = (double)vs->duration / AV_TIME_BASE;
-    // 边界保护：不 seek 到超出范围的位置
+    double durationSec = (double)vs->duration * av_q2d(vs->time_base);
     if (seconds < 0) seconds = 0;
     if (durationSec > 0 && seconds > durationSec) seconds = durationSec * 0.95;
 
-    int64_t ts = (int64_t)(seconds * AV_TIME_BASE);
-    av_seek_frame(ctx_, -1, ts, AVSEEK_FLAG_BACKWARD);
+    // 正确转换：seconds → 流 time_base 的时间戳
+    int64_t ts = (int64_t)(seconds / av_q2d(vs->time_base));
+    av_seek_frame(ctx_, videoStreamIdx_, ts, AVSEEK_FLAG_BACKWARD);
     avcodec_flush_buffers(codecCtx_);
 
-    // 读包 + 解码，限制总读包数防止死循环
+    // 读包 + 解码
     AVPacket* pkt = av_packet_alloc();
     bool gotFrame = false;
     int packetsRead = 0;
-    const int maxPackets = 128;  // 最多读 128 个包
+    const int maxPackets = 128;
+    double framePts = -1.0;
 
     while (packetsRead < maxPackets) {
         int ret = av_read_frame(ctx_, pkt);
-        if (ret < 0) break;  // EOF 或错误
-
+        if (ret < 0) break;
         packetsRead++;
 
         if (pkt->stream_index != videoStreamIdx_) {
@@ -86,22 +86,31 @@ bool ThumbnailExtractor::getFrame(double seconds, uint8_t** outPixels, int& outW
         av_packet_unref(pkt);
         if (ret < 0) continue;
 
-        // 循环接收帧（处理 B 帧等情况）
         while (true) {
             ret = avcodec_receive_frame(codecCtx_, frame_);
-            if (ret == 0) { gotFrame = true; break; }
-            if (ret == AVERROR(EAGAIN)) break;  // 需要更多包
-            if (ret == AVERROR_EOF) break;       // 流结束
+            if (ret == 0) {
+                // 计算帧的实际时间
+                if (frame_->pts != AV_NOPTS_VALUE)
+                    framePts = frame_->pts * av_q2d(vs->time_base);
+                else
+                    framePts = -1.0;
+                gotFrame = true;
+                break;
+            }
+            if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) break;
             break;
         }
         if (gotFrame) break;
     }
 
-    // 尝试 flush 解码器获取剩余帧
+    // flush 解码器
     if (!gotFrame) {
         avcodec_send_packet(codecCtx_, nullptr);
-        if (avcodec_receive_frame(codecCtx_, frame_) == 0)
+        if (avcodec_receive_frame(codecCtx_, frame_) == 0) {
+            if (frame_->pts != AV_NOPTS_VALUE)
+                framePts = frame_->pts * av_q2d(vs->time_base);
             gotFrame = true;
+        }
     }
 
     av_packet_free(&pkt);
