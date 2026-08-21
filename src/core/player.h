@@ -78,6 +78,8 @@ private:
     std::atomic<bool> muted_{ false };
     std::atomic<float> speed_{ 1.0f };
     std::atomic<bool> audioWait_{ false };
+    std::atomic<bool> seekFirstFrame_{ false };  // M17: seek 后首帧立即显示
+    Uint32 lastSeekTime_ = 0;                    // M17: seek 合并 debounce
 
     std::mutex seekMutex_;
     bool seekPending_ = false;
