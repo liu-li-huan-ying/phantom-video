@@ -458,3 +458,35 @@
   - 增益 = 目标峰值 / 检测峰值，限制 0.25~4.0 倍
   - 软限幅：`tanh(s/32768) * 32768`，超阈值平滑压缩
 - **提交**：`ea3cefa`
+
+---
+
+### 阶段 M16：播放列表面板（2026-08-21）
+
+#### M16 实现（2026-08-21）
+- **新增文件**：
+  - `src/ui/playlist_panel.h/.cpp` — PlaylistPanel 类（面板渲染+交互）
+  - `src/ui/gdi_text.h/.cpp` — GdiTextCache 类（GDI 文字渲染+缓存，支持中日韩）
+  - `assets/icons/formats/*.png` — 22 种视频格式彩色图标（48x48，Python+Pillow 生成）
+  - `tools/gen_format_icons.py` — 图标生成脚本
+- **PlaylistPanel 功能**：
+  - 右侧可切换面板（8px 竖条按钮点击切换）
+  - 面板打开时视频区域自动收缩让位
+  - 格式图标：MP4 蓝/MKV 绿/AVI 橙/WMV 紫/MOV 青/FLV 黄/RM 红 等
+  - 当前曲蓝色高亮，hover 白色背景
+  - 鼠标滚轮滚动，点击选曲
+  - 左边缘拖拽调整面板宽度（160~280px）
+  - 滚动条显示
+- **布局适配**：
+  - `ControlLayout::compute()` 新增 `panelWidth` 参数
+  - `VideoRenderer::render()` 视频显示区域减去面板宽度
+  - `VideoRenderer::drawBackground()` 背景区域减去面板宽度
+  - 所有 main.cpp 中 ControlLayout 调用传入 panel.width()
+- **GdiTextCache**：
+  - Windows GDI 渲染 UTF-8 文字（Microsoft YaHei 字体）
+  - alpha 后处理（非黑像素 alpha=255）
+  - LRU 缓存（最多 200 条）
+- **Playlist 新增 API**：
+  - `fileAt(displayIndex)` — 按显示索引访问文件路径
+- **依赖**：CMake 自动拷贝 assets/ 到构建目录
+- **提交**：`a85dd84`
