@@ -759,3 +759,19 @@
 - **验证逻辑**（2x 速度 10 秒视频）：
   - 修正前：音频 5 秒播完，视频 10 秒走完 → 持续不同步
   - 修正后：音频 5 秒播完，视频 5 秒走完（audioClock 在 5 秒时到达 10 秒 PTS）→ 同步
+- **提交**：`b73d9fa`
+
+### 阶段 M22：seek 后音频时钟立即初始化 — 消除 seek 后音画延迟 ✅ 完成
+
+- 任务：seek 后立即初始化音频时钟到 target，防止视频用 videoClock 超前
+- **根因分析**：
+  - seek 后视频立即开始显示（audioWait_ 机制），但音频时钟还是 -1.0
+  - 视频 fallback 到 videoClock() → videoBasePts_ + elapsed → 跑在音频前面
+  - 等音频首块到达 fill() 时钟才初始化 → 视频已超前 → 音画延迟
+- **修复**：doSeek() 中先 `clearQueue()` + `setClock(t)`，再 `requestSeek(t)`
+  - clearQueue() 清空队列 → fill() 输出静音不推进时钟
+  - setClock(t) 立即初始化时钟 → 视频不会 fallback 到 videoClock
+  - requestSeek(t) 的 pendingSeek_ 在 fill() 内原子处理 current_ 清理
+  - race 安全：queue 空时 fill() 不推进 writeHead_
+- **改动**：`player.cpp` doSeek() 中增加 clearQueue() + setClock(t)
+- **效果**：seek 后音频时钟立即就位，视频不超前，字幕和声音同步
