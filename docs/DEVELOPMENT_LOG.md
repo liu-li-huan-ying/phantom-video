@@ -444,3 +444,17 @@
   3. 扫描所有包取最大 PTS — SWF 等流格式最后手段
 - **验证**：SWF/MP4/MKV/FLV 全部通过
 - **提交**：`b8cff2b`
+
+#### M15-B：音量标准化（2026-08-21）
+- **实现**：
+  - `audio_output.h`：新增 `setNormalization(bool)` / `normalizationGain()` 接口 + `peakTracker_` / `normGain_` 成员
+  - `audio_output.cpp` `applyVolume()`：合并音量+标准化增益，峰值检测 → 滑动最大值衰减 → 增益计算 → tanh 软限幅
+  - 目标峰值 -1 dBFS (28672)，增益限制 0.25x~4.0x（防过放大）
+  - `player.h`：新增 `audio()` 访问器
+  - `main.cpp`：A 键切换音量标准化，toast 提示
+- **原理**：
+  - 峰值检测：遍历 S16 样本取绝对值最大值
+  - 滑动衰减：每秒峰值衰减 50%（防止旧峰值拖累）
+  - 增益 = 目标峰值 / 检测峰值，限制 0.25~4.0 倍
+  - 软限幅：`tanh(s/32768) * 32768`，超阈值平滑压缩
+- **提交**：`ea3cefa`
