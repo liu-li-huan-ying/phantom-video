@@ -397,6 +397,50 @@
   - 新增 `src/core/thumbnail_extractor.h/.cpp`：ThumbnailExtractor 类
   - 修改 `video_renderer.h/.cpp`：进度条 hover 时触发缩略图显示
   - 修改 `main.cpp`：集成 ThumbnailExtractor
-- **M15-B：音量标准化（后做）**
-  - EBU R128 峰值检测 + 软限幅算法
-  - 修改 `audio/audio_output.h/.cpp`：音频输出前增益调节
+
+#### M15-A 进度更新（2026-08-21）— 关键帧预览实现
+- **新增 ThumbnailExtractor 类**：
+  - 独立 FFmpeg 解码器（独立 AVFormatContext + AVCodecContext + SwsContext）
+  - `open()` 打开文件，`getFrame(seconds)` seek + 解码一帧，转 RGB24 输出
+  - `close()` 释放资源
+- **VideoRenderer 集成**：
+  - `setThumbnail(tex, w, h, time)` 设置缩略图纹理
+  - `drawControls()` 进度条 hover 时绘制缩略图（最大 160x90，白边框，居中于鼠标）
+- **main.cpp 集成**：
+  - MOUSEMOTION 中检测进度条 hover → `thumbnail.getFrame()` → SDL_Texture → `vrender.setThumbnail()`
+  - 时间差 >1s 才重新提取（避免频繁 seek）
+- **提交**：`5d44bee`
+
+#### M15-A 修复 1（2026-08-21）— 缩略图位置 + 防死循环
+- **缩略图位置**：`thumbCenterX = progX + fillW`（播放进度）→ `thumbCenterX = mouseX_`（鼠标位置）
+- **getFrame 防死循环**：限制 `maxPackets = 128`，`avcodec_receive_frame` 区分 EAGAIN/EOF，最后 flush 解码器
+- **提交**：`ee8ce8f`
+
+#### M15-A 修复 2（2026-08-21）— seek 时间戳修复
+- **问题**：缩略图始终显示视频开头第一帧，seek 未生效
+- **根因**：`av_seek_frame` 时间戳用了 `AV_TIME_BASE`（微秒），但不同格式 time_base 不同（MPEG-TS=1/90000，MP4=1/1000）
+- **修复**：`ts = seconds / av_q2d(vs->time_base)`，`av_seek_frame` 指定视频流索引
+- **提交**：`4212ee6`
+
+#### M15-A 修复 3（2026-08-21）— 多格式 seek 兼容
+- **问题**：MKV/FLV/SWF 格式缩略图仍有问题
+- **修复**：三级 seek 策略
+  1. `avformat_seek_file(minTs, targetTs, maxTs)` — 精确范围 seek（MKV/FLV 最佳）
+  2. `av_seek_frame(streamIndex, stream_time_base)` — 流级回退
+  3. `av_seek_frame(-1, AV_TIME_BASE)` — 传统格式回退（SWF）
+- **提交**：`07824ad`
+
+#### M15-A 修复 4（2026-08-21）— 播放列表自然排序
+- **问题**：文件排序为字典序 "1,10,2"，不符合人类认知
+- **修复**：新增 `naturalLess()` 比较函数，数字序列按数值比较（"1,2,...,10"）
+- **提交**：`ca292ba`
+
+#### M15-A 修复 5（2026-08-21）— SWF 格式 duration 推算
+- **问题**：SWF 无进度条，总时长显示为零
+- **根因**：SWF 是流格式，`ctx_->duration` 为 `AV_NOPTS_VALUE`
+- **修复**：三级 duration 检测策略
+  1. `ctx_->duration` — 标准格式直接可用
+  2. `st->duration * av_q2d(st->time_base)` — 流级 duration
+  3. 扫描所有包取最大 PTS — SWF 等流格式最后手段
+- **验证**：SWF/MP4/MKV/FLV 全部通过
+- **提交**：`b8cff2b`
