@@ -17,6 +17,40 @@ static bool isVideoExt(const std::string& ext) {
     return false;
 }
 
+// 自然排序比较函数（"1","2","10" 而非 "1","10","2"）
+static bool naturalLess(const std::string& a, const std::string& b) {
+    std::size_t i = 0, j = 0;
+    while (i < a.size() && j < b.size()) {
+        char ca = a[i], cb = b[j];
+        // 两个都是数字时，按数值比较
+        if (ca >= '0' && ca <= '9' && cb >= '0' && cb <= '9') {
+            // 跳过前导零
+            while (i < a.size() && a[i] == '0') i++;
+            while (j < b.size() && b[j] == '0') j++;
+            // 记录数字起始位置
+            std::size_t si = i, sj = j;
+            while (i < a.size() && a[i] >= '0' && a[i] <= '9') i++;
+            while (j < b.size() && b[j] >= '0' && b[j] <= '9') j++;
+            std::size_t lenI = i - si, lenJ = j - sj;
+            // 数字长度不同，长的更大
+            if (lenI != lenJ) return lenI < lenJ;
+            // 长度相同，逐位比较
+            for (std::size_t k = 0; k < lenI; ++k) {
+                if (a[si + k] != b[sj + k])
+                    return a[si + k] < b[sj + k];
+            }
+            // 数值相同，继续比较后续字符
+        } else {
+            // 按字符比较（忽略大小写）
+            char la = (char)std::tolower((unsigned char)ca);
+            char lb = (char)std::tolower((unsigned char)cb);
+            if (la != lb) return la < lb;
+            i++; j++;
+        }
+    }
+    return a.size() < b.size();
+}
+
 static std::mt19937& rng() {
     static std::mt19937 gen(std::random_device{}());
     return gen;
@@ -41,7 +75,7 @@ bool Playlist::scanDirectory(const std::string& file) {
         if (isVideoExt(ext)) found.push_back(it->path().string());
     }
     if (found.empty()) return false;
-    std::sort(found.begin(), found.end());
+    std::sort(found.begin(), found.end(), naturalLess);
 
     files_ = std::move(found);
     idx_ = -1;
