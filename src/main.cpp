@@ -13,6 +13,7 @@
 #include "core/config.h"
 #include "core/player.h"
 #include "core/playlist.h"
+#include "core/thumbnail_extractor.h"
 #include "ui/osd.h"
 #include "ui/custom_titlebar.h"
 #include "video/video_renderer.h"
@@ -143,6 +144,7 @@ int main(int argc, char** argv) {
     Player player;
     VideoRenderer vrender;
     OSD osd;
+    ThumbnailExtractor thumbnail;
     if (!vrender.init(win)) {
         std::printf("鍒涘缓娓叉煋鍣ㄥけ璐? %s\n", SDL_GetError());
         SDL_DestroyWindow(win);
@@ -191,6 +193,7 @@ auto args = utf8Args();
         titlebar.setTitle(title);
         if (player.openFile(p)) {
             loadExternalSubtitle(player, p);
+            thumbnail.open(p);  // M15: 打开缩略图提取器
             if (cfg.resume) {
                 auto it = cfg.history.find(p);
                 if (it != cfg.history.end() && it->second > 2.0) {
@@ -258,6 +261,7 @@ auto args = utf8Args();
             case SDL_DROPFILE:
                 if (player.openFile(e.drop.file)) {
                     loadExternalSubtitle(player, e.drop.file);
+                    thumbnail.open(e.drop.file);
                     playlist.scanDirectory(e.drop.file);
                     std::string base = e.drop.file;
                     std::size_t slash = base.find_last_of("\\/");
@@ -284,6 +288,7 @@ auto args = utf8Args();
                         float pct = (float)(mx - lay.progX) / lay.progW;
                         if (pct < 0) pct = 0; if (pct > 1) pct = 1;
                         player.seek(pct * player.duration());
+                        vrender.setThumbnail(nullptr, 0, 0, -1);
                     } else if (draggingVolume) {
                         int winW = 0, winH = 0;
                         SDL_GetWindowSize(win, &winW, &winH);
@@ -293,6 +298,49 @@ auto args = utf8Args();
                         if (v < 0) v = 0; if (v > 1) v = 1;
                         player.setVolume(v);
                         if (v == 0) { player.setVolume(0.0001f); }
+                    } else if (player.hasMedia()) {
+                        // 进度条 hover 缩略图
+                        int winW = 0, winH = 0;
+                        SDL_GetWindowSize(win, &winW, &winH);
+                        ControlLayout lay = ControlLayout::compute(winW, winH);
+                        bool overProg = mx >= lay.progX && mx < lay.progX + lay.progW &&
+                                        my >= lay.progY - 10 && my < lay.progY + 12;
+                        if (overProg && player.duration() > 0) {
+                            float pct = (float)(mx - lay.progX) / lay.progW;
+                            if (pct < 0) pct = 0; if (pct > 1) pct = 1;
+                            double targetTime = pct * player.duration();
+                            // 只在时间差距较大时重新提取（避免频繁 seek）
+                            static double lastThumbTime = -1;
+                            if (std::abs(targetTime - lastThumbTime) > 1.0) {
+                                lastThumbTime = targetTime;
+                                if (thumbnail.isOpen()) {
+                                    uint8_t* pixels = nullptr;
+                                    int tw = 0, th = 0;
+                                    if (thumbnail.getFrame(targetTime, &pixels, tw, th) && pixels) {
+                                        SDL_Texture* tex = SDL_CreateTexture(
+                                            vrender.renderer(), SDL_PIXELFORMAT_RGB24,
+                                            SDL_TEXTUREACCESS_STREAMING, tw, th);
+                                        if (tex) {
+                                            void* tbits = nullptr;
+                                            int pitch = 0;
+                                            if (SDL_LockTexture(tex, nullptr, &tbits, &pitch) == 0) {
+                                                for (int row = 0; row < th; ++row)
+                                                    memcpy((Uint8*)tbits + row * pitch,
+                                                           pixels + row * tw * 3, tw * 3);
+                                                SDL_UnlockTexture(tex);
+                                                SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
+                                                vrender.setThumbnail(tex, tw, th, targetTime);
+                                            } else {
+                                                SDL_DestroyTexture(tex);
+                                            }
+                                        }
+                                        av_free(pixels);
+                                    }
+                                }
+                            }
+                        } else {
+                            vrender.setThumbnail(nullptr, 0, 0, -1);
+                        }
                     }
                 }
                 break;

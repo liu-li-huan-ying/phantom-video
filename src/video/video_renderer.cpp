@@ -360,6 +360,14 @@ void VideoRenderer::toggleSpeedMenu() {
     showControls();
 }
 
+void VideoRenderer::setThumbnail(SDL_Texture* tex, int w, int h, double timeSec) {
+    if (thumbTex_) { SDL_DestroyTexture(thumbTex_); thumbTex_ = nullptr; }
+    thumbTex_ = tex;
+    thumbW_ = w;
+    thumbH_ = h;
+    thumbTime_ = timeSec;
+}
+
 SDL_Rect VideoRenderer::speedMenuItemRect(const ControlLayout& lay, int index) {
     int itemH = 28;
     int menuW = 92;
@@ -657,6 +665,29 @@ void VideoRenderer::drawControls(const RenderStats& stats) {
         // 圆形 thumb
         fillRoundedRect(renderer_, thumbX, trackY - 4, 16, trackH + 8, 8,
                         255, 255, 255, (Uint8)(255 * a / 255));
+
+        // M15: 缩略图预览（在进度条上方显示）
+        if (thumbTex_ && thumbW_ > 0 && thumbH_ > 0) {
+            int maxThumbW = 160;
+            int maxThumbH = 90;
+            float scale = std::min((float)maxThumbW / thumbW_, (float)maxThumbH / thumbH_);
+            int dispW = (int)(thumbW_ * scale);
+            int dispH = (int)(thumbH_ * scale);
+            int thumbCenterX = progX + fillW;
+            int thumbX2 = thumbCenterX - dispW / 2;
+            int thumbY2 = trackY - dispH - 12;
+            // 边界约束
+            if (thumbX2 < 4) thumbX2 = 4;
+            if (thumbX2 + dispW > winW - 4) thumbX2 = winW - dispW - 4;
+            if (thumbY2 < 36) thumbY2 = 36;  // 标题栏高度 + 间距
+
+            // 白色边框 + 黑色背景
+            fillRoundedRect(renderer_, thumbX2 - 2, thumbY2 - 2, dispW + 4, dispH + 4, 4,
+                            40, 40, 40, (Uint8)(240 * a / 255));
+            SDL_SetTextureAlphaMod(thumbTex_, (Uint8)a);
+            SDL_Rect dst{ thumbX2, thumbY2, dispW, dispH };
+            SDL_RenderCopy(renderer_, thumbTex_, nullptr, &dst);
+        }
     }
 
     // time text centered in the control row
