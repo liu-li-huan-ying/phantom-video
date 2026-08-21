@@ -490,3 +490,19 @@
   - `fileAt(displayIndex)` — 按显示索引访问文件路径
 - **依赖**：CMake 自动拷贝 assets/ 到构建目录
 - **提交**：`a85dd84`
+
+#### M16 修复 1（2026-08-21）— 面板位置 + 暂停叠加图标
+- **问题**：面板绘制在窗口左边缘（x=0），切换按钮不可见
+- **根因**：draw() 方法未接收窗口宽度，面板固定从 x=0 绘制
+- **修复**：
+  - `draw()`/`handleMouseMove()`/`handleMouseDown()`/`handleMouseWheel()` 全部增加 `winW` 参数
+  - 面板背景绘制在 `winW - pw`（窗口右边缘）
+  - 切换按钮始终绘制在 `winW - kEdgeW`（即使面板关闭也可见）
+  - 按钮上绘制箭头指示（">" 关闭时朝右，"<" 打开时朝左）
+  - 所有 hit-test 逻辑改为基于 `panelX = winW - w`
+- **新增功能：视频区域单击暂停叠加图标**
+  - `VideoRenderer::showPauseOverlay()` — 触发显示
+  - `drawPauseOverlay()` — 半透明暗色遮罩 + 大白色暂停双竖条
+  - 淡入淡出动画（1.2 秒后自动消失）
+  - `main.cpp`：视频区域单击（非控件）→ `togglePause()` + `showPauseOverlay()`
+- **提交**：`4b66daa`
