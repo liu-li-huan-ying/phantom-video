@@ -612,13 +612,17 @@ void VideoRenderer::drawControls(const RenderStats& stats) {
     };
 
     auto drawBtn = [&](const Btn& b, Icon icon, bool hover, bool active) {
+        // 圆角背景：hover 时白色渐变，active 时蓝色高亮
         if (hover || active) {
-            fillRoundedRect(renderer_, b.x, b.y, b.w, b.h, 8,
-                            255, 255, 255, (Uint8)(hover ? 40 * a / 255 : 60 * a / 255));
+            Uint8 bgA = active ? (Uint8)(70 * a / 255) : (Uint8)(45 * a / 255);
+            Uint8 r = active ? 77 : 255, g = active ? 144 : 255, b2 = active ? 255 : 255;
+            fillRoundedRect(renderer_, b.x, b.y, b.w, b.h, 8, r, g, b2, bgA);
         }
+        // 图标：hover 时白色不透明度 255，否则 200；active 时图标缩放 1.1x
+        int iconSize = hover ? 26 : 24;
+        int iconAlpha = (int)((hover ? 255 : 200) * a / 255);
         drawIconOrTexture(renderer_, iconTexture(icon), icon,
-                          b.x + b.w / 2, b.y + b.h / 2, 24,
-                          (int)((hover ? 255 : 200) * a / 255));
+                          b.x + b.w / 2, b.y + b.h / 2, iconSize, iconAlpha);
     };
 
     // ---- progress bar: full-width slim bar at the very bottom ----
@@ -631,24 +635,27 @@ void VideoRenderer::drawControls(const RenderStats& stats) {
 
     bool progHover = mouseX_ >= progX && mouseX_ < progX + progressW &&
                      mouseY_ >= progY - 10 && mouseY_ < progY + 12;
-    int trackH = (progHover || stats.draggingVolume) ? 8 : 4;
+    int trackH = (progHover || stats.draggingVolume) ? 10 : 4;
     int trackY = progY - trackH / 2;
 
-    // track
-    fillRoundedRect(renderer_, progX, trackY, progressW, trackH, 2,
-                    80, 80, 80, (Uint8)(180 * a / 255));
-    // fill
+    // track 背景（深灰 + 圆角）
+    fillRoundedRect(renderer_, progX, trackY, progressW, trackH, 3,
+                    50, 50, 50, (Uint8)(200 * a / 255));
+    // fill（蓝色渐变）
     int fillW = (int)(pct * progressW);
     if (fillW > 0) {
-        fillRoundedRect(renderer_, progX, trackY, fillW, trackH, 2,
+        fillRoundedRect(renderer_, progX, trackY, fillW, trackH, 3,
                         77, 144, 255, (Uint8)(255 * a / 255));
     }
-    // hover thumb
+    // hover/drag 时发光 thumb + 阴影
     if (progHover || stats.draggingVolume) {
-        int thumbX = progX + fillW - 6;
-        SDL_SetRenderDrawColor(renderer_, 255, 255, 255, (Uint8)(255 * a / 255));
-        SDL_Rect thumb{ thumbX, trackY - 3, 12, trackH + 6 };
-        SDL_RenderFillRect(renderer_, &thumb);
+        int thumbX = progX + fillW - 8;
+        // 发光阴影
+        fillRoundedRect(renderer_, thumbX - 4, trackY - 6, 24, trackH + 12, 8,
+                        77, 144, 255, (Uint8)(60 * a / 255));
+        // 圆形 thumb
+        fillRoundedRect(renderer_, thumbX, trackY - 4, 16, trackH + 8, 8,
+                        255, 255, 255, (Uint8)(255 * a / 255));
     }
 
     // time text centered in the control row
@@ -666,14 +673,25 @@ void VideoRenderer::drawControls(const RenderStats& stats) {
     // ---- volume popup (above vol button) ----
     bool volHover = hit(volBtn);
     if (volHover || stats.draggingVolume) {
-        int pw = 6, ph = 90;
+        int pw = 8, ph = 90;
         int px = volBtn.x + volBtn.w / 2 - pw / 2;
         int py = barY - ph - 12;
-        fillRoundedRect(renderer_, px, py, pw, ph, 3, 30, 30, 30, (Uint8)(230 * a / 255));
-        int vh = (int)((stats.muted ? 0.0f : stats.volume) * (ph - 12));
+        // 背景
+        fillRoundedRect(renderer_, px - 2, py - 2, pw + 4, ph + 4, 4,
+                        30, 30, 30, (Uint8)(230 * a / 255));
+        // 轨道
+        fillRoundedRect(renderer_, px, py, pw, ph, 3, 60, 60, 60, (Uint8)(200 * a / 255));
+        // 音量填充
+        int vh = (int)((stats.muted ? 0.0f : stats.volume) * (ph - 8));
         if (vh > 0) {
-            fillRoundedRect(renderer_, px, py + ph - 6 - vh, pw, vh, 3,
+            fillRoundedRect(renderer_, px, py + ph - 4 - vh, pw, vh, 3,
                             77, 144, 255, (Uint8)(255 * a / 255));
+        }
+        // thumb
+        if (stats.draggingVolume) {
+            int thumbY = py + ph - 4 - vh - 4;
+            fillRoundedRect(renderer_, px - 3, thumbY, pw + 6, 8, 4,
+                            255, 255, 255, (Uint8)(255 * a / 255));
         }
     }
 
