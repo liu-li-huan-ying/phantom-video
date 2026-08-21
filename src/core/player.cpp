@@ -212,17 +212,26 @@ void Player::setVolume(float v) {
 
 void Player::setSpeed(float s) {
     s = std::clamp(s, 0.05f, 3.0f);
-    speed_.store(s);
     if (audio_) {
         double anchor = audio_->clock();
         if (anchor < 0.0) anchor = 0.0;
-        // 不暂停设备：重建 Sonic + 清空队列 + 锚定时钟，fill() 自然过渡
-        audio_->rebuildSonic(s);
-        audio_->clearQueue();
+        // 1. 锚定时钟（fill() 处理速度变更时保持此时钟）
         audio_->setClock(anchor);
+        // 2. 请求延迟速度变更：fill() 在 SDL 回调线程内原子处理
+        //    （清 current_ + 清 queue + 重建 Sonic + 更新 speed_ + 保持时钟）
+        audio_->requestSpeedChange(s);
+        // 3. 等待 fill() 处理完毕（~23ms 一个回调周期），再更新 Player::speed_
+        //    确保视频时钟和音频速度一致
+        for (int i = 0; i < 20; ++i) {
+            if (!audio_->hasPendingSpeed()) break;
+            SDL_Delay(1);
+        }
+        speed_.store(s);
         dropUntil_.store(anchor);
         uiSeeking_.store(true, std::memory_order_relaxed);
         uiTargetPts_.store(anchor, std::memory_order_relaxed);
+    } else {
+        speed_.store(s);
     }
     videoBaseTicks_ = SDL_GetPerformanceCounter();
 }
@@ -353,9 +362,10 @@ void Player::doSeek(double t) {
     audioSeeking_.store(true);
     if (onSeekingChanged) onSeekingChanged(true);
     if (audio_) {
-        // 不暂停设备：清空队列 + 重置时钟，fill() 自然输出静音直到新数据到达
-        audio_->clearQueue();
-        audio_->setClock(t);
+        // 请求延迟 seek：fill() 在 SDL 回调线程内原子处理
+        // （清 current_ + 清队列 + 设时钟），消除与 fill() 的竞态
+        audio_->requestSeek(t);
+        // 音频 demuxer seek 由 audioLoop 线程处理（audioSeekPending_ 机制）
     }
     videoQueue_.clear();
     videoClockStarted_ = true;

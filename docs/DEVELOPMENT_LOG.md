@@ -709,3 +709,31 @@
   - 变速即时生效（无嗡嗡声/杂音）
   - 频繁操作下 A/V 始终同步
 - **提交**：`8ba12df`
+
+### 阶段 M20：fill() 内原子处理状态变更 — 消除变速/seek 竞态 ✅ 完成
+
+- 任务：将所有音频状态变更（变速/seek）延迟到 fill() 内处理，消除跨线程竞态
+- **根因分析**（M19 遗留问题）：
+  1. **Player::speed_ 与 AudioOutput::speed_ 不一致**：Player::speed_ 在 rebuildSonic() 前更新，视频用新速度计算 delay，但音频还在旧速度
+  2. **fill() 中时钟推进使用 AudioOutput::speed_**：speed_ 在 rebuildSonic() 内更新但 fill() 不持 sonicMutex_ 读 speed_，TOCTOU 竞态
+  3. **clearQueue + setClock 非原子**：fill() 可能在两步之间推进时钟，setClock 回退时钟
+  4. **旧 chunk 在 current_ 中按新速率推进时钟**：clearQueue 不清 current_，旧 1x 数据按 2x 速率推进时钟→时钟超前
+- **解决方案**：延迟操作模式（Deferred Action Pattern）
+  - 新增 `pendingSpeed_` 原子量（float，-1=无待处理）
+  - 新增 `pendingSeek_` 原子量（double，-1=无待处理）
+  - `fill()` 回调开头原子 exchange 读取 pending，一次性完成：清 current_ + 清 queue + 重建 Sonic + 设时钟 + 更新 speed_
+  - `Player::setSpeed()` 改为调用 `requestSpeedChange()`，然后轮询等待 fill() 处理完毕，再更新 Player::speed_
+  - `Player::doSeek()` 改为调用 `requestSeek()`，消除与 fill() 的竞态
+- **改动**：
+  - `audio_output.h`：新增 `requestSpeedChange()`、`pendingSpeed()`、`hasPendingSpeed()`、`requestSeek()`、`hasPendingSeek()`；新增 `pendingSpeed_`、`pendingSeek_` 原子成员
+  - `audio_output.cpp`：fill() 开头处理 pendingSpeed 和 pendingSeek；新增方法实现
+  - `player.cpp`：setSpeed() 使用 requestSpeedChange + 轮询等待；doSeek() 使用 requestSeek
+  - `main.cpp`：修复 SDL_MAIN_HANDLED 重复定义警告
+- **关键设计**：
+  - 所有状态变更在 fill() 线程（SDL 回调线程）内完成 → 零竞态
+  - pendingSpeed_ 使用 exchange(-1) 原子操作 → 一次读取，不会丢失
+  - 轮询等待最多 20ms（20×1ms），一个回调周期内必然处理
+- **效果**：
+  - 高频切倍速无音画不同步、无失声
+  - Seek 时钟原子重置，无竞态窗口
+  - 进度条冻结规则（uiSeeking_ + uiTargetPts_）保持不变

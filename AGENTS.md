@@ -7,9 +7,9 @@
   - 语言：C++17（g++ 15.2.0，w64devkit，位于 D:\w64devkit）
   - 构建：CMake + MinGW Makefiles（构建前需临时改名 `D:\w64devkit\bin\sh.exe`，构建完恢复）
   - 解码：FFmpeg 9.0.1（gyan.dev stable shared 构建，位于 `F:\dev\ffmpeg-9.0.1-full_build-shared`，libavformat/avcodec/avutil/swresample，MinGW 用 `-l:xxx.lib` 链接 COFF 导入库）
-  - 变速不变调：Sonic（Bill Cox，`F:\dev\sonic\sonic.c`，零分配单缓冲 TSM）
+  - 变速不变调：Sonic（Bill Cox，`F:\vedioplayer\dev\sonic\sonic.c`，零分配单缓冲 TSM）
   - 渲染/音频/窗口：SDL2（SDL_MAIN_HANDLED 方案，不链接 SDL2main）
-  - 依赖定位：pkg-config（`PKG_CONFIG_PATH="F:\dev\sdl2\x86_64-w64-mingw32\lib\pkgconfig"`；FFmpeg 不走 pkg-config，CMake 直接链接 `F:\dev\ffmpeg-9.0.1-full_build-shared\lib\*.lib`）
+  - 依赖定位：pkg-config（`PKG_CONFIG_PATH="F:\vedioplayer\dev\sdl2\x86_64-w64-mingw32\lib\pkgconfig"`；FFmpeg 不走 pkg-config，CMake 直接链接 `F:\vedioplayer\dev\ffmpeg-9.0.1-full_build-shared\lib\*.lib`）
 - 已彻底放弃 Python / Go / TypeScript 技术栈，不得重新引入。
 
 ### 2. 下载与磁盘约束（2026-08-19 起强制）
@@ -45,3 +45,4 @@
 - **重大教训（M4 已定位 M3 崩溃根因）**：`shared_ptr<AVFrame>` 默认删除器是 `delete`（msvcrt 堆），但 AVFrame 由 FFmpeg DLL（UCRT 堆）分配 → 跨堆 free 导致堆损坏 0xC0000374！必须用 `makeFramePtr()`/`makePacketPtr()`（内部传 av_frame_free/av_packet_free 删除器）构造，禁止 `shared_ptr<AVFrame>(ptr)` 裸构造。
 - **教训（M5）**：`BlockingQueue::close()` 是永久性的，`Player::close()` 关闭视频队列后若 `openFile()` 不重置，解码线程 push 会立即失败退出（画面/音频静默停摆，进程却不崩溃——**"无崩溃"不等于"在播放"**，验证必须看时钟/画面）。修复：BlockingQueue 提供 `reopen()`，`openFile()` 在 `close()` 后调用。音频时钟=视频时钟回退（clock() 返回 0）是解码线程停摆的典型信号。
 - 测试素材：`F:\vedioplayer\testdata\`（13 种真实世界格式：AVI/WMV/MKV/MP4/MOV/RM/3GP/FLV/GIF/MPG/RMVB/SWF/VOB）；API 自动化测试在 `C:\Users\31697\AppData\Local\Temp\opencode\player_api_test.cpp`（编译方式见 DEVELOPMENT_LOG M5）。
+- **教训（M20）**：音频状态变更（变速/seek）**必须在 fill() 线程内原子处理**，不可从外部线程直接调用 `rebuildSonic()`/`clearQueue()`/`setClock()`。根因：Player::speed_ 在 rebuildSonic() 前更新 → 视频用新速度但音频还在旧速度；clearQueue+setClock 非原子 → fill() 在两步之间推进时钟；旧 chunk 在 current_ 中按新速率推进时钟→时钟超前。修复：`pendingSpeed_`/`pendingSeek_` 原子量 + fill() 开头 exchange 处理。

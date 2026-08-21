@@ -108,6 +108,27 @@ void AudioOutput::setSpeed(float spd) {
     speed_.store(spd, std::memory_order_relaxed);
 }
 
+void AudioOutput::requestSpeedChange(float spd) {
+    if (spd <= 0.01f) spd = 0.01f;
+    pendingSpeed_.store(spd, std::memory_order_release);
+}
+
+float AudioOutput::pendingSpeed() const {
+    return pendingSpeed_.load(std::memory_order_acquire);
+}
+
+bool AudioOutput::hasPendingSpeed() const {
+    return pendingSpeed_.load(std::memory_order_acquire) >= 0.0f;
+}
+
+void AudioOutput::requestSeek(double t) {
+    pendingSeek_.store(t, std::memory_order_release);
+}
+
+bool AudioOutput::hasPendingSeek() const {
+    return pendingSeek_.load(std::memory_order_acquire) >= 0.0;
+}
+
 bool AudioOutput::push(const FramePtr& frame) {
     if (!ok_) return false;
     AudioChunk chunk;
@@ -185,6 +206,37 @@ void SDLCALL AudioOutput::sdlCallback(void* userdata, Uint8* stream, int len) {
 }
 
 void AudioOutput::fill(Uint8* stream, int len) {
+    // 原子处理待处理的速度变更（在 SDL 回调线程内，零竞态）
+    float newSpeed = pendingSpeed_.exchange(-1.0f, std::memory_order_acq_rel);
+    if (newSpeed >= 0.0f) {
+        // 清除 current_（旧速度数据），清空队列，重建 Sonic，保持时钟
+        current_.data.clear();
+        offset_ = 0;
+        queue_.clear();
+        {
+            std::lock_guard<std::mutex> lock(sonicMutex_);
+            if (sonic_) sonicDestroyStream(sonic_);
+            sonic_ = sonicCreateStream(spec_.freq, spec_.channels);
+            sonicSetSampleRate(sonic_, spec_.freq);
+            sonicSetNumChannels(sonic_, spec_.channels);
+            sonicSetSpeed(sonic_, newSpeed);
+            sonicSetPitch(sonic_, 1.0f);
+            sonicSetRate(sonic_, 1.0f);
+            sonicSetQuality(sonic_, 1);
+            lastSpeed_ = newSpeed;
+        }
+        speed_.store(newSpeed, std::memory_order_relaxed);
+    }
+
+    // 原子处理待处理的 seek（清 current_ + 清队列 + 设时钟）
+    double seekTarget = pendingSeek_.exchange(-1.0, std::memory_order_acq_rel);
+    if (seekTarget >= 0.0) {
+        current_.data.clear();
+        offset_ = 0;
+        queue_.clear();
+        setClock(seekTarget);
+    }
+
     SDL_memset(stream, 0, len);
     int space = len;
     Uint8* dst = stream;

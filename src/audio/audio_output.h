@@ -36,6 +36,13 @@ public:
     void rebuildSonic(float spd);              // 重建 Sonic + 更新速度（sonicMutex_ 保护）
     void setSpeed(float spd);                   // 仅更新速度原子量
 
+    // 延迟操作：由 fill() 在 SDL 回调线程内原子处理，消除竞态
+    void requestSpeedChange(float spd);         // 设置待处理速度变更
+    float pendingSpeed() const;                 // 读取待处理速度（-1 = 无）
+    bool hasPendingSpeed() const;               // 是否有待处理速度变更
+    void requestSeek(double t);                 // 设置待处理 seek（fill() 内原子清队列+设时钟）
+    bool hasPendingSeek() const;                // 是否有待处理 seek
+
 private:
     static void SDLCALL sdlCallback(void* userdata, Uint8* stream, int len);
     void fill(Uint8* stream, int len);
@@ -65,6 +72,12 @@ private:
     std::atomic<float> volume_{ 0.8f };
     std::atomic<float> speed_{ 1.0f };
     float lastSpeed_ = 1.0f;
+
+    // 延迟速度变更：fill() 在 SDL 回调线程内原子处理
+    std::atomic<float> pendingSpeed_{ -1.0f };  // -1 = 无待处理变更
+
+    // 延迟 seek：fill() 在 SDL 回调线程内原子处理
+    std::atomic<double> pendingSeek_{ -1.0 };   // -1 = 无待处理 seek
     std::atomic<bool> normalization_{ false };
     std::atomic<float> normGain_{ 1.0f };
     float peakTracker_ = 0.0f;
