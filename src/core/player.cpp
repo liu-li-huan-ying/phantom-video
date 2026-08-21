@@ -295,14 +295,19 @@ FramePtr Player::pullFrame() {
 
     double pts = framePts(f);
     if (audioWait_.load()) {
-        // seek 后立即出首帧并恢复音频，避免 delay 死锁
+        // M17: seek 期间逐帧显示，用户看到画面从关键帧推进到目标
         videoQueue_.pop(f);
         lastFrame_ = f;
-        videoBasePts_ = pts;
-        videoBaseTicks_ = SDL_GetPerformanceCounter();
-        playing_ = !paused_.load();
-        if (audioWait_.exchange(false) && audio_ && !paused_.load())
-            audio_->resumeDevice();
+        // 到达目标帧附近时才恢复音频
+        double seekTarget = audioSeekTarget_.load();
+        if (pts >= seekTarget - 0.1 || pts < videoBasePts_ - 1.0) {
+            // PTS 已超过目标，或 PTS 发生跳变（新 seek）→ 校准时钟并恢复音频
+            videoBasePts_ = pts;
+            videoBaseTicks_ = SDL_GetPerformanceCounter();
+            playing_ = !paused_.load();
+            if (audioWait_.exchange(false) && audio_ && !paused_.load())
+                audio_->resumeDevice();
+        }
         return f;
     }
     if (pts - target > 0.05) {
@@ -347,7 +352,7 @@ void Player::doSeek(double t) {
     videoBasePts_ = t;
     videoBaseTicks_ = SDL_GetPerformanceCounter();
     audioWait_ = true;
-    seekFirstFrame_.store(true);  // M17: 解码线程推送首帧
+    seekFirstFrame_.store(true);
     audioSeekPending_.store(true);
     audioSeekTarget_.store(t);
     videoDemuxer_->seek(t);
@@ -356,7 +361,9 @@ void Player::doSeek(double t) {
         subtitles_.clear();
         subtitleDecoder_->flushBuffers();
     }
-    dropUntil_.store(t - 0.05);
+    // M17: 不再设置 dropUntil_，让所有帧通过队列
+    // 用户会看到画面从关键帧快速推进到目标帧
+    dropUntil_.store(-1e9);
 }
 
 void Player::decodeLoop() {
@@ -383,15 +390,6 @@ void Player::decodeLoop() {
             if (!videoDecoder_ || !videoDecoder_->send(pkt.get())) continue;
             while (FramePtr f = videoDecoder_->receive()) {
                 if (seekRequested() || stop_.load()) break;
-                // M17: seek 后首帧无条件推送，快速给用户画面反馈
-                if (seekFirstFrame_.exchange(false)) {
-                    while (!videoQueue_.tryPush(f)) {
-                        if (seekRequested() || stop_.load()) break;
-                        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-                    }
-                    continue;  // 继续解码后续帧（dropUntil_ 生效）
-                }
-                if (framePts(f) < dropUntil_.load()) continue;
                 while (!videoQueue_.tryPush(f)) {
                     if (seekRequested() || stop_.load()) break;
                     std::this_thread::sleep_for(std::chrono::milliseconds(1));

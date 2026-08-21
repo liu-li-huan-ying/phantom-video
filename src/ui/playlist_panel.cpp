@@ -238,7 +238,6 @@ void PlaylistPanel::drawItem(int baseX, int y, int index, const std::string& fil
 }
 
 bool PlaylistPanel::handleMouseMove(int mx, int my, int winW, int winH) {
-    int w = width();
     const int titleH = 32;
     const int barH = 64;
     const int progH = 9;
@@ -246,9 +245,10 @@ bool PlaylistPanel::handleMouseMove(int mx, int my, int winW, int winH) {
     int panelTop = titleH;
     int panelBot = barY;
 
-    // 切换按钮 hover（始终在窗口右边缘）
+    // 切换按钮 hover（始终检测，无论面板开关状态）
     toggleHover_ = (mx >= winW - kEdgeW && mx < winW && my >= 0 && my < winH);
 
+    int w = width();
     if (w == 0) return false;
     int panelX = winW - w;
 
@@ -280,7 +280,6 @@ bool PlaylistPanel::handleMouseMove(int mx, int my, int winW, int winH) {
 }
 
 bool PlaylistPanel::handleMouseDown(int mx, int my, int winW, int winH) {
-    int w = width();
     const int titleH = 32;
     const int barH = 64;
     const int progH = 9;
@@ -288,12 +287,13 @@ bool PlaylistPanel::handleMouseDown(int mx, int my, int winW, int winH) {
     int panelTop = titleH;
     int panelBot = barY;
 
-    // 切换按钮点击
+    // 切换按钮点击（始终优先检测，无论面板开关状态）
     if (mx >= winW - kEdgeW && mx < winW && my >= 0 && my < winH) {
         toggle();
         return true;
     }
 
+    int w = width();
     if (w == 0) return false;
     int panelX = winW - w;
 
