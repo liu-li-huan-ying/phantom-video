@@ -554,3 +554,26 @@
 - seek 开始 → 显示半透明 "Seeking..." 文字
 - 首帧到达 → 隐藏
 - 改善感知体验
+
+---
+
+### M18 实现记录（2026-08-21）
+
+#### M18-1：音频竞态修复
+- `player.h` 添加 `std::atomic<bool> audioSeeking_`
+- `doSeek()` 设置 `audioSeeking_ = true`（在 clearQueue 之前）
+- `audioLoop()`：`audioSeeking_` 为 true 时 `continue` 跳过旧帧
+- audio demuxer seek 完成后 `audioSeeking_.store(false)`
+- 效果：seek 期间旧音频帧不会推入队列，避免 writeHead_ 被污染
+
+#### M18-2：音频时钟跳变检测（已有）
+- `AudioOutput::callback()` 中已有跳变检测：`current_.pts - writeHead_ > 0.5 || current_.pts < writeHead_ - 0.5`
+- 与 `audioSeeking_` 配合，双重保护
+
+#### M18-3：Seeking 指示器
+- `VideoRenderer` 添加 `seekingAlpha_` 状态 + `showSeekingOverlay()`/`hideSeekingOverlay()`
+- `drawSeekingOverlay()`：半透明暗色遮罩 + 圆角矩形框 + 白色边框 + 三点动画（200ms 循环）
+- `Player` 添加 `std::function<void(bool)> onSeekingChanged` 回调
+- `doSeek()` 触发 `onSeekingChanged(true)`，`pullFrame()` 到达目标帧时触发 `onSeekingChanged(false)`
+- `main.cpp` 连接回调：seeking 开始显示指示器，完成隐藏
+- **提交**：`8f2b4ec`

@@ -214,10 +214,7 @@ void Player::setSpeed(float s) {
     speed_.store(s);
     if (audio_) {
         audio_->setSpeed(s);
-        // 变速清空缓冲后，音频线程供给位置超前播放位置 → 让音频线程 seek 回当前
-        // 播放位置，chunk pts 与时钟对齐，避免 fill 的 pts 同步把时钟拉到缓冲位置
-        audioSeekPending_.store(true);
-        audioSeekTarget_.store(clock());
+        // M18: atempo 保调变速，无需 seek — 时钟连续无跳变
     }
     videoBaseTicks_ = SDL_GetPerformanceCounter();
 }

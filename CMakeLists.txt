@@ -18,7 +18,8 @@ set(FFMPEG_LIBS
   "${FFMPEG_ROOT}/lib/avcodec.lib"
   "${FFMPEG_ROOT}/lib/avutil.lib"
   "${FFMPEG_ROOT}/lib/swresample.lib"
-  "${FFMPEG_ROOT}/lib/swscale.lib")
+  "${FFMPEG_ROOT}/lib/swscale.lib"
+  "${FFMPEG_ROOT}/lib/avfilter.lib")
 
 file(GLOB_RECURSE PLAYER_SOURCES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/src/*.cpp")
 
@@ -57,6 +58,7 @@ add_custom_command(TARGET vplayer POST_BUILD
     "${FFMPEG_ROOT}/bin/avutil-61.dll"
     "${FFMPEG_ROOT}/bin/swresample-7.dll"
     "${FFMPEG_ROOT}/bin/swscale-10.dll"
+    "${FFMPEG_ROOT}/bin/avfilter-12.dll"
     "${DEPS_ROOT}/sdl2/x86_64-w64-mingw32/bin/SDL2.dll"
     "${DEPS_ROOT}/SDL2_image-2.8.2/x86_64-w64-mingw32/bin/SDL2_image.dll"
     $<TARGET_FILE_DIR:vplayer>
