@@ -748,8 +748,10 @@ void VideoRenderer::drawBackground() {
     int w = 0, h = 0;
     SDL_GetWindowSize(window_, &w, &h);
     const int titleH = 32;  // 标题栏高度
-    // 深色主题背景 (18,18,18)，仅绘制标题栏下方区域
-    fillRoundedRect(renderer_, 0, titleH, w, h - titleH, 0, 18, 18, 18, 255);
+    // 视频区域纯黑 (0,0,0)，与标题栏 (30,30,30) 形成层次感
+    SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255);
+    SDL_Rect videoArea{ 0, titleH, w, h - titleH };
+    SDL_RenderFillRect(renderer_, &videoArea);
 }
 
 void VideoRenderer::render(const AVFrame* frame, const RenderStats& stats) {
