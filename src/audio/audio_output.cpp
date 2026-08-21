@@ -76,14 +76,27 @@ bool AudioOutput::open(const AVCodecParameters* par, double ptsScale) {
 
 void AudioOutput::setSpeed(float spd) {
     if (spd <= 0.01f) spd = 0.01f;
+    // 原子操作：清队列 + 重建 Sonic + 锚定时钟（一个函数内完成，无中间态）
+    std::lock_guard<std::mutex> sLock(sonicMutex_);
     speed_.store(spd, std::memory_order_relaxed);
-    // 原子捕获锚定点（无竞态，Player::setSpeed 直接读 anchorPts_）
+    queue_.clear();
+    current_.data.clear();
+    offset_ = 0;
     {
         std::lock_guard<std::mutex> lock(clockMutex_);
         anchorPts_.store(writeHead_ > 0.0 ? writeHead_ : lastPts_,
                          std::memory_order_relaxed);
+        writeHead_ = anchorPts_.load(std::memory_order_relaxed);
     }
-    speedChanged_.store(true, std::memory_order_release);
+    if (sonic_) sonicDestroyStream(sonic_);
+    sonic_ = sonicCreateStream(spec_.freq, spec_.channels);
+    sonicSetSampleRate(sonic_, spec_.freq);
+    sonicSetNumChannels(sonic_, spec_.channels);
+    sonicSetSpeed(sonic_, spd);
+    sonicSetPitch(sonic_, 1.0f);
+    sonicSetRate(sonic_, 1.0f);
+    sonicSetQuality(sonic_, 1);
+    lastSpeed_ = spd;
 }
 
 bool AudioOutput::push(const FramePtr& frame) {
@@ -101,32 +114,9 @@ bool AudioOutput::tryPush(const FramePtr& frame) {
 }
 
 bool AudioOutput::convert(const FramePtr& frame, AudioChunk& chunk) {
-    std::lock_guard<std::mutex> lock(swrMutex_);
+    std::lock_guard<std::mutex> swrLock(swrMutex_);
     if (!swr_ || !sonic_) return false;
 
-    // 规则1：切倍速 = 清队列 + 重建 Sonic + 锚定时钟
-    if (speedChanged_.exchange(false, std::memory_order_acquire)) {
-        float spd = speed_.load(std::memory_order_relaxed);
-        queue_.clear();
-        current_.data.clear();
-        offset_ = 0;
-
-        // 规则1b：时钟锚定到切倍速瞬间的 pts
-        {
-            std::lock_guard<std::mutex> lock(clockMutex_);
-            writeHead_ = anchorPts_.load(std::memory_order_relaxed);
-        }
-
-        if (sonic_) sonicDestroyStream(sonic_);
-        sonic_ = sonicCreateStream(spec_.freq, spec_.channels);
-        sonicSetSampleRate(sonic_, spec_.freq);
-        sonicSetNumChannels(sonic_, spec_.channels);
-        sonicSetSpeed(sonic_, spd);
-        sonicSetPitch(sonic_, 1.0f);
-        sonicSetRate(sonic_, 1.0f);
-        sonicSetQuality(sonic_, 1);
-        lastSpeed_ = spd;
-    }
     int outSamples = (int)av_rescale_rnd(
         swr_get_delay(swr_, frame->sample_rate) + frame->nb_samples,
         spec_.freq, frame->sample_rate, AV_ROUND_UP);
@@ -150,18 +140,8 @@ bool AudioOutput::convert(const FramePtr& frame, AudioChunk& chunk) {
         chunk.data.assign(s16Buf, s16Buf + validBytes);
         av_free(s16Buf);
     } else {
-        // 变速时重建 Sonic 流，清空内部 pitch 检测缓冲
-        if (std::abs(spd - lastSpeed_) > 0.05f) {
-            if (sonic_) sonicDestroyStream(sonic_);
-            sonic_ = sonicCreateStream(spec_.freq, spec_.channels);
-            sonicSetSampleRate(sonic_, spec_.freq);
-            sonicSetNumChannels(sonic_, spec_.channels);
-            sonicSetSpeed(sonic_, spd);
-            sonicSetPitch(sonic_, 1.0f);
-            sonicSetRate(sonic_, 1.0f);
-            sonicSetQuality(sonic_, 1);
-            lastSpeed_ = spd;
-        }
+        std::lock_guard<std::mutex> sLock(sonicMutex_);
+        if (!sonic_) { av_free(s16Buf); return false; }
         // sonicWriteShortToStream 参数：samples per channel
         sonicWriteShortToStream(sonic_, (int16_t*)s16Buf, converted);
         av_free(s16Buf);

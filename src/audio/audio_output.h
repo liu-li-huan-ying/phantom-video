@@ -51,6 +51,7 @@ private:
 
     // Sonic TSM（变速不变调），工作在设备采样率 S16 交错数据上
     sonicStream sonic_ = nullptr;
+    std::mutex sonicMutex_;  // 保护 Sonic 重建（setSpeed vs convert 并发）
 
     BlockingQueue<AudioChunk, AudioChunkSize> queue_{ 1764000 };
     AudioChunk current_;
@@ -62,7 +63,6 @@ private:
 
     std::atomic<float> volume_{ 0.8f };
     std::atomic<float> speed_{ 1.0f };
-    std::atomic<bool> speedChanged_{ false };
     float lastSpeed_ = 1.0f;
     std::atomic<bool> normalization_{ false };
     std::atomic<float> normGain_{ 1.0f };

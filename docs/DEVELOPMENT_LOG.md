@@ -643,3 +643,13 @@
   3. **进度永不回退**：`uiClock()` 返回 `max(clock, uiTargetPts_)`，保证进度条单调递增
 - **改动**：`player.h` 加 `uiSeeking_` / `uiTargetPts_` / `uiClock()` / `clearUiSeeking()`；`video_renderer.h` 加 `RenderStats.uiClock`；`main.cpp` 主循环冻结逻辑
 - **提交**：`08e995c`
+
+#### M19 A/V 解耦最终修复（2026-08-21）
+- **问题**：频繁切倍速+seek 后只有画面没声音/只有声音画面卡住
+- **根因**：`doSeek()`（视频线程）和 `convert()` 中 `speedChanged_`（音频线程）同时清队列+重置时钟，互相覆盖；两操作无串行化
+- **修复（2 层锁）**：
+  1. **`sonicMutex_`**（AudioOutput）：保护 Sonic 重建。`setSpeed()` 直接清队列+重建 Sonic+锚定时钟（原子完成），`convert()` 仅做 Sonic 读写，移除 `speedChanged_` 原子标志
+  2. **`opMutex_`**（Player）：串行化 `setSpeed()` 和 `doSeek()`，防止交叉修改音频状态
+- **锁序**：`opMutex_` → `sonicMutex_` → `clockMutex_`（无循环依赖）
+- **效果**：seek 和倍速切换不再交叉，音频时钟始终连续，视频同步不卡死
+- **提交**：`1a33304`

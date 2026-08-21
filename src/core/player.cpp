@@ -214,6 +214,7 @@ void Player::setVolume(float v) {
 
 void Player::setSpeed(float s) {
     s = std::clamp(s, 0.05f, 3.0f);
+    std::lock_guard<std::mutex> lock(opMutex_);
     speed_.store(s);
     if (audio_) {
         audio_->setSpeed(s);
@@ -358,6 +359,7 @@ FramePtr Player::pullFrame() {
 
 void Player::doSeek(double t) {
     if (!videoDemuxer_) return;
+    std::lock_guard<std::mutex> lock(opMutex_);
     audioSeeking_.store(true);
     if (onSeekingChanged) onSeekingChanged(true);  // M18: 通知 seeking 开始
     if (audio_) {
