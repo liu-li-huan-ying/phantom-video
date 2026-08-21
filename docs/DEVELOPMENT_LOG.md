@@ -329,6 +329,17 @@
   - 调用 `DwmSetWindowAttribute(DWMWA_WINDOW_CORNER_PREFERENCE=33, pref=2)` 启用 Windows 11 圆角窗口
 - **验证**：cmake 构建成功（仅 SDL_MAIN_HANDLED redefined 无害警告），vplayer.exe 启动 5 秒正常退出无崩溃
 - **结论**：M14 阶段 A 完成，窗口阴影+圆角已启用，为后续自定义标题栏和背景绘制打下基础
+
+### M14 进度更新（2026-08-21）— 阶段 B：自定义标题栏
+- **改动**：
+  - 新增 `src/ui/custom_titlebar.h/.cpp`：自定义标题栏类
+  - `SetWindowLongPtrW(GWLP_WNDPROC)` hook 窗口消息，处理 `WM_NCHITTEST` 实现拖动（`HTCAPTION`）和按钮点击（`HTMINBUTTON`/`HTMAXBUTTON`/`HTCLOSE`）
+  - `WM_NCCALCSIZE` 去掉默认标题栏，保留边框阴影
+  - GDI 自绘标题栏：深色背景(24,24,24) + 白色标题文字 + 最小化/最大化/关闭按钮（Segoe MDL2 Assets 图标）
+  - 关闭按钮 hover 红色高亮(196,43,28)，其他按钮 hover 灰色高亮(60,60,60)
+  - main.cpp 集成 CustomTitlebar 实例，文件打开时同步更新标题
+- **验证**：cmake 构建成功，vplayer.exe 启动 5 秒正常退出无崩溃
+- **结论**：M14 阶段 B 完成，自定义标题栏可拖动，按钮 hover 高亮正常
 ### 阶段 M15：音量标准化 + 关键帧预览（已合并自原 M14）
 - 任务：EBU R128 音量标准化实现 + 进度条关键帧预览功能
 - 内容已合并自原 M14 阶段：

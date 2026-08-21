@@ -14,6 +14,7 @@
 #include "core/player.h"
 #include "core/playlist.h"
 #include "ui/osd.h"
+#include "ui/custom_titlebar.h"
 #include "video/video_renderer.h"
 
 static std::vector<std::string> utf8Args() {
@@ -106,11 +107,12 @@ int main(int argc, char** argv) {
     }
 
     // --- DWM: 启用窗口阴影 + 圆角（Windows 11+）---
+    HWND hwnd = nullptr;
     {
         SDL_SysWMinfo wmi;
         SDL_VERSION(&wmi.version);
         if (SDL_GetWindowWMInfo(win, &wmi)) {
-            HWND hwnd = wmi.info.win.window;
+            hwnd = wmi.info.win.window;
             // DwmExtendFrameIntoClientArea: 使窗口有系统阴影
             MARGINS m = {0, 0, 0, 0};
             DwmExtendFrameIntoClientArea(hwnd, &m);
@@ -118,6 +120,13 @@ int main(int argc, char** argv) {
             int pref = 2;
             DwmSetWindowAttribute(hwnd, 33, &pref, sizeof(pref));
         }
+    }
+
+    // --- 自定义标题栏 ---
+    CustomTitlebar titlebar;
+    if (hwnd) {
+        titlebar.init(hwnd);
+        titlebar.setTitle("VPlayer");
     }
 
     Player player;
@@ -168,6 +177,7 @@ auto args = utf8Args();
         else
             std::snprintf(title, sizeof(title), "VPlayer - %s", base.c_str());
         SDL_SetWindowTitle(win, title);
+        titlebar.setTitle(title);
         if (player.openFile(p)) {
             loadExternalSubtitle(player, p);
             if (cfg.resume) {
@@ -244,6 +254,7 @@ auto args = utf8Args();
                     char title[512];
                     std::snprintf(title, sizeof(title), "VPlayer - %s", base.c_str());
                     SDL_SetWindowTitle(win, title);
+                    titlebar.setTitle(title);
                     std::printf("已打开: %s\n", e.drop.file);
                 }
                 else
@@ -480,6 +491,7 @@ auto args = utf8Args();
 
     player.close();
     vrender.shutdown();
+    titlebar.shutdown();
     SDL_DestroyWindow(win);
     SDL_Quit();
     return 0;
