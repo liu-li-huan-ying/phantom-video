@@ -11,12 +11,17 @@
 #include "core/demuxer.h"
 #include "subtitle/subtitle.h"
 
+#include <functional>
+
 class Player {
 public:
     enum class State { Idle, Playing, Paused, Ended };
 
     Player() = default;
     ~Player();
+
+    // M18: seeking 状态回调
+    std::function<void(bool seeking)> onSeekingChanged;
 
     bool openFile(const std::string& path);
     void close();
@@ -78,7 +83,9 @@ private:
     std::atomic<bool> muted_{ false };
     std::atomic<float> speed_{ 1.0f };
     std::atomic<bool> audioWait_{ false };
-    std::atomic<bool> seekFirstFrame_{ false };  // M17: seek 后首帧立即显示
+    std::atomic<bool> audioSeeking_{ false };  // M18: seek 期间跳过旧帧
+    double lastAudioPts_{ -1e9 };              // M18: 检测音频 PTS 跳变
+    std::atomic<bool> seekFirstFrame_{ false };
     Uint32 lastSeekTime_ = 0;                    // M17: seek 合并 debounce
 
     std::mutex seekMutex_;

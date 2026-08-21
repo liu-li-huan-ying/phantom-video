@@ -307,6 +307,7 @@ FramePtr Player::pullFrame() {
             playing_ = !paused_.load();
             if (audioWait_.exchange(false) && audio_ && !paused_.load())
                 audio_->resumeDevice();
+            if (onSeekingChanged) onSeekingChanged(false);  // M18: 通知 seeking 完成
         }
         return f;
     }
@@ -342,6 +343,8 @@ FramePtr Player::pullFrame() {
 
 void Player::doSeek(double t) {
     if (!videoDemuxer_) return;
+    audioSeeking_.store(true);
+    if (onSeekingChanged) onSeekingChanged(true);  // M18: 通知 seeking 开始
     if (audio_) {
         audio_->clearQueue();
         audio_->pauseDevice();
@@ -361,8 +364,6 @@ void Player::doSeek(double t) {
         subtitles_.clear();
         subtitleDecoder_->flushBuffers();
     }
-    // M17: 不再设置 dropUntil_，让所有帧通过队列
-    // 用户会看到画面从关键帧快速推进到目标帧
     dropUntil_.store(-1e9);
 }
 
@@ -424,6 +425,7 @@ void Player::audioLoop() {
         if (audioSeekPending_.exchange(false)) {
             audioDemuxer_->seek(audioSeekTarget_.load());
             if (audioDecoder_) audioDecoder_->flushBuffers();
+            audioSeeking_.store(false);  // M18: seek 完成，允许新帧推入
         }
         PacketPtr pkt = audioDemuxer_->readPacket();
         if (!pkt) break;
@@ -431,6 +433,7 @@ void Player::audioLoop() {
         if (!audioDecoder_ || !audioDecoder_->send(pkt.get())) continue;
         while (FramePtr f = audioDecoder_->receive()) {
             if (seekRequested() || stop_.load()) break;
+            if (audioSeeking_.load()) continue;  // M18: 跳过旧帧
             if (framePts(f) < dropUntil_.load()) continue;
             while (!audio_ || !audio_->tryPush(f)) {
                 if (seekRequested() || stop_.load()) break;

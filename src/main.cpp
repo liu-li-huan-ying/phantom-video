@@ -153,6 +153,11 @@ int main(int argc, char** argv) {
         return 1;
     }
     osd.init(vrender.renderer());
+    // M18: seeking 状态回调 → 显示/隐藏 Seeking 指示器
+    player.onSeekingChanged = [&](bool seeking) {
+        if (seeking) vrender.showSeekingOverlay();
+        else vrender.hideSeekingOverlay();
+    };
 
 auto args = utf8Args();
     AppConfig cfg;

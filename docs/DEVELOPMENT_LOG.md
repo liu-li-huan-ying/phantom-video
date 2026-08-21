@@ -514,12 +514,13 @@
 - 拖动进度条每帧触发一次 seek（无 debounce）
 - 音频 clearQueue 和 audio seek 之间有竞态窗口
 
-#### M17-1：Seek 后首帧立即显示
-- **原理**：seek 后第一帧解码成功立即推入队列显示（不等精确目标帧）
-- `doSeek()` 设置 `seekFirstFrame_ = true`（atomic bool）
-- `decodeLoop()`：seek 后第一帧无论 PTS 都推入队列，清除标志，继续解码后续帧
-- `pullFrame()`：`audioWait_` 机制已有，首帧到达即显示+校准时钟+恢复音频
-- 效果：用户 ~50ms 内看到关键帧画面，GOP 解码完成后跳到精确目标
+#### M17-1：Seek 逐帧显示（替代原方案）
+- **原方案**：seekFirstFrame_ 首帧立即显示 + dropUntil_ 丢弃中间帧
+- **问题**：首帧显示后，中间帧被丢弃导致队列空，视频冻结 10+ 秒
+- **新方案**：不丢弃任何帧（`dropUntil_ = -1e9`），所有帧正常推入队列
+- `pullFrame()` seek 期间逐帧显示（用户看到画面从关键帧推进到目标）
+- 到目标帧附近（PTS >= target - 0.1）才校准时钟并恢复音频
+- 效果：用户看到画面流畅推进，无冻结
 
 #### M17-2：Seek 合并 150ms debounce
 - `requestSeek()` 记录 `lastSeekTime_ = SDL_GetTicks()`
@@ -529,6 +530,10 @@
 #### M17-3：轮询延迟优化
 - `pullFrame()` 空队列 `SDL_Delay(8)` → `SDL_Delay(1)`
 - 减少首帧检测延迟 0~7ms
+
+#### M17 修复（2026-08-21）— 面板切换 + seek 卡住
+- **面板切换修复**：`handleMouseDown` 切换按钮检测移到函数最前面，无论面板开关状态都优先检测
+- **seek 卡住修复**：移除 dropUntil_ 丢帧机制 + seekFirstFrame_ 特殊路径，改为逐帧显示到目标再恢复音频
 
 ---
 

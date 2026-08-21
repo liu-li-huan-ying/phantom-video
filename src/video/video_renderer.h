@@ -71,6 +71,9 @@ public:
     enum class PauseIcon { None, Play, Pause };
     void showPauseOverlay(PauseIcon icon);
     bool isPauseOverlayVisible() const { return pauseOverlayAlpha_ > 0; }
+    void showSeekingOverlay();   // M18: 显示 "Seeking..."
+    void hideSeekingOverlay();   // M18: 隐藏
+    bool isSeekingOverlayVisible() const { return seekingAlpha_ > 0; }
 
 private:
     SDL_Window* window_ = nullptr;
@@ -94,6 +97,7 @@ private:
     void drawToast();
     void drawBackground();  // M14-C: 深色主题圆角背景
     void drawPauseOverlay(const RenderStats& stats);  // M16: 暂停叠加图标
+    void drawSeekingOverlay(const RenderStats& stats);  // M18: Seeking 指示器
     void destroySubtitleTexture();
     void* subtitleTexture_ = nullptr;  // SDL_Texture*
     int subTexW_ = 0;
@@ -114,4 +118,5 @@ private:
     int pauseOverlayAlpha_ = 0;   // 0~255 淡入淡出
     Uint32 pauseOverlayUntil_ = 0; // 显示截止时间
     PauseIcon pauseOverlayIcon_ = PauseIcon::None;
+    int seekingAlpha_ = 0;         // M18: Seeking 指示器 alpha
 };

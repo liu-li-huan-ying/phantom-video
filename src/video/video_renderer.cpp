@@ -867,6 +867,7 @@ void VideoRenderer::render(const AVFrame* frame, const RenderStats& stats) {
     drawToast();
     drawControls(stats);
     drawPauseOverlay(stats);
+    drawSeekingOverlay(stats);
 }
 
 void VideoRenderer::showPauseOverlay(PauseIcon icon) {
@@ -940,5 +941,56 @@ void VideoRenderer::clear() {
         SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255);
         SDL_RenderClear(renderer_);
         drawBackground();
+    }
+}
+
+// M18-3: Seeking 指示器
+void VideoRenderer::showSeekingOverlay() {
+    seekingAlpha_ = 1;
+}
+
+void VideoRenderer::hideSeekingOverlay() {
+    seekingAlpha_ = 0;
+}
+
+void VideoRenderer::drawSeekingOverlay(const RenderStats&) {
+    if (!renderer_ || seekingAlpha_ <= 0) return;
+
+    // 淡入
+    if (seekingAlpha_ < 200) seekingAlpha_ = std::min(200, seekingAlpha_ + 25);
+
+    int winW = 0, winH = 0;
+    SDL_GetWindowSize(window_, &winW, &winH);
+
+    SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+
+    // 半透明暗色遮罩
+    SDL_SetRenderDrawColor(renderer_, 0, 0, 0, (Uint8)(seekingAlpha_ * 0.3f));
+    SDL_Rect overlay{ 0, 32, winW - panelWidth_, winH - 32 };
+    SDL_RenderFillRect(renderer_, &overlay);
+
+    // "Seeking..." 文字（GDI 渲染）
+    int cx = (winW - panelWidth_) / 2;
+    int cy = winH / 2;
+    const char* text = "Seeking...";
+    // 使用 SDL_ttf 不可用，用简单矩形指示器代替
+    int boxW = 200, boxH = 60;
+    SDL_SetRenderDrawColor(renderer_, 30, 30, 30, (Uint8)(seekingAlpha_ * 0.9f));
+    SDL_Rect box{ cx - boxW / 2, cy - boxH / 2, boxW, boxH };
+    SDL_RenderFillRect(renderer_, &box);
+
+    // 白色边框
+    SDL_SetRenderDrawColor(renderer_, 255, 255, 255, (Uint8)(seekingAlpha_ * 0.8f));
+    SDL_RenderDrawRect(renderer_, &box);
+
+    // 三点动画（简单矩形表示）
+    Uint32 now = SDL_GetTicks();
+    int dotPhase = (now / 200) % 4;  // 0~3
+    SDL_SetRenderDrawColor(renderer_, 255, 255, 255, (Uint8)(seekingAlpha_));
+    for (int i = 0; i < 3; ++i) {
+        if (i < dotPhase) {
+            SDL_Rect dot{ cx - 30 + i * 30, cy - 6, 12, 12 };
+            SDL_RenderFillRect(renderer_, &dot);
+        }
     }
 }
