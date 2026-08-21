@@ -538,6 +538,7 @@ ControlLayout ControlLayout::compute(int winW, int winH) {
     ControlLayout l;
     l.btnSize = 40;
     l.gap = 12;
+    const int titleH = 32;  // 标题栏高度
     // 进度条贴底全宽（独立一行），控制按钮行在进度条上方
     l.progX = 8;
     l.progY = winH - 5;
@@ -746,8 +747,9 @@ void VideoRenderer::drawBackground() {
     if (!renderer_) return;
     int w = 0, h = 0;
     SDL_GetWindowSize(window_, &w, &h);
-    // 深色主题背景 (18,18,18)，圆角半径 8px
-    fillRoundedRect(renderer_, 0, 0, w, h, 8, 18, 18, 18, 255);
+    const int titleH = 32;  // 标题栏高度
+    // 深色主题背景 (18,18,18)，仅绘制标题栏下方区域
+    fillRoundedRect(renderer_, 0, titleH, w, h - titleH, 0, 18, 18, 18, 255);
 }
 
 void VideoRenderer::render(const AVFrame* frame, const RenderStats& stats) {
@@ -811,12 +813,15 @@ void VideoRenderer::render(const AVFrame* frame, const RenderStats& stats) {
 
     int winW = 0, winH = 0;
     SDL_GetWindowSize(window_, &winW, &winH);
-    float scale = std::min((float)winW / fw_, (float)winH / fh_);
+    const int titleH = 32;  // 标题栏高度
+    int areaY = titleH;     // 视频区域从标题栏下方开始
+    int areaH = winH - titleH;
+    float scale = std::min((float)winW / fw_, (float)areaH / fh_);
     SDL_Rect dst;
     dst.w = (int)(fw_ * scale);
     dst.h = (int)(fh_ * scale);
     dst.x = (winW - dst.w) / 2;
-    dst.y = (winH - dst.h) / 2;
+    dst.y = areaY + (areaH - dst.h) / 2;
 
     SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255);
     SDL_RenderClear(renderer_);

@@ -488,6 +488,9 @@ auto args = utf8Args();
         } else {
             vrender.clear();
         }
+        // 绘制自定义标题栏（每帧，覆盖 SDL 渲染）
+        titlebar.draw(vrender.renderer());
+
         SDL_RenderPresent(vrender.renderer());
         SDL_Delay(8);
     }
