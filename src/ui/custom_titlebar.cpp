@@ -171,14 +171,29 @@ SDL_Texture* CustomTitlebar::renderTextGDI(SDL_Renderer* renderer, const char* t
     if (!hbmp) { SelectObject(mem, oldFont); DeleteObject(font); DeleteDC(mem); return nullptr; }
 
     HGDIOBJ oldBmp = SelectObject(mem, hbmp);
-    // 透明背景
+    // 先用黑色填充整个位图（alpha=0 即全透明）
     RECT trc{ 0, 0, tw, th };
-    HBRUSH nullBrush = (HBRUSH)GetStockObject(NULL_BRUSH);
-    FillRect(mem, &trc, nullBrush);
+    HBRUSH blackBrush = (HBRUSH)GetStockObject(BLACK_BRUSH);
+    FillRect(mem, &trc, blackBrush);
     SetBkMode(mem, TRANSPARENT);
     SetTextColor(mem, RGB(cr, cg, cb));
     RECT drc{ 4, 2, tw, th };
     DrawTextW(mem, wtext.c_str(), -1, &drc, DT_NOPREFIX | DT_SINGLELINE | DT_LEFT | DT_VCENTER);
+    GdiFlush();  // 确保 GDI 绘制完成
+
+    // 后处理：将文字像素的 alpha 设为 255（不透明），背景保持透明
+    Uint32* pixels = (Uint32*)bits;
+    for (int i = 0; i < tw * th; ++i) {
+        Uint32 px = pixels[i];
+        Uint8 b = px & 0xFF;
+        Uint8 g = (px >> 8) & 0xFF;
+        Uint8 r = (px >> 16) & 0xFF;
+        // 任何非纯黑的像素都是文字，设为不透明
+        if (r > 5 || g > 5 || b > 5) {
+            pixels[i] = 0xFF000000 | (r << 16) | (g << 8) | b;  // alpha=255
+        }
+        // 纯黑像素保持 alpha=0（透明）
+    }
 
     // 转换为 SDL_Texture
     SDL_Texture* tex = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
