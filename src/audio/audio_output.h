@@ -28,14 +28,13 @@ public:
     void setNormalization(bool on) { normalization_.store(on, std::memory_order_relaxed); }
     bool normalization() const { return normalization_.load(std::memory_order_relaxed); }
     float normalizationGain() const { return normGain_.load(std::memory_order_relaxed); }
-    void setSpeed(float spd);
-    void setClock(double t);
-    double clock() const;
 
-    // 所有状态变更必须在 pause/resume 之间进行
-    // pauseDevice 停止 SDL 回调，保证 fill() 不会在修改期间运行
-    void clearAndReset(double newClock);
-    void setSpeedAndReset(float spd);
+    // 线程安全操作（可从任何线程调用，无需暂停设备）：
+    void clearQueue();                          // 清空 BlockingQueue（current_/offset_ 不碰）
+    void setClock(double t);                    // 重置时钟（clockMutex_ 保护）
+    double clock() const;                       // 读时钟（clockMutex_ 保护）
+    void rebuildSonic(float spd);              // 重建 Sonic + 更新速度（sonicMutex_ 保护）
+    void setSpeed(float spd);                   // 仅更新速度原子量
 
 private:
     static void SDLCALL sdlCallback(void* userdata, Uint8* stream, int len);
@@ -55,6 +54,7 @@ private:
     std::mutex sonicMutex_;
 
     BlockingQueue<AudioChunk, AudioChunkSize> queue_{ 1764000 };
+    // current_ 和 offset_ 仅由 fill()（SDL 回调线程）访问，无锁
     AudioChunk current_;
     size_t offset_ = 0;
 
@@ -69,5 +69,4 @@ private:
     std::atomic<float> normGain_{ 1.0f };
     float peakTracker_ = 0.0f;
     Uint32 peakDecayTime_ = 0;
-    std::atomic<bool> devicePaused_{ false };
 };

@@ -101,12 +101,6 @@ bool Player::openFile(const std::string& path) {
     videoBaseTicks_ = SDL_GetPerformanceCounter();
     state_.store(State::Playing);
 
-    if (audio_) {
-        float s = speed_.load(std::memory_order_relaxed);
-        audio_->pauseDevice();
-        audio_->setSpeedAndReset(s);
-        audio_->resumeDevice();
-    }
     audioThread_ = std::thread(&Player::audioLoop, this);
     decodeThread_ = std::thread(&Player::decodeLoop, this);
     return true;
@@ -200,7 +194,6 @@ void Player::requestSeek(double t) {
     seekPending_ = true;
     seekTarget_ = std::clamp(t, 0.0, duration_ > 0.0 ? duration_ : t);
     lastSeekTime_ = SDL_GetTicks();
-    // UI 冻结：进度条不回退
     uiSeeking_.store(true, std::memory_order_relaxed);
     uiTargetPts_.store(seekTarget_, std::memory_order_relaxed);
 }
@@ -223,10 +216,10 @@ void Player::setSpeed(float s) {
     if (audio_) {
         double anchor = audio_->clock();
         if (anchor < 0.0) anchor = 0.0;
-        audio_->pauseDevice();
-        audio_->setSpeedAndReset(s);
-        audio_->clearAndReset(anchor);
-        audio_->resumeDevice();
+        // 不暂停设备：重建 Sonic + 清空队列 + 锚定时钟，fill() 自然过渡
+        audio_->rebuildSonic(s);
+        audio_->clearQueue();
+        audio_->setClock(anchor);
         dropUntil_.store(anchor);
         uiSeeking_.store(true, std::memory_order_relaxed);
         uiTargetPts_.store(anchor, std::memory_order_relaxed);
@@ -283,7 +276,6 @@ double Player::clock() const {
 }
 
 double Player::uiClock() const {
-    // seek / 切倍速期间冻结，用 targetPts；否则取 max(时钟, target) 防回退
     if (uiSeeking_.load(std::memory_order_relaxed)) {
         return uiTargetPts_.load(std::memory_order_relaxed);
     }
@@ -298,7 +290,7 @@ FramePtr Player::pullFrame() {
 
     double c = clock();
     float spd = speed_.load();
-    double target = c;  // 音频时钟已含变速；无音频时 videoClock 也含变速
+    double target = c;
     FramePtr f;
 
     if (!videoQueue_.peek(f)) {
@@ -306,7 +298,7 @@ FramePtr Player::pullFrame() {
             state_.store(State::Ended);
             return nullptr;
         }
-        SDL_Delay(1);  // M17: 轮询延迟从 8ms 优化到 1ms
+        SDL_Delay(1);
         return lastFrame_;
     }
     if (!f) {
@@ -317,6 +309,7 @@ FramePtr Player::pullFrame() {
 
     double pts = framePts(f);
     if (audioWait_.load()) {
+        // seek 期间逐帧显示，用 tryPop 避免阻塞主线程
         videoQueue_.pop(f);
         lastFrame_ = f;
         double seekTarget = audioSeekTarget_.load();
@@ -324,7 +317,6 @@ FramePtr Player::pullFrame() {
             videoBasePts_ = pts;
             videoBaseTicks_ = SDL_GetPerformanceCounter();
             playing_ = !paused_.load();
-            // 不再在这里恢复设备 — 由 audioLoop() 推入第一帧后恢复
             audioWait_.store(false);
             if (onSeekingChanged) onSeekingChanged(false);
         }
@@ -361,9 +353,9 @@ void Player::doSeek(double t) {
     audioSeeking_.store(true);
     if (onSeekingChanged) onSeekingChanged(true);
     if (audio_) {
-        // 暂停 → 清空+重置 → 不恢复！等音频线程推入第一帧再恢复
-        audio_->pauseDevice();
-        audio_->clearAndReset(t);
+        // 不暂停设备：清空队列 + 重置时钟，fill() 自然输出静音直到新数据到达
+        audio_->clearQueue();
+        audio_->setClock(t);
     }
     videoQueue_.clear();
     videoClockStarted_ = true;
@@ -387,7 +379,6 @@ void Player::decodeLoop() {
         {
             std::lock_guard<std::mutex> lock(seekMutex_);
             if (seekPending_) {
-                // M17: 150ms debounce — 拖动进度条时等松手再 seek
                 if (SDL_GetTicks() - lastSeekTime_ < 150) {
                     // 还在快速 seek 中，跳过本轮
                 } else {
@@ -435,14 +426,12 @@ void Player::decodeLoop() {
 }
 
 void Player::audioLoop() {
-    bool seekResumePending = false;
     while (!stop_.load()) {
         if (!audioDemuxer_ || !audioEnabled_.load()) break;
         if (audioSeekPending_.exchange(false)) {
             audioDemuxer_->seek(audioSeekTarget_.load());
             if (audioDecoder_) audioDecoder_->flushBuffers();
             audioSeeking_.store(false);
-            seekResumePending = true;
         }
         PacketPtr pkt = audioDemuxer_->readPacket();
         if (!pkt) break;
@@ -457,11 +446,6 @@ void Player::audioLoop() {
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
             if (seekRequested() || stop_.load()) break;
-            // seek 后第一帧推入，恢复音频设备（此时队列有数据，fill() 不会空跑）
-            if (seekResumePending && audio_) {
-                audio_->resumeDevice();
-                seekResumePending = false;
-            }
         }
     }
     if (stop_.load()) return;

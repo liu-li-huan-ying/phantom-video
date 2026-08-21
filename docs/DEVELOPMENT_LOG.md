@@ -684,3 +684,28 @@
   4. **`pullFrame()` 不再恢复设备**：全部由 `audioLoop()` 负责
 - **效果**：seek 后音频设备暂停→时钟冻结→视频用视频时钟→音频解码完成后恢复→音画同步
 - **提交**：`1fd05ba`
+
+#### M19 音频架构终极重写：永不暂停模式（2026-08-21）
+- **问题**：pause/resume 模式导致 seek 后画面卡数秒 + 音画不同步
+- **根因分析**：
+  1. `doSeek()` 暂停设备 → `fill()` 停止 → 时钟冻结 → 视频用 videoClock 追赶
+  2. `audioLoop()` 推入首帧后才恢复设备 → 音频时钟从 seek target 重新开始
+  3. 视频时钟已前进 vs 音频时钟从 target 重启 → 时钟断裂 → 音画不同步
+  4. `videoQueue_.pop(f)` 在 audioWait_ 期间阻塞主线程 → UI 冻结
+- **参考**：VLC/mpv/ExoPlayer 的 seek 策略 — **永远不暂停音频设备**
+- **新架构（永不暂停模式）**：
+  - `current_` 和 `offset_` **仅由 fill()（SDL 回调线程）访问**，外部永不触碰 → 零竞态
+  - `queue_.clear()` 使用 BlockingQueue 自带锁 → 线程安全
+  - `setClock(t)` 使用 clockMutex_ → 线程安全
+  - `rebuildSonic()` 使用 sonicMutex_ → 线程安全
+  - **seek**：`clearQueue()` + `setClock(target)` → fill() 输出静音 → 新数据到达后自然恢复
+  - **变速**：`rebuildSonic()` + `clearQueue()` + `setClock(anchor)` → 旧数据自然消费完
+  - 时钟永远连续，无跳变，无冻结
+- **改动**：
+  - AudioOutput：移除 `clearAndReset()`、`setSpeedAndReset()`、`devicePaused_`；新增 `clearQueue()`、`rebuildSonic()`、`setSpeed()`
+  - Player：`doSeek()` 不暂停设备；`setSpeed()` 不暂停设备；`audioLoop()` 移除 seekResumePending
+- **效果**：
+  - Seek 即时响应（无冻结），时钟连续无跳变
+  - 变速即时生效（无嗡嗡声/杂音）
+  - 频繁操作下 A/V 始终同步
+- **提交**：`8ba12df`

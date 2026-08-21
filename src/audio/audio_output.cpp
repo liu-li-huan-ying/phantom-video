@@ -74,37 +74,35 @@ bool AudioOutput::open(const AVCodecParameters* par, double ptsScale) {
     return true;
 }
 
-// 必须在 pauseDevice() 之后、resumeDevice() 之前调用
-// 因为 fill() 不会运行，所以 current_/offset_/queue_/clock 无竞态
-void AudioOutput::clearAndReset(double newClock) {
+void AudioOutput::clearQueue() {
     queue_.clear();
-    current_.data.clear();
-    offset_ = 0;
-    {
-        std::lock_guard<std::mutex> lock(clockMutex_);
-        writeHead_ = newClock;
-    }
 }
 
-// 必须在 pauseDevice() 之后、resumeDevice() 之前调用
-void AudioOutput::setSpeedAndReset(float spd) {
+void AudioOutput::setClock(double t) {
+    std::lock_guard<std::mutex> lock(clockMutex_);
+    writeHead_ = t;
+}
+
+double AudioOutput::clock() const {
+    std::lock_guard<std::mutex> lock(clockMutex_);
+    return writeHead_;
+}
+
+void AudioOutput::rebuildSonic(float spd) {
     if (spd <= 0.01f) spd = 0.01f;
-    {
-        std::lock_guard<std::mutex> lock(sonicMutex_);
-        if (sonic_) sonicDestroyStream(sonic_);
-        sonic_ = sonicCreateStream(spec_.freq, spec_.channels);
-        sonicSetSampleRate(sonic_, spec_.freq);
-        sonicSetNumChannels(sonic_, spec_.channels);
-        sonicSetSpeed(sonic_, spd);
-        sonicSetPitch(sonic_, 1.0f);
-        sonicSetRate(sonic_, 1.0f);
-        sonicSetQuality(sonic_, 1);
-        lastSpeed_ = spd;
-    }
+    std::lock_guard<std::mutex> lock(sonicMutex_);
+    if (sonic_) sonicDestroyStream(sonic_);
+    sonic_ = sonicCreateStream(spec_.freq, spec_.channels);
+    sonicSetSampleRate(sonic_, spec_.freq);
+    sonicSetNumChannels(sonic_, spec_.channels);
+    sonicSetSpeed(sonic_, spd);
+    sonicSetPitch(sonic_, 1.0f);
+    sonicSetRate(sonic_, 1.0f);
+    sonicSetQuality(sonic_, 1);
+    lastSpeed_ = spd;
     speed_.store(spd, std::memory_order_relaxed);
 }
 
-// 仅更新 speed（不清队列不重建 Sonic），用于微调
 void AudioOutput::setSpeed(float spd) {
     if (spd <= 0.01f) spd = 0.01f;
     speed_.store(spd, std::memory_order_relaxed);
@@ -178,26 +176,9 @@ bool AudioOutput::convert(const FramePtr& frame, AudioChunk& chunk) {
 
 void AudioOutput::closeQueue() { queue_.close(); }
 
-void AudioOutput::pauseDevice() {
-    devicePaused_.store(true, std::memory_order_relaxed);
-    SDL_PauseAudioDevice(dev_, 1);
-}
+void AudioOutput::pauseDevice() { SDL_PauseAudioDevice(dev_, 1); }
 
-void AudioOutput::resumeDevice() {
-    SDL_PauseAudioDevice(dev_, 0);
-    devicePaused_.store(false, std::memory_order_relaxed);
-}
-
-void AudioOutput::setClock(double t) {
-    std::lock_guard<std::mutex> lock(clockMutex_);
-    writeHead_ = t;
-}
-
-double AudioOutput::clock() const {
-    if (devicePaused_.load(std::memory_order_relaxed)) return -1.0;
-    std::lock_guard<std::mutex> lock(clockMutex_);
-    return writeHead_;
-}
+void AudioOutput::resumeDevice() { SDL_PauseAudioDevice(dev_, 0); }
 
 void SDLCALL AudioOutput::sdlCallback(void* userdata, Uint8* stream, int len) {
     static_cast<AudioOutput*>(userdata)->fill(stream, len);
@@ -212,6 +193,7 @@ void AudioOutput::fill(Uint8* stream, int len) {
         if (current_.data.empty()) {
             AudioChunk chunk;
             if (!queue_.tryPop(chunk)) {
+                // 队列空：输出静音，按当前速度推进时钟
                 std::lock_guard<std::mutex> lock(clockMutex_);
                 if (writeHead_ >= 0.0) {
                     writeHead_ += (double)space / 4.0 / spec_.freq
