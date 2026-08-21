@@ -12,12 +12,10 @@ ThumbnailExtractor::~ThumbnailExtractor() { close(); }
 bool ThumbnailExtractor::open(const std::string& path) {
     close();
 
-    // 打开文件（不读音频流，减少开销）
     if (avformat_open_input(&ctx_, path.c_str(), nullptr, nullptr) < 0)
         return false;
     if (avformat_find_stream_info(ctx_, nullptr) < 0) { close(); return false; }
 
-    // 找视频流
     videoStreamIdx_ = -1;
     for (unsigned i = 0; i < ctx_->nb_streams; ++i) {
         if (ctx_->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
@@ -37,7 +35,6 @@ bool ThumbnailExtractor::open(const std::string& path) {
 
     srcW_ = codecCtx_->width;
     srcH_ = codecCtx_->height;
-
     frame_ = av_frame_alloc();
     return true;
 }
@@ -57,31 +54,54 @@ bool ThumbnailExtractor::getFrame(double seconds, uint8_t** outPixels, int& outW
     *outPixels = nullptr;
     outW = outH = 0;
 
-    // Seek 到目标时间（AVSEEK_FLAG_BACKWARD 回退到最近关键帧）
+    // Seek 到目标时间
     AVStream* vs = ctx_->streams[videoStreamIdx_];
+    double durationSec = (double)vs->duration / AV_TIME_BASE;
+    // 边界保护：不 seek 到超出范围的位置
+    if (seconds < 0) seconds = 0;
+    if (durationSec > 0 && seconds > durationSec) seconds = durationSec * 0.95;
+
     int64_t ts = (int64_t)(seconds * AV_TIME_BASE);
     av_seek_frame(ctx_, -1, ts, AVSEEK_FLAG_BACKWARD);
-
-    // 清空解码器缓冲
     avcodec_flush_buffers(codecCtx_);
 
-    // 读包 + 解码，直到拿到一帧
+    // 读包 + 解码，限制总读包数防止死循环
     AVPacket* pkt = av_packet_alloc();
     bool gotFrame = false;
-    int tries = 0;
+    int packetsRead = 0;
+    const int maxPackets = 128;  // 最多读 128 个包
 
-    while (tries < 30) {
+    while (packetsRead < maxPackets) {
         int ret = av_read_frame(ctx_, pkt);
-        if (ret < 0) break;
-        if (pkt->stream_index != videoStreamIdx_) { av_packet_unref(pkt); continue; }
+        if (ret < 0) break;  // EOF 或错误
+
+        packetsRead++;
+
+        if (pkt->stream_index != videoStreamIdx_) {
+            av_packet_unref(pkt);
+            continue;
+        }
 
         ret = avcodec_send_packet(codecCtx_, pkt);
         av_packet_unref(pkt);
-        if (ret < 0) { tries++; continue; }
+        if (ret < 0) continue;
 
-        ret = avcodec_receive_frame(codecCtx_, frame_);
-        if (ret == 0) { gotFrame = true; break; }
-        tries++;
+        // 循环接收帧（处理 B 帧等情况）
+        while (true) {
+            ret = avcodec_receive_frame(codecCtx_, frame_);
+            if (ret == 0) { gotFrame = true; break; }
+            if (ret == AVERROR(EAGAIN)) break;  // 需要更多包
+            if (ret == AVERROR_EOF) break;       // 流结束
+            break;
+        }
+        if (gotFrame) break;
+    }
+
+    // 尝试 flush 解码器获取剩余帧
+    if (!gotFrame) {
+        avcodec_send_packet(codecCtx_, nullptr);
+        if (avcodec_receive_frame(codecCtx_, frame_) == 0)
+            gotFrame = true;
     }
 
     av_packet_free(&pkt);

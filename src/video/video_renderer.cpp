@@ -666,14 +666,14 @@ void VideoRenderer::drawControls(const RenderStats& stats) {
         fillRoundedRect(renderer_, thumbX, trackY - 4, 16, trackH + 8, 8,
                         255, 255, 255, (Uint8)(255 * a / 255));
 
-        // M15: 缩略图预览（在进度条上方显示）
+        // M15: 缩略图预览（在进度条上方，居中于鼠标位置）
         if (thumbTex_ && thumbW_ > 0 && thumbH_ > 0) {
             int maxThumbW = 160;
             int maxThumbH = 90;
             float scale = std::min((float)maxThumbW / thumbW_, (float)maxThumbH / thumbH_);
             int dispW = (int)(thumbW_ * scale);
             int dispH = (int)(thumbH_ * scale);
-            int thumbCenterX = progX + fillW;
+            int thumbCenterX = mouseX_;  // 居中于鼠标 X 坐标
             int thumbX2 = thumbCenterX - dispW / 2;
             int thumbY2 = trackY - dispH - 12;
             // 边界约束
