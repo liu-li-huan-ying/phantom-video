@@ -16,6 +16,7 @@
 #include "core/thumbnail_extractor.h"
 #include "ui/osd.h"
 #include "ui/custom_titlebar.h"
+#include "ui/playlist_panel.h"
 #include "video/video_renderer.h"
 
 static std::vector<std::string> utf8Args() {
@@ -171,6 +172,10 @@ auto args = utf8Args();
     }
     playlist.setMode(static_cast<PlayMode>(cfg.playMode));
 
+    PlaylistPanel panel;
+    panel.init(vrender.renderer());
+    panel.setPlaylist(&playlist);
+
     player.setVolume(cfg.volume);
 
     auto openCurrent = [&]() {
@@ -280,19 +285,23 @@ auto args = utf8Args();
             case SDL_MOUSEMOTION:
                 {
                     int mx = e.motion.x, my = e.motion.y;
+                    int winW = 0, winH = 0;
+                    SDL_GetWindowSize(win, &winW, &winH);
+                    // M16: 播放列表面板事件优先处理
+                    panel.setPlaylist(&playlist);
+                    if (panel.handleMouseMove(mx, my, winH)) {
+                        vrender.setPanelWidth(panel.width());
+                        break;
+                    }
                     vrender.onMouseMove(mx, my);
                     if (draggingProgress) {
-                        int winW = 0, winH = 0;
-                        SDL_GetWindowSize(win, &winW, &winH);
-                        ControlLayout lay = ControlLayout::compute(winW, winH);
+                        ControlLayout lay = ControlLayout::compute(winW, winH, panel.width());
                         float pct = (float)(mx - lay.progX) / lay.progW;
                         if (pct < 0) pct = 0; if (pct > 1) pct = 1;
                         player.seek(pct * player.duration());
                         vrender.setThumbnail(nullptr, 0, 0, -1);
                     } else if (draggingVolume) {
-                        int winW = 0, winH = 0;
-                        SDL_GetWindowSize(win, &winW, &winH);
-                        ControlLayout lay = ControlLayout::compute(winW, winH);
+                        ControlLayout lay = ControlLayout::compute(winW, winH, panel.width());
                         const int ph = 90, py = lay.barY - ph - 12;
                         float v = 1.0f - (float)(my - py - 6) / (ph - 12);
                         if (v < 0) v = 0; if (v > 1) v = 1;
@@ -302,7 +311,7 @@ auto args = utf8Args();
                         // 进度条 hover 缩略图
                         int winW = 0, winH = 0;
                         SDL_GetWindowSize(win, &winW, &winH);
-                        ControlLayout lay = ControlLayout::compute(winW, winH);
+                        ControlLayout lay = ControlLayout::compute(winW, winH, panel.width());
                         bool overProg = mx >= lay.progX && mx < lay.progX + lay.progW &&
                                         my >= lay.progY - 10 && my < lay.progY + 12;
                         if (overProg && player.duration() > 0) {
@@ -349,7 +358,21 @@ auto args = utf8Args();
                     int mx = e.button.x, my = e.button.y;
                     int winW = 0, winH = 0;
                     SDL_GetWindowSize(win, &winW, &winH);
-                    ControlLayout lay = ControlLayout::compute(winW, winH);
+                    // M16: 播放列表面板事件优先处理
+                    if (panel.handleMouseDown(mx, my, winH)) {
+                        vrender.setPanelWidth(panel.width());
+                        // 检查面板点击选曲
+                        int clicked = panel.clickedIndex();
+                        if (clicked >= 0 && clicked < (int)playlist.size()) {
+                            // 跳转到点击的曲目
+                            while (playlist.index() < clicked) playlist.next();
+                            while (playlist.index() > clicked) playlist.prev();
+                            openCurrent();
+                            panel.clearClick();
+                        }
+                        break;
+                    }
+                    ControlLayout lay = ControlLayout::compute(winW, winH, panel.width());
                     const int btnY = lay.btnY, bs = lay.btnSize;
                     bool hitControl = false;
                     // Prev
@@ -432,8 +455,16 @@ auto args = utf8Args();
                 }
                 break;
             case SDL_MOUSEBUTTONUP:
+                panel.handleMouseUp(e.button.x, e.button.y);
                 draggingProgress = false;
                 draggingVolume = false;
+                break;
+            case SDL_MOUSEWHEEL:
+                {
+                    int winH = 0;
+                    SDL_GetWindowSize(win, nullptr, &winH);
+                    panel.handleMouseWheel(e.wheel.y, winH);
+                }
                 break;
             case SDL_KEYDOWN:
                 switch (e.key.keysym.sym) {
@@ -545,6 +576,13 @@ auto args = utf8Args();
         }
         // 绘制自定义标题栏（每帧，覆盖 SDL 渲染）
         titlebar.draw(vrender.renderer());
+        // M16: 绘制播放列表面板
+        {
+            int pw = 0, ph = 0;
+            SDL_GetWindowSize(win, &pw, &ph);
+            panel.setPlaylist(&playlist);
+            panel.draw(playlist.index(), ph);
+        }
 
         SDL_RenderPresent(vrender.renderer());
         SDL_Delay(8);

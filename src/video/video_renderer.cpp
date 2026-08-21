@@ -542,23 +542,24 @@ void VideoRenderer::drawSubtitle(const RenderStats& stats) {
     SDL_RenderCopy(renderer_, (SDL_Texture*)subtitleTexture_, nullptr, &dst);
 }
 
-ControlLayout ControlLayout::compute(int winW, int winH) {
+ControlLayout ControlLayout::compute(int winW, int winH, int panelWidth) {
     ControlLayout l;
     l.btnSize = 40;
     l.gap = 12;
     const int titleH = 32;  // 标题栏高度
+    int areaW = winW - panelWidth;  // 减去播放列表面板宽度
     // 进度条贴底全宽（独立一行），控制按钮行在进度条上方
     l.progX = 8;
     l.progY = winH - 5;
-    l.progW = winW - 16;
+    l.progW = areaW - 16;
     l.barY = winH - 5 - 4 - 64;  // 控制栏 64px 高，位于进度条上方
     l.btnY = l.barY + (64 - l.btnSize) / 2;
     // 左侧播放控制组
     l.prevX = 16;
     l.playX = l.prevX + l.btnSize + l.gap;
     l.nextX = l.playX + l.btnSize + l.gap;
-    // 右侧功能组（右对齐）
-    l.fsX = winW - 16 - l.btnSize;
+    // 右侧功能组（右对齐到 areaW）
+    l.fsX = areaW - 16 - l.btnSize;
     l.volX = l.fsX - l.btnSize - l.gap;
     l.speedX = l.volX - l.btnSize - l.gap;
     l.modeX = l.speedX - l.btnSize - l.gap;
@@ -568,7 +569,7 @@ ControlLayout ControlLayout::compute(int winW, int winH) {
 void VideoRenderer::drawControls(const RenderStats& stats) {
     int winW = 0, winH = 0;
     SDL_GetWindowSize(window_, &winW, &winH);
-    ControlLayout lay = ControlLayout::compute(winW, winH);
+    ControlLayout lay = ControlLayout::compute(winW, winH, panelWidth_);
     const int h = 64;
     const int barY = lay.barY;
 
@@ -779,9 +780,10 @@ void VideoRenderer::drawBackground() {
     int w = 0, h = 0;
     SDL_GetWindowSize(window_, &w, &h);
     const int titleH = 32;  // 标题栏高度
+    int areaW = w - panelWidth_;  // 减去面板宽度
     // 视频区域纯黑 (0,0,0)，与标题栏 (30,30,30) 形成层次感
     SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255);
-    SDL_Rect videoArea{ 0, titleH, w, h - titleH };
+    SDL_Rect videoArea{ 0, titleH, areaW, h - titleH };
     SDL_RenderFillRect(renderer_, &videoArea);
 }
 
@@ -848,12 +850,13 @@ void VideoRenderer::render(const AVFrame* frame, const RenderStats& stats) {
     SDL_GetWindowSize(window_, &winW, &winH);
     const int titleH = 32;  // 标题栏高度
     int areaY = titleH;     // 视频区域从标题栏下方开始
+    int areaW = winW - panelWidth_;  // 减去播放列表面板宽度
     int areaH = winH - titleH;
-    float scale = std::min((float)winW / fw_, (float)areaH / fh_);
+    float scale = std::min((float)areaW / fw_, (float)areaH / fh_);
     SDL_Rect dst;
     dst.w = (int)(fw_ * scale);
     dst.h = (int)(fh_ * scale);
-    dst.x = (winW - dst.w) / 2;
+    dst.x = (areaW - dst.w) / 2;
     dst.y = areaY + (areaH - dst.h) / 2;
 
     SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255);

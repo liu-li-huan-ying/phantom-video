@@ -38,7 +38,7 @@ struct ControlLayout {
     int gap = 12;
     int prevX = 0, playX = 0, nextX = 0, modeX = 0, speedX = 0, volX = 0, fsX = 0;
     int progX = 0, progY = 0, progW = 0;  // 进度条（贴底全宽）
-    static ControlLayout compute(int winW, int winH);
+    static ControlLayout compute(int winW, int winH, int panelWidth = 0);
 };
 
 class VideoRenderer {
@@ -60,6 +60,8 @@ public:
     void toggleSpeedMenu();
     bool speedMenuOpen() const { return speedMenuOpen_; }
     void setSpeedMenuOpen(bool b) { speedMenuOpen_ = b; }
+    void setPanelWidth(int w) { panelWidth_ = w; }
+    int panelWidth() const { return panelWidth_; }
     static SDL_Rect speedMenuItemRect(const ControlLayout& lay, int index);
 
     // M15: 缩略图预览
@@ -101,4 +103,5 @@ private:
     SDL_Texture* thumbTex_ = nullptr;
     int thumbW_ = 0, thumbH_ = 0;
     double thumbTime_ = -1.0;
+    int panelWidth_ = 0;  // M16: 播放列表面板宽度
 };

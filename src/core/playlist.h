@@ -35,6 +35,7 @@ public:
     int index() const { return idx_; }
     int size() const { return (int)files_.size(); }
     bool empty() const { return files_.empty(); }
+    const std::string& fileAt(int displayIndex) const { return files_[order_[displayIndex]]; }
 
 private:
     int currentIndex() const;
