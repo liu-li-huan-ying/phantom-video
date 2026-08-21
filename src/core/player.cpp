@@ -317,19 +317,16 @@ FramePtr Player::pullFrame() {
 
     double pts = framePts(f);
     if (audioWait_.load()) {
-        // M17: seek 期间逐帧显示，用户看到画面从关键帧推进到目标
         videoQueue_.pop(f);
         lastFrame_ = f;
-        // 到达目标帧附近时才恢复音频
         double seekTarget = audioSeekTarget_.load();
         if (pts >= seekTarget - 0.1 || pts < videoBasePts_ - 1.0) {
-            // PTS 已超过目标，或 PTS 发生跳变（新 seek）→ 校准时钟并恢复音频
             videoBasePts_ = pts;
             videoBaseTicks_ = SDL_GetPerformanceCounter();
             playing_ = !paused_.load();
-            if (audioWait_.exchange(false) && audio_ && !paused_.load())
-                audio_->resumeDevice();
-            if (onSeekingChanged) onSeekingChanged(false);  // M18: 通知 seeking 完成
+            // 不再在这里恢复设备 — 由 audioLoop() 推入第一帧后恢复
+            audioWait_.store(false);
+            if (onSeekingChanged) onSeekingChanged(false);
         }
         return f;
     }
@@ -350,10 +347,6 @@ FramePtr Player::pullFrame() {
     videoBaseTicks_ = SDL_GetPerformanceCounter();
     playing_ = !paused_.load();
 
-    // seek: audio was paused + clock set to target; resume once video catches up
-    if (audioWait_.exchange(false) && audio_ && !paused_.load())
-        audio_->resumeDevice();
-
     while (videoQueue_.peek(f) && f) {
         if (framePts(f) <= c - 0.05)
             videoQueue_.pop(f);
@@ -368,10 +361,9 @@ void Player::doSeek(double t) {
     audioSeeking_.store(true);
     if (onSeekingChanged) onSeekingChanged(true);
     if (audio_) {
-        // 暂停 → 清空+重置 → 恢复，保证 fill() 不在修改期间运行
+        // 暂停 → 清空+重置 → 不恢复！等音频线程推入第一帧再恢复
         audio_->pauseDevice();
         audio_->clearAndReset(t);
-        audio_->resumeDevice();
     }
     videoQueue_.clear();
     videoClockStarted_ = true;
@@ -443,12 +435,14 @@ void Player::decodeLoop() {
 }
 
 void Player::audioLoop() {
+    bool seekResumePending = false;
     while (!stop_.load()) {
         if (!audioDemuxer_ || !audioEnabled_.load()) break;
         if (audioSeekPending_.exchange(false)) {
             audioDemuxer_->seek(audioSeekTarget_.load());
             if (audioDecoder_) audioDecoder_->flushBuffers();
-            audioSeeking_.store(false);  // M18: seek 完成，允许新帧推入
+            audioSeeking_.store(false);
+            seekResumePending = true;
         }
         PacketPtr pkt = audioDemuxer_->readPacket();
         if (!pkt) break;
@@ -456,13 +450,18 @@ void Player::audioLoop() {
         if (!audioDecoder_ || !audioDecoder_->send(pkt.get())) continue;
         while (FramePtr f = audioDecoder_->receive()) {
             if (seekRequested() || stop_.load()) break;
-            if (audioSeeking_.load()) continue;  // M18: 跳过旧帧
+            if (audioSeeking_.load()) continue;
             if (framePts(f) < dropUntil_.load()) continue;
             while (!audio_ || !audio_->tryPush(f)) {
                 if (seekRequested() || stop_.load()) break;
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
             if (seekRequested() || stop_.load()) break;
+            // seek 后第一帧推入，恢复音频设备（此时队列有数据，fill() 不会空跑）
+            if (seekResumePending && audio_) {
+                audio_->resumeDevice();
+                seekResumePending = false;
+            }
         }
     }
     if (stop_.load()) return;

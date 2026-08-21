@@ -178,9 +178,15 @@ bool AudioOutput::convert(const FramePtr& frame, AudioChunk& chunk) {
 
 void AudioOutput::closeQueue() { queue_.close(); }
 
-void AudioOutput::pauseDevice() { SDL_PauseAudioDevice(dev_, 1); }
+void AudioOutput::pauseDevice() {
+    devicePaused_.store(true, std::memory_order_relaxed);
+    SDL_PauseAudioDevice(dev_, 1);
+}
 
-void AudioOutput::resumeDevice() { SDL_PauseAudioDevice(dev_, 0); }
+void AudioOutput::resumeDevice() {
+    SDL_PauseAudioDevice(dev_, 0);
+    devicePaused_.store(false, std::memory_order_relaxed);
+}
 
 void AudioOutput::setClock(double t) {
     std::lock_guard<std::mutex> lock(clockMutex_);
@@ -188,6 +194,7 @@ void AudioOutput::setClock(double t) {
 }
 
 double AudioOutput::clock() const {
+    if (devicePaused_.load(std::memory_order_relaxed)) return -1.0;
     std::lock_guard<std::mutex> lock(clockMutex_);
     return writeHead_;
 }

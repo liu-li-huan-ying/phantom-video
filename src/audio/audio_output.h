@@ -69,4 +69,5 @@ private:
     std::atomic<float> normGain_{ 1.0f };
     float peakTracker_ = 0.0f;
     Uint32 peakDecayTime_ = 0;
+    std::atomic<bool> devicePaused_{ false };
 };
