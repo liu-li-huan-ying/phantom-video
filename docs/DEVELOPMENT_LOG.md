@@ -320,6 +320,15 @@
 - **图形后端**：当前项目使用 SDL2，建议未来迁移至 Direct2D/DirectWrite（Windows）或 SDL3 + SDL_RendererGeometry 以获得更流畅的圆角和阴影渲染；若坚持 SDL2，可通过 CPU 软件光栅化实现圆角效果。
 - 任务难度：较高，涉及 Win32 API 与 SDL 结合、自绘大量 UI 元素，建议在 M14-M15 阶段作为主要目标攻克。
 - 计划：第一阶段实现基本的自定义背景和圆角窗口；第二阶段实现可拖动标题栏和功能按钮自绘；第三阶段优化图形后端，迁移至 Direct2D 或 SDL3。
+
+### M14 进度更新（2026-08-21）— 阶段 A：DWM 窗口阴影 + 圆角
+- **改动**：
+  - CMakeLists.txt 添加 `dwmapi` 链接库
+  - main.cpp 添加 `#include <SDL_syswm.h>` + `#include <dwmapi.h>`
+  - SDL_CreateWindow 后获取 HWND（`SDL_GetWindowWMInfo`），调用 `DwmExtendFrameIntoClientArea` 启用系统窗口阴影
+  - 调用 `DwmSetWindowAttribute(DWMWA_WINDOW_CORNER_PREFERENCE=33, pref=2)` 启用 Windows 11 圆角窗口
+- **验证**：cmake 构建成功（仅 SDL_MAIN_HANDLED redefined 无害警告），vplayer.exe 启动 5 秒正常退出无崩溃
+- **结论**：M14 阶段 A 完成，窗口阴影+圆角已启用，为后续自定义标题栏和背景绘制打下基础
 ### 阶段 M15：音量标准化 + 关键帧预览（已合并自原 M14）
 - 任务：EBU R128 音量标准化实现 + 进度条关键帧预览功能
 - 内容已合并自原 M14 阶段：

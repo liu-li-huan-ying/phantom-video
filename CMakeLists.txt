@@ -45,7 +45,7 @@ foreach(f ${SDL2_CFLAGS_OTHER})
   endif()
 endforeach()
 
-target_link_libraries(vplayer PRIVATE ${SDL2_LINK} ${FFMPEG_LIBS} shell32
+target_link_libraries(vplayer PRIVATE ${SDL2_LINK} ${FFMPEG_LIBS} shell32 dwmapi
   "${DEPS_ROOT}/SDL2_image-2.8.2/x86_64-w64-mingw32/lib/libSDL2_image.dll.a")
 
 # 拷贝运行时 DLL 到构建目录（依赖根目录可通过 -DDEPS_ROOT= 覆盖）

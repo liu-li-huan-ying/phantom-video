@@ -1,8 +1,10 @@
 ﻿#define SDL_MAIN_HANDLED
 #include <SDL.h>
+#include <SDL_syswm.h>
 
 #include <windows.h>
 #include <shellapi.h>
+#include <dwmapi.h>
 
 #include <cstdio>
 #include <string>
@@ -100,6 +102,21 @@ int main(int argc, char** argv) {
         if (icon) {
             SDL_SetWindowIcon(win, icon);
             SDL_FreeSurface(icon);
+        }
+    }
+
+    // --- DWM: 启用窗口阴影 + 圆角（Windows 11+）---
+    {
+        SDL_SysWMinfo wmi;
+        SDL_VERSION(&wmi.version);
+        if (SDL_GetWindowWMInfo(win, &wmi)) {
+            HWND hwnd = wmi.info.win.window;
+            // DwmExtendFrameIntoClientArea: 使窗口有系统阴影
+            MARGINS m = {0, 0, 0, 0};
+            DwmExtendFrameIntoClientArea(hwnd, &m);
+            // DWMWA_WINDOW_CORNER_PREFERENCE (33): 2=圆角 (Windows 11)
+            int pref = 2;
+            DwmSetWindowAttribute(hwnd, 33, &pref, sizeof(pref));
         }
     }
 
