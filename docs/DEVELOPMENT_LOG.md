@@ -577,3 +577,25 @@
 - `doSeek()` 触发 `onSeekingChanged(true)`，`pullFrame()` 到达目标帧时触发 `onSeekingChanged(false)`
 - `main.cpp` 连接回调：seeking 开始显示指示器，完成隐藏
 - **提交**：`8f2b4ec`
+
+---
+
+### 阶段 M19：倍速保调变速
+
+**目标**：变速不改变音色（保调），消除切换卡顿
+
+#### M19-1：FFmpeg atempo 滤镜替代纯重采样
+- **问题**：旧方案通过改变 SwrContext 输出采样率实现变速，本质是"变速变调"（高倍尖锐/低倍沉闷）
+- **方案**：使用 FFmpeg `atempo` 滤镜做时间拉伸（WSOLA 算法），保持音调不变
+- 滤镜图：`abuffer → aformat(sample_fmts=flt) → atempo(speed) → abuffersink`
+- SwrContext 固定为 `float→S16, 44100Hz`（仅做格式转换，不再控制速度）
+- `setSpeed()` 仅标记 `speedChanged_`，在 `convert()` 中 flush 旧滤镜图+重建
+- 速度变化时旧滤镜图剩余样本被 flush 到队列，无卡顿过渡
+- CMakeLists.txt 新增 `avfilter.lib` + `avfilter-12.dll`
+
+#### M19-2：消除变速卡顿
+- 移除 `Player::setSpeed()` 中的 `audioSeekPending_`（atempo 不改变时钟，无需 seek）
+- 移除 `clearPending_` 机制（队列不再需要清空）
+- 变速时旧 chunks 按旧速率播放完后自然过渡到新速率 chunks
+
+- **提交**：`50e65bd`
