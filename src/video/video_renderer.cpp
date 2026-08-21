@@ -869,9 +869,10 @@ void VideoRenderer::render(const AVFrame* frame, const RenderStats& stats) {
     drawPauseOverlay(stats);
 }
 
-void VideoRenderer::showPauseOverlay() {
+void VideoRenderer::showPauseOverlay(PauseIcon icon) {
+    pauseOverlayIcon_ = icon;
     pauseOverlayAlpha_ = 1;
-    pauseOverlayUntil_ = SDL_GetTicks() + 1200;  // 显示 1.2 秒
+    pauseOverlayUntil_ = SDL_GetTicks() + 2000;
 }
 
 void VideoRenderer::drawPauseOverlay(const RenderStats& stats) {
@@ -879,9 +880,9 @@ void VideoRenderer::drawPauseOverlay(const RenderStats& stats) {
 
     Uint32 now = SDL_GetTicks();
     if (now > pauseOverlayUntil_ && pauseOverlayAlpha_ > 0) {
-        pauseOverlayAlpha_ = std::max(0, pauseOverlayAlpha_ - 15);
+        pauseOverlayAlpha_ = std::max(0, pauseOverlayAlpha_ - 12);
     } else if (pauseOverlayAlpha_ > 0 && pauseOverlayAlpha_ < 200) {
-        pauseOverlayAlpha_ = std::min(200, pauseOverlayAlpha_ + 20);
+        pauseOverlayAlpha_ = std::min(200, pauseOverlayAlpha_ + 25);
     }
     if (pauseOverlayAlpha_ <= 0) return;
 
@@ -890,24 +891,47 @@ void VideoRenderer::drawPauseOverlay(const RenderStats& stats) {
 
     SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
 
-    // 半透明暗色遮罩（视频区域）
-    SDL_SetRenderDrawColor(renderer_, 0, 0, 0, (Uint8)(pauseOverlayAlpha_ * 0.4f));
+    // 半透明暗色遮罩
+    SDL_SetRenderDrawColor(renderer_, 0, 0, 0, (Uint8)(pauseOverlayAlpha_ * 0.35f));
     SDL_Rect overlay{ 0, 32, winW - panelWidth_, winH - 32 };
     SDL_RenderFillRect(renderer_, &overlay);
 
-    // 大暂停图标（两个竖条）
     int cx = (winW - panelWidth_) / 2;
     int cy = winH / 2;
-    int barW = 28;
-    int barH = 100;
-    int gap = 24;
     Uint8 a = (Uint8)pauseOverlayAlpha_;
     SDL_SetRenderDrawColor(renderer_, 255, 255, 255, a);
 
-    SDL_Rect bar1{ cx - gap - barW, cy - barH / 2, barW, barH };
-    SDL_Rect bar2{ cx + gap, cy - barH / 2, barW, barH };
-    SDL_RenderFillRect(renderer_, &bar1);
-    SDL_RenderFillRect(renderer_, &bar2);
+    if (pauseOverlayIcon_ == PauseIcon::Play) {
+        // 大三角形播放图标 ▶（指向右）
+        int size = 70;
+        SDL_Point tri[3];
+        tri[0] = { cx - size / 3, cy - size / 2 };  // 左上
+        tri[1] = { cx - size / 3, cy + size / 2 };  // 左下
+        tri[2] = { cx + size / 2, cy };               // 右中
+        // 用多边形填充（SDL 没有直接填充三角形，用水平线扫描）
+        for (int y = -size / 2; y <= size / 2; ++y) {
+            float t = (float)(y + size / 2) / size;
+            int leftX = cx - size / 3;
+            int rightX;
+            if (t < 0.5f) {
+                // 上半部分：左边界固定，右边界从 leftX 线性到 cx+size/2
+                rightX = leftX + (int)((cx + size / 2 - leftX) * (t / 0.5f));
+            } else {
+                // 下半部分：左边界固定，右边界从 cx+size/2 线性回到 leftX
+                rightX = cx + size / 2 - (int)((cx + size / 2 - leftX) * ((t - 0.5f) / 0.5f));
+            }
+            SDL_RenderDrawLine(renderer_, leftX, cy + y, rightX, cy + y);
+        }
+    } else {
+        // 双竖线暂停图标 ||
+        int barW = 24;
+        int barH = 80;
+        int gap = 20;
+        SDL_Rect bar1{ cx - gap - barW, cy - barH / 2, barW, barH };
+        SDL_Rect bar2{ cx + gap, cy - barH / 2, barW, barH };
+        SDL_RenderFillRect(renderer_, &bar1);
+        SDL_RenderFillRect(renderer_, &bar2);
+    }
 }
 
 void VideoRenderer::clear() {

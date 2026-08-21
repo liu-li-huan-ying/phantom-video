@@ -294,6 +294,14 @@ auto args = utf8Args();
                         break;
                     }
                     vrender.onMouseMove(mx, my);
+                    // 暂停状态鼠标移入视频区域：显示播放三角形
+                    if (player.hasMedia() && player.state() == Player::State::Paused) {
+                        int titleH = 32;
+                        int areaW = winW - panel.width();
+                        if (mx >= 0 && mx < areaW && my >= titleH && my < winH) {
+                            vrender.showPauseOverlay(VideoRenderer::PauseIcon::Play);
+                        }
+                    }
                     if (draggingProgress) {
                         ControlLayout lay = ControlLayout::compute(winW, winH, panel.width());
                         float pct = (float)(mx - lay.progX) / lay.progW;
@@ -446,10 +454,17 @@ auto args = utf8Args();
                         draggingProgress = true;
                         hitControl = true;
                     }
-                    // 单击视频区域暂停/继续 + 显示大暂停图标
+                    // 单击视频区域暂停/继续 + 显示叠加图标
                     if (e.button.clicks == 1 && !hitControl && player.hasMedia()) {
+                        bool wasPaused = (player.state() == Player::State::Paused);
                         player.togglePause();
-                        vrender.showPauseOverlay();
+                        if (wasPaused) {
+                            // 从暂停恢复播放 → 显示播放三角形
+                            vrender.showPauseOverlay(VideoRenderer::PauseIcon::Play);
+                        } else {
+                            // 从播放进入暂停 → 显示暂停双竖条
+                            vrender.showPauseOverlay(VideoRenderer::PauseIcon::Pause);
+                        }
                     }
                     // Double-click for fullscreen only outside controls
                     if (e.button.clicks == 2 && !hitControl) {

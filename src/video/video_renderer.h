@@ -68,7 +68,8 @@ public:
     void setThumbnail(SDL_Texture* tex, int w, int h, double timeSec);
 
     // M16: 暂停叠加图标
-    void showPauseOverlay();
+    enum class PauseIcon { None, Play, Pause };
+    void showPauseOverlay(PauseIcon icon);
     bool isPauseOverlayVisible() const { return pauseOverlayAlpha_ > 0; }
 
 private:
@@ -112,4 +113,5 @@ private:
     // M16: 暂停叠加图标
     int pauseOverlayAlpha_ = 0;   // 0~255 淡入淡出
     Uint32 pauseOverlayUntil_ = 0; // 显示截止时间
+    PauseIcon pauseOverlayIcon_ = PauseIcon::None;
 };
