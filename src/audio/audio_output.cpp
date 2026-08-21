@@ -77,6 +77,12 @@ bool AudioOutput::open(const AVCodecParameters* par, double ptsScale) {
 void AudioOutput::setSpeed(float spd) {
     if (spd <= 0.01f) spd = 0.01f;
     speed_.store(spd, std::memory_order_relaxed);
+    // 原子捕获锚定点（无竞态，Player::setSpeed 直接读 anchorPts_）
+    {
+        std::lock_guard<std::mutex> lock(clockMutex_);
+        anchorPts_.store(writeHead_ > 0.0 ? writeHead_ : lastPts_,
+                         std::memory_order_relaxed);
+    }
     speedChanged_.store(true, std::memory_order_release);
 }
 
@@ -98,13 +104,18 @@ bool AudioOutput::convert(const FramePtr& frame, AudioChunk& chunk) {
     std::lock_guard<std::mutex> lock(swrMutex_);
     if (!swr_ || !sonic_) return false;
 
-    // 规则1：切倍速 = 清队列 + 重建 Sonic + 重置时钟
+    // 规则1：切倍速 = 清队列 + 重建 Sonic + 锚定时钟
     if (speedChanged_.exchange(false, std::memory_order_acquire)) {
         float spd = speed_.load(std::memory_order_relaxed);
         queue_.clear();
         current_.data.clear();
         offset_ = 0;
-        resetClock();
+
+        // 规则1b：时钟锚定到切倍速瞬间的 pts
+        {
+            std::lock_guard<std::mutex> lock(clockMutex_);
+            writeHead_ = anchorPts_.load(std::memory_order_relaxed);
+        }
 
         if (sonic_) sonicDestroyStream(sonic_);
         sonic_ = sonicCreateStream(spec_.freq, spec_.channels);
@@ -172,6 +183,7 @@ bool AudioOutput::convert(const FramePtr& frame, AudioChunk& chunk) {
     chunk.outRate = spec_.freq;
     chunk.pts = frame->pts == AV_NOPTS_VALUE ? 0.0 : frame->pts * ptsScale_;
     if (chunk.pts < 0.0) chunk.pts = 0.0;
+    lastPts_ = chunk.pts;
 
     return !chunk.data.empty();
 }
@@ -215,7 +227,15 @@ void AudioOutput::fill(Uint8* stream, int len) {
     while (space > 0) {
         if (current_.data.empty()) {
             AudioChunk chunk;
-            if (!queue_.tryPop(chunk)) break;
+            if (!queue_.tryPop(chunk)) {
+                // 规则3：队列空，仍按 speed 推进时钟（宁可断音，不让视频卡死）
+                std::lock_guard<std::mutex> lock(clockMutex_);
+                if (writeHead_ >= 0.0) {
+                    writeHead_ += (double)space / 4.0 / spec_.freq
+                                  * speed_.load(std::memory_order_relaxed);
+                }
+                break;
+            }
             current_ = std::move(chunk);
             offset_ = 0;
             {

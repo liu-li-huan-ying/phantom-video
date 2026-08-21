@@ -619,3 +619,17 @@
 - SwrContext 固定为 `any→S16, 44100Hz`，不再碰速度参数
 - CMakeLists.txt：添加 sonic 静态库（`enable_language(C)` + `add_library(sonic STATIC)`），移除 `avfilter.lib`
 - **提交**：`5a3cb8f`
+
+#### M19 Sonic 正确集成 + 4 条硬规则（2026-08-21）
+- **问题**：Sonic 在1x 仍做 pitch 分析导致嘶嘶声；变速切换时旧 PCM 残留队列导致嗡嗡声；时钟悬空导致视频卡死
+- **4 条硬规则**：
+  1. **speed=1.0 bypass Sonic**：`std::abs(spd-1.0f)<0.001f` 时直通 S16，零处理
+  2. **切倍速 = 原子清队列 + 重建 Sonic**：`speedChanged_` 原子标志 → `queue_.clear()` + `sonicDestroyStream`/`sonicCreateStream`（在解码线程 `convert()` 中执行，无跨线程竞态）
+  3. **时钟锚定到 `anchorPts_`**：`setSpeed()` 原子捕获 `writeHead_` → `convert()` 用 `anchorPts_` 重置时钟 → `Player::setSpeed()` 原子读 `anchorPts_` 设 `dropUntil_`
+  4. **空队列仍推进时钟**：`fill()` 中队列空时 `writeHead_ += space/(4*freq)*speed`，宁可断音不让视频卡死
+- **架构（最终版）**：
+  ```
+  解码 AVFrame → SwrContext(any→S16/44100Hz/2ch) → [speed≠1.0] Sonic(TSM) → Queue → SDL
+  ```
+- **dev 目录迁入项目**：`F:\dev\` → `F:\vedioplayer\dev\`（ffmpeg/sdl2/sdl2_image/sonic），CMakeLists.txt 路径全部更新
+- **提交**：`82ca9c8` + 后续修复

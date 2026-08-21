@@ -214,8 +214,9 @@ void Player::setSpeed(float s) {
     speed_.store(s);
     if (audio_) {
         audio_->setSpeed(s);
-        // 规则3：切倍速时让视频跳过旧帧，追赶新时钟
-        dropUntil_.store(audio_->clock());
+        // dropUntil 用原子锚定点（无竞态）
+        double anchor = audio_->anchorPts_.load(std::memory_order_relaxed);
+        if (anchor > 0.0) dropUntil_.store(anchor);
     }
     videoBaseTicks_ = SDL_GetPerformanceCounter();
 }

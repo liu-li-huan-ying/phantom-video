@@ -33,6 +33,7 @@ public:
     void resetClock();
     void setClock(double t);
     double clock() const;
+    std::atomic<double> anchorPts_{ 0.0 };  // 切倍速时的锚定点（Player 直接读）
 
 private:
     static void SDLCALL sdlCallback(void* userdata, Uint8* stream, int len);
@@ -57,6 +58,7 @@ private:
 
     mutable std::mutex clockMutex_;
     double writeHead_ = -1.0;
+    double lastPts_ = 0.0;
 
     std::atomic<float> volume_{ 0.8f };
     std::atomic<float> speed_{ 1.0f };
