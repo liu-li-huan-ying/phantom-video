@@ -101,8 +101,6 @@ private:
     bool seekPending_ = false;
     double seekTarget_ = 0.0;
 
-    std::mutex opMutex_;  // 串行化 setSpeed() 和 doSeek()，防止交叉修改音频状态
-
     AVBufferRef* hwDeviceCtx_ = nullptr;
     std::atomic<bool> hwDecode_{ false };
 

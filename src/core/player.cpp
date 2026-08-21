@@ -101,7 +101,12 @@ bool Player::openFile(const std::string& path) {
     videoBaseTicks_ = SDL_GetPerformanceCounter();
     state_.store(State::Playing);
 
-    if (audio_) audio_->setSpeed(speed_.load(std::memory_order_relaxed));
+    if (audio_) {
+        float s = speed_.load(std::memory_order_relaxed);
+        audio_->pauseDevice();
+        audio_->setSpeedAndReset(s);
+        audio_->resumeDevice();
+    }
     audioThread_ = std::thread(&Player::audioLoop, this);
     decodeThread_ = std::thread(&Player::decodeLoop, this);
     return true;
@@ -214,16 +219,17 @@ void Player::setVolume(float v) {
 
 void Player::setSpeed(float s) {
     s = std::clamp(s, 0.05f, 3.0f);
-    std::lock_guard<std::mutex> lock(opMutex_);
     speed_.store(s);
     if (audio_) {
-        audio_->setSpeed(s);
-        double anchor = audio_->anchorPts_.load(std::memory_order_relaxed);
-        if (anchor > 0.0) {
-            dropUntil_.store(anchor);
-            uiSeeking_.store(true, std::memory_order_relaxed);
-            uiTargetPts_.store(anchor, std::memory_order_relaxed);
-        }
+        double anchor = audio_->clock();
+        if (anchor < 0.0) anchor = 0.0;
+        audio_->pauseDevice();
+        audio_->setSpeedAndReset(s);
+        audio_->clearAndReset(anchor);
+        audio_->resumeDevice();
+        dropUntil_.store(anchor);
+        uiSeeking_.store(true, std::memory_order_relaxed);
+        uiTargetPts_.store(anchor, std::memory_order_relaxed);
     }
     videoBaseTicks_ = SDL_GetPerformanceCounter();
 }
@@ -359,13 +365,13 @@ FramePtr Player::pullFrame() {
 
 void Player::doSeek(double t) {
     if (!videoDemuxer_) return;
-    std::lock_guard<std::mutex> lock(opMutex_);
     audioSeeking_.store(true);
-    if (onSeekingChanged) onSeekingChanged(true);  // M18: 通知 seeking 开始
+    if (onSeekingChanged) onSeekingChanged(true);
     if (audio_) {
-        audio_->clearQueue();
+        // 暂停 → 清空+重置 → 恢复，保证 fill() 不在修改期间运行
         audio_->pauseDevice();
-        audio_->setClock(t);
+        audio_->clearAndReset(t);
+        audio_->resumeDevice();
     }
     videoQueue_.clear();
     videoClockStarted_ = true;

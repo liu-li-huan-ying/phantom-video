@@ -21,7 +21,6 @@ public:
     bool push(const FramePtr& frame);
     bool tryPush(const FramePtr& frame);
     void closeQueue();
-    void clearQueue();
     void pauseDevice();
     void resumeDevice();
     void setVolume(float v) { volume_.store(v, std::memory_order_relaxed); }
@@ -30,10 +29,13 @@ public:
     bool normalization() const { return normalization_.load(std::memory_order_relaxed); }
     float normalizationGain() const { return normGain_.load(std::memory_order_relaxed); }
     void setSpeed(float spd);
-    void resetClock();
     void setClock(double t);
     double clock() const;
-    std::atomic<double> anchorPts_{ 0.0 };  // 切倍速时的锚定点（Player 直接读）
+
+    // 所有状态变更必须在 pause/resume 之间进行
+    // pauseDevice 停止 SDL 回调，保证 fill() 不会在修改期间运行
+    void clearAndReset(double newClock);
+    void setSpeedAndReset(float spd);
 
 private:
     static void SDLCALL sdlCallback(void* userdata, Uint8* stream, int len);
@@ -49,9 +51,8 @@ private:
     std::mutex swrMutex_;
     AVChannelLayout inLayout_{};
 
-    // Sonic TSM（变速不变调），工作在设备采样率 S16 交错数据上
     sonicStream sonic_ = nullptr;
-    std::mutex sonicMutex_;  // 保护 Sonic 重建（setSpeed vs convert 并发）
+    std::mutex sonicMutex_;
 
     BlockingQueue<AudioChunk, AudioChunkSize> queue_{ 1764000 };
     AudioChunk current_;

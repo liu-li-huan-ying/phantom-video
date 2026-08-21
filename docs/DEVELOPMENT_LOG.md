@@ -653,3 +653,23 @@
 - **锁序**：`opMutex_` → `sonicMutex_` → `clockMutex_`（无循环依赖）
 - **效果**：seek 和倍速切换不再交叉，音频时钟始终连续，视频同步不卡死
 - **提交**：`1a33304`
+
+#### M19 音频线程安全架构重写（2026-08-21）
+- **问题**：前述修复后高频压力测试仍出现 A/V 解耦
+- **根因（3 个数据竞争）**：
+  1. **`current_` + `offset_` 无保护**：SDL callback 线程读 `current_.data` + `offset_`，同时 `setSpeed()`/`clearQueue()` 清空它们 → 未定义行为
+  2. **时钟回退**：`setSpeed()` 重置 `writeHead_ = anchorPts`，但 `fill()` 已把它推过 anchor → 时钟倒退 → 视频冻结
+  3. **`doSeek()` 与 `fill()` 竞争**：`clearQueue()` 清 `current_` 时 `fill()` 正在读
+- **核心洞察**：SDL 回调 `fill()` 不能被阻塞，但必须保证它不在状态变更期间运行
+- **新架构（pause/resume 模式）**：
+  - **所有音频状态变更（清队列、重建 Sonic、重置时钟）必须在 `pauseDevice()` → 操作 → `resumeDevice()` 之间执行**
+  - `pauseDevice()` 停止 SDL 回调 → `fill()` 不再运行 → 无需任何锁保护 `current_`/`offset_`/queue/clock
+  - 操作完成后 `resumeDevice()` 恢复回调
+- **改动**：
+  - `AudioOutput`：移除 `speedChanged_` 标志、`opMutex_`、`clearQueue()`、`resetClock()`、`anchorPts_`
+  - 新增 `clearAndReset(double newClock)` 和 `setSpeedAndReset(float spd)` — 必须在 pause/resume 间调用
+  - `Player::setSpeed()`：`pauseDevice → setSpeedAndReset → clearAndReset(anchor) → resumeDevice`
+  - `Player::doSeek()`：`pauseDevice → clearAndReset(target) → resumeDevice`
+  - `convert()`：同时持 `swrMutex_` + `sonicMutex_`
+- **效果**：零数据竞争，高频操作下 A/V 始终同步
+- **提交**：`9ffeca0`
