@@ -67,6 +67,10 @@ public:
     // M15: 缩略图预览
     void setThumbnail(SDL_Texture* tex, int w, int h, double timeSec);
 
+    // M16: 暂停叠加图标
+    void showPauseOverlay();
+    bool isPauseOverlayVisible() const { return pauseOverlayAlpha_ > 0; }
+
 private:
     SDL_Window* window_ = nullptr;
     SDL_Renderer* renderer_ = nullptr;
@@ -88,6 +92,7 @@ private:
     void drawSubtitle(const RenderStats& stats);
     void drawToast();
     void drawBackground();  // M14-C: 深色主题圆角背景
+    void drawPauseOverlay(const RenderStats& stats);  // M16: 暂停叠加图标
     void destroySubtitleTexture();
     void* subtitleTexture_ = nullptr;  // SDL_Texture*
     int subTexW_ = 0;
@@ -104,4 +109,7 @@ private:
     int thumbW_ = 0, thumbH_ = 0;
     double thumbTime_ = -1.0;
     int panelWidth_ = 0;  // M16: 播放列表面板宽度
+    // M16: 暂停叠加图标
+    int pauseOverlayAlpha_ = 0;   // 0~255 淡入淡出
+    Uint32 pauseOverlayUntil_ = 0; // 显示截止时间
 };

@@ -289,7 +289,7 @@ auto args = utf8Args();
                     SDL_GetWindowSize(win, &winW, &winH);
                     // M16: 播放列表面板事件优先处理
                     panel.setPlaylist(&playlist);
-                    if (panel.handleMouseMove(mx, my, winH)) {
+                    if (panel.handleMouseMove(mx, my, winW, winH)) {
                         vrender.setPanelWidth(panel.width());
                         break;
                     }
@@ -359,7 +359,7 @@ auto args = utf8Args();
                     int winW = 0, winH = 0;
                     SDL_GetWindowSize(win, &winW, &winH);
                     // M16: 播放列表面板事件优先处理
-                    if (panel.handleMouseDown(mx, my, winH)) {
+                    if (panel.handleMouseDown(mx, my, winW, winH)) {
                         vrender.setPanelWidth(panel.width());
                         // 检查面板点击选曲
                         int clicked = panel.clickedIndex();
@@ -446,6 +446,11 @@ auto args = utf8Args();
                         draggingProgress = true;
                         hitControl = true;
                     }
+                    // 单击视频区域暂停/继续 + 显示大暂停图标
+                    if (e.button.clicks == 1 && !hitControl && player.hasMedia()) {
+                        player.togglePause();
+                        vrender.showPauseOverlay();
+                    }
                     // Double-click for fullscreen only outside controls
                     if (e.button.clicks == 2 && !hitControl) {
                         fullscreen = !fullscreen;
@@ -463,7 +468,9 @@ auto args = utf8Args();
                 {
                     int winH = 0;
                     SDL_GetWindowSize(win, nullptr, &winH);
-                    panel.handleMouseWheel(e.wheel.y, winH);
+                    int winW2 = 0, winH2 = 0;
+                    SDL_GetWindowSize(win, &winW2, &winH2);
+                    panel.handleMouseWheel(e.wheel.y, winW2, winH2);
                 }
                 break;
             case SDL_KEYDOWN:
@@ -581,7 +588,7 @@ auto args = utf8Args();
             int pw = 0, ph = 0;
             SDL_GetWindowSize(win, &pw, &ph);
             panel.setPlaylist(&playlist);
-            panel.draw(playlist.index(), ph);
+            panel.draw(playlist.index(), pw, ph);
         }
 
         SDL_RenderPresent(vrender.renderer());

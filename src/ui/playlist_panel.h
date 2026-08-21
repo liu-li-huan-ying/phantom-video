@@ -20,12 +20,12 @@ public:
     int width() const;
     void setPlaylist(const Playlist* pl) { playlist_ = pl; }
 
-    void draw(int currentIndex, int winH);
+    void draw(int currentIndex, int winW, int winH);
 
-    bool handleMouseMove(int mx, int my, int winH);
-    bool handleMouseDown(int mx, int my, int winH);
+    bool handleMouseMove(int mx, int my, int winW, int winH);
+    bool handleMouseDown(int mx, int my, int winW, int winH);
     bool handleMouseUp(int mx, int my);
-    bool handleMouseWheel(int dy, int winH);
+    bool handleMouseWheel(int dy, int winW, int winH);
 
     int clickedIndex() const { return clickedIdx_; }
     void clearClick() { clickedIdx_ = -1; }
@@ -34,8 +34,8 @@ private:
     void loadFormatIcons();
     SDL_Texture* iconForFile(const std::string& path) const;
     std::string extLower(const std::string& path) const;
-    void drawItem(int y, int index, const std::string& filename,
-                  bool isActive, bool isHover, int winH);
+    void drawItem(int baseX, int y, int index, const std::string& filename,
+                  bool isActive, bool isHover, int panelW);
 
     SDL_Renderer* renderer_ = nullptr;
     bool open_ = false;

@@ -866,6 +866,48 @@ void VideoRenderer::render(const AVFrame* frame, const RenderStats& stats) {
     drawSubtitle(stats);
     drawToast();
     drawControls(stats);
+    drawPauseOverlay(stats);
+}
+
+void VideoRenderer::showPauseOverlay() {
+    pauseOverlayAlpha_ = 1;
+    pauseOverlayUntil_ = SDL_GetTicks() + 1200;  // 显示 1.2 秒
+}
+
+void VideoRenderer::drawPauseOverlay(const RenderStats& stats) {
+    if (!renderer_) return;
+
+    Uint32 now = SDL_GetTicks();
+    if (now > pauseOverlayUntil_ && pauseOverlayAlpha_ > 0) {
+        pauseOverlayAlpha_ = std::max(0, pauseOverlayAlpha_ - 15);
+    } else if (pauseOverlayAlpha_ > 0 && pauseOverlayAlpha_ < 200) {
+        pauseOverlayAlpha_ = std::min(200, pauseOverlayAlpha_ + 20);
+    }
+    if (pauseOverlayAlpha_ <= 0) return;
+
+    int winW = 0, winH = 0;
+    SDL_GetWindowSize(window_, &winW, &winH);
+
+    SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+
+    // 半透明暗色遮罩（视频区域）
+    SDL_SetRenderDrawColor(renderer_, 0, 0, 0, (Uint8)(pauseOverlayAlpha_ * 0.4f));
+    SDL_Rect overlay{ 0, 32, winW - panelWidth_, winH - 32 };
+    SDL_RenderFillRect(renderer_, &overlay);
+
+    // 大暂停图标（两个竖条）
+    int cx = (winW - panelWidth_) / 2;
+    int cy = winH / 2;
+    int barW = 28;
+    int barH = 100;
+    int gap = 24;
+    Uint8 a = (Uint8)pauseOverlayAlpha_;
+    SDL_SetRenderDrawColor(renderer_, 255, 255, 255, a);
+
+    SDL_Rect bar1{ cx - gap - barW, cy - barH / 2, barW, barH };
+    SDL_Rect bar2{ cx + gap, cy - barH / 2, barW, barH };
+    SDL_RenderFillRect(renderer_, &bar1);
+    SDL_RenderFillRect(renderer_, &bar2);
 }
 
 void VideoRenderer::clear() {
