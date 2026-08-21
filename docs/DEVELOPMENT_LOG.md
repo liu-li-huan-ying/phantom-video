@@ -366,7 +366,13 @@
   - custom_titlebar.cpp：`WM_NCCALCSIZE` 改为扩展客户区到整个窗口（减 1 像素保留边框阴影）
 - **验证**：cmake 构建成功，vplayer.exe 启动 5 秒正常退出无崩溃
 
-### M14 修复 2（2026-08-21）— 标题栏与视频分离 + SDL 绘制标题栏
+### M14 修复 3（2026-08-21）— 标题栏全面重做
+- **修复白色系统按钮 bug**：`WM_NCHITTEST` 不再返回 `HTMINBUTTON`/`HTMAXBUTTON`/`HTCLOSE`（会触发 Windows 绘制系统按钮），改为返回 `HTCLIENT`，由 `WM_NCLBUTTONDOWN` 自行处理点击
+- **布局重做**：左侧 vplay.bmp logo(20x20) + "VPlayer" 文字(浅灰白 200,200,200)，中间视频文件名(白灰 210,210,210)，右侧三个按钮(最小化/最大化/关闭)
+- **滚动字幕**：文件名超出中间区域时自动从右向左滚动，到端点暂停 1.5s 后反向滚动，SDL_RenderSetClipRect 裁剪溢出文字
+- **色差区分**：标题栏 (30,30,30) + 分隔线 (55,55,55)，视频区域纯黑 (0,0,0)，形成层次感
+- **Logo 加载**：用 IMG_Load 加载 vplay.bmp 缩放到 20x20，全局缓存
+- **验证**：cmake 构建成功，vplayer.exe 启动 5 秒正常退出无崩溃
 - **问题**：自定义标题栏用 GDI 绘制被 SDL_RenderPresent 覆盖；标题栏与视频重叠
 - **修复**：
   - custom_titlebar.cpp 重写：改用 SDL_Renderer 绘制（draw() 方法），每帧在主循环调用
