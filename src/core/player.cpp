@@ -273,7 +273,7 @@ double Player::videoClock() const {
     if (!playing_) return videoBasePts_;
     double elapsed = (double)(SDL_GetPerformanceCounter() - videoBaseTicks_) /
                      (double)SDL_GetPerformanceFrequency();
-    return videoBasePts_ + elapsed * speed_.load();
+    return videoBasePts_ + elapsed;
 }
 
 double Player::clock() const {
@@ -298,7 +298,6 @@ FramePtr Player::pullFrame() {
     if (paused_.load()) return lastFrame_;
 
     double c = clock();
-    float spd = speed_.load();
     double target = c;
     FramePtr f;
 
@@ -332,7 +331,7 @@ FramePtr Player::pullFrame() {
         return f;
     }
     if (pts - target > 0.05) {
-        double remain = (pts - target) / spd;
+        double remain = pts - target;
         int delay = std::min((int)(remain * 1000.0), 50);
         SDL_Delay(delay);
         return lastFrame_;

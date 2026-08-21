@@ -737,3 +737,25 @@
   - 高频切倍速无音画不同步、无失声
   - Seek 时钟原子重置，无竞态窗口
   - 进度条冻结规则（uiSeeking_ + uiTargetPts_）保持不变
+- **提交**：`9eff158`
+
+### 阶段 M21：时钟语义修正 — speed 只属于 Sonic，不属于时钟 ✅ 完成
+
+- 任务：修正音频时钟和视频同步逻辑，使 speed 仅影响 Sonic 内容拉伸，不影响时间轴
+- **根因分析**（M20 后遗留问题）：
+  - Sonic 做的是"内容拉伸"（1 秒内容在 0.5 秒播完），不是"时间膨胀"
+  - 但原代码把 speed 当"时间膨胀系数"：`writeHead_ += ... * speed_`（音频时钟被污染）
+  - `videoClock()` 里 `elapsed * speed_`（视频时钟也被污染）
+  - `pullFrame()` 里 `(pts - target) / spd`（delay 被 speed 除）
+  - 结果：音频和视频以不同速率理解时间 → 持续音画不同步
+- **正确模型**：
+  - 音频时钟 = 已播放样本数 / 采样率（不乘 speed）
+  - 视频 delay = frame.pts - audioClock（不除 speed）
+  - videoClock（纯视频回退）= 基准 + 已流逝系统时间（不乘 speed）
+  - speed 只在 Sonic 内部使用：`sonicSetSpeed(sonic_, speed)`
+- **改动**：
+  - `audio_output.cpp`：fill() 中 `writeHead_` 推进移除 `* speed_`（队列空和正常两处）
+  - `player.cpp`：`videoClock()` 移除 `* speed_`；`pullFrame()` delay 计算移除 `/ spd`
+- **验证逻辑**（2x 速度 10 秒视频）：
+  - 修正前：音频 5 秒播完，视频 10 秒走完 → 持续不同步
+  - 修正后：音频 5 秒播完，视频 5 秒走完（audioClock 在 5 秒时到达 10 秒 PTS）→ 同步
