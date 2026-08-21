@@ -100,10 +100,14 @@ LRESULT CustomTitlebar::handleMsg(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
         break;
     }
     case WM_NCCALCSIZE: {
-        // 去掉默认标题栏，保留边框阴影
+        // 去掉默认标题栏和边框，客户区填满整个窗口
         if (wParam) {
             NCCALCSIZE_PARAMS* cs = (NCCALCSIZE_PARAMS*)lParam;
-            cs->rgrc[0].top += 0;  // 不调整，SDL 渲染覆盖全客户区
+            // 扩展客户区到整个窗口（减去1像素保留窗口边框阴影）
+            cs->rgrc[0].top += 1;
+            cs->rgrc[0].left += 1;
+            cs->rgrc[0].right -= 1;
+            cs->rgrc[0].bottom -= 1;
         }
         return 0;
     }

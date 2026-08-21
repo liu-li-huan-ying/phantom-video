@@ -125,6 +125,17 @@ int main(int argc, char** argv) {
     // --- 自定义标题栏 ---
     CustomTitlebar titlebar;
     if (hwnd) {
+        // 去掉系统默认标题栏（WS_CAPTION），保留窗口边框用于 DWM 阴影
+        LONG_PTR style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+        style &= ~WS_CAPTION;   // 去掉标题栏
+        style &= ~WS_THICKFRAME; // 去掉可调边框（自绘控件不需要）
+        SetWindowLongPtrW(hwnd, GWL_STYLE, style);
+        // 通知系统窗口样式已改变，重新计算非客户区
+        RECT rc;
+        GetWindowRect(hwnd, &rc);
+        SetWindowPos(hwnd, nullptr, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top,
+                     SWP_FRAMECHANGED | SWP_NOZORDER);
+
         titlebar.init(hwnd);
         titlebar.setTitle("VPlayer");
     }
