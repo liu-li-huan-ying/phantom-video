@@ -501,3 +501,50 @@
   - 视频区域单击 → 仅切换暂停/播放，不显示叠加图标
   - 删除 `showPauseOverlay` 调用，保留 `drawPauseOverlay` 代码备用
 - **提交**：`4b66daa` `016b16b` `c7fd728`
+
+---
+
+### 阶段 M17：Seek 性能核心优化
+
+**目标**：解决 seek 卡顿（2~5 秒延迟）、音频先响视频后到、主线程无响应
+
+**瓶颈分析**：
+- H.264 GOP 100~300 帧（4~12 秒），解码 ~10ms/帧 → 总解码 1~3 秒（不可跳过）
+- `pullFrame()` 8ms 轮询延迟
+- 拖动进度条每帧触发一次 seek（无 debounce）
+- 音频 clearQueue 和 audio seek 之间有竞态窗口
+
+#### M17-1：Seek 后首帧立即显示
+- **原理**：seek 后第一帧解码成功立即推入队列显示（不等精确目标帧）
+- `doSeek()` 设置 `seekFirstFrame_ = true`（atomic bool）
+- `decodeLoop()`：seek 后第一帧无论 PTS 都推入队列，清除标志
+- `pullFrame()`：检测首帧到达 → 立即显示 + 校准时钟 + 恢复音频
+- 效果：用户 ~50ms 内看到关键帧画面，GOP 解码完成后跳到精确目标
+
+#### M17-2：Seek 合并 150ms debounce
+- `requestSeek()` 记录 `lastSeekTime_`（SDL_GetTicks）
+- `decodeLoop()` 检查：距上次 seek < 150ms 则跳过，等 timer 到期
+- 效果：拖动进度条流畅，松手后才执行实际 seek
+
+#### M17-3：轮询延迟优化
+- `pullFrame()` 空队列 `SDL_Delay(8)` → `SDL_Delay(1)`
+
+---
+
+### 阶段 M18：音频同步 + 可靠性
+
+**目标**：消除音频竞态、改善 seek 感知体验
+
+#### M18-1：音频竞态修复
+- `doSeek()` 设置 `audioSeeking_ = true`
+- `audioLoop()`：`audioSeeking_` 为 true 时不推帧
+- audio demuxer seek 完成后清除 `audioSeeking_`
+
+#### M18-2：音频时钟显式 reset（补充）
+- seek 后音频回调检测时钟跳变 >0.5s 时强制 reset
+- 防止旧帧 PTS 污染 writeHead_
+
+#### M18-3：Seeking 指示器
+- seek 开始 → 显示半透明 "Seeking..." 文字
+- 首帧到达 → 隐藏
+- 改善感知体验
