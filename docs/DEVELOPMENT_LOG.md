@@ -357,6 +357,14 @@
   - **音量弹层优化**：宽度 6→8px，背景加边框，拖动时白色 thumb 指示器，轨道深灰(60,60,60)
 - **验证**：cmake 构建成功，vplayer.exe 启动 5 秒正常退出无崩溃
 - **结论**：M14 全部阶段（A/B/C/D）完成
+
+### M14 修复（2026-08-21）— 去掉系统默认标题栏
+- **问题**：自定义标题栏已实现但系统默认标题栏仍可见
+- **修复**：
+  - main.cpp：SDL_CreateWindow 后用 `SetWindowLongPtrW(GWL_STYLE)` 去掉 `WS_CAPTION` + `WS_THICKFRAME`
+  - 调用 `SetWindowPos(SWP_FRAMECHANGED)` 通知系统重新计算窗口布局
+  - custom_titlebar.cpp：`WM_NCCALCSIZE` 改为扩展客户区到整个窗口（减 1 像素保留边框阴影）
+- **验证**：cmake 构建成功，vplayer.exe 启动 5 秒正常退出无崩溃
 ### 阶段 M15：音量标准化 + 关键帧预览（已合并自原 M14）
 - 任务：EBU R128 音量标准化实现 + 进度条关键帧预览功能
 - 内容已合并自原 M14 阶段：
