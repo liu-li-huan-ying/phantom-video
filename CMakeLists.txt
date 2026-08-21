@@ -18,10 +18,14 @@ set(FFMPEG_LIBS
   "${FFMPEG_ROOT}/lib/avcodec.lib"
   "${FFMPEG_ROOT}/lib/avutil.lib"
   "${FFMPEG_ROOT}/lib/swresample.lib"
-  "${FFMPEG_ROOT}/lib/swscale.lib"
-  "${FFMPEG_ROOT}/lib/avfilter.lib")
+  "${FFMPEG_ROOT}/lib/swscale.lib")
 
 file(GLOB_RECURSE PLAYER_SOURCES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/src/*.cpp")
+
+# Sonic 库（C 文件）
+enable_language(C)
+add_library(sonic STATIC "F:/dev/sonic/sonic.c")
+target_include_directories(sonic PUBLIC "F:/dev/sonic")
 
 add_executable(vplayer ${PLAYER_SOURCES})
 
@@ -29,6 +33,7 @@ target_include_directories(vplayer PRIVATE
   ${SDL2_INCLUDE_DIRS}
   "${DEPS_ROOT}/SDL2_image-2.8.2/x86_64-w64-mingw32/include/SDL2"
   ${FFMPEG_INCLUDE_DIRS}
+  "F:/dev/sonic"
   ${CMAKE_SOURCE_DIR}/src)
 
 target_compile_definitions(vplayer PRIVATE SDL_MAIN_HANDLED)
@@ -46,7 +51,7 @@ foreach(f ${SDL2_CFLAGS_OTHER})
   endif()
 endforeach()
 
-target_link_libraries(vplayer PRIVATE ${SDL2_LINK} ${FFMPEG_LIBS} shell32 dwmapi
+target_link_libraries(vplayer PRIVATE ${SDL2_LINK} ${FFMPEG_LIBS} sonic shell32 dwmapi
   "${DEPS_ROOT}/SDL2_image-2.8.2/x86_64-w64-mingw32/lib/libSDL2_image.dll.a")
 
 # 拷贝运行时 DLL 到构建目录（依赖根目录可通过 -DDEPS_ROOT= 覆盖）
@@ -58,7 +63,6 @@ add_custom_command(TARGET vplayer POST_BUILD
     "${FFMPEG_ROOT}/bin/avutil-61.dll"
     "${FFMPEG_ROOT}/bin/swresample-7.dll"
     "${FFMPEG_ROOT}/bin/swscale-10.dll"
-    "${FFMPEG_ROOT}/bin/avfilter-12.dll"
     "${DEPS_ROOT}/sdl2/x86_64-w64-mingw32/bin/SDL2.dll"
     "${DEPS_ROOT}/SDL2_image-2.8.2/x86_64-w64-mingw32/bin/SDL2_image.dll"
     $<TARGET_FILE_DIR:vplayer>

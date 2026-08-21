@@ -7,9 +7,7 @@
 
 extern "C" {
 #include <libswresample/swresample.h>
-#include <libavfilter/avfilter.h>
-#include <libavfilter/buffersink.h>
-#include <libavfilter/buffersrc.h>
+#include "sonic.h"
 }
 
 #include "core/blocking_queue.h"
@@ -44,13 +42,15 @@ private:
 
     SDL_AudioDeviceID dev_ = 0;
     SDL_AudioSpec spec_{};
-    SwrContext* swr_ = nullptr;
+    SwrContext* swr_ = nullptr;     // 仅做格式转换（any→S16），不做变速
     double ptsScale_ = 1.0;
     bool ok_ = false;
     std::mutex swrMutex_;
     int inSampleRate_ = 0;
     AVChannelLayout inLayout_{};
     AVSampleFormat inFmt_ = AV_SAMPLE_FMT_NONE;
+
+    sonicStream sonic_ = nullptr;   // Sonic TSM（变速不变调）
 
     BlockingQueue<AudioChunk, AudioChunkSize> queue_{ 1764000 };
     AudioChunk current_;
@@ -61,21 +61,8 @@ private:
 
     std::atomic<float> volume_{ 0.8f };
     std::atomic<float> speed_{ 1.0f };
-    std::atomic<bool> clearPending_{ false };
     std::atomic<bool> normalization_{ false };
     std::atomic<float> normGain_{ 1.0f };
-    float peakTracker_ = 0.0f;       // 峰值追踪器（滑动最大值）
-    Uint32 peakDecayTime_ = 0;       // 峰值衰减计时
-
-    // M18: atempo 滤镜（保调变速）
-    AVFilterGraph* filterGraph_ = nullptr;
-    const AVFilter* srcFilter_ = nullptr;
-    const AVFilter* sinkFilter_ = nullptr;
-    AVFilterContext* bufferSrcCtx_ = nullptr;
-    AVFilterContext* bufferSinkCtx_ = nullptr;
-    AVFrame* filterFrame_ = nullptr;
-    AVFrame* filterOutFrame_ = nullptr;
-    std::atomic<bool> speedChanged_{ false };  // 标记需要重建滤镜图
-    void buildFilterGraph(float speed);
-    void destroyFilterGraph();
+    float peakTracker_ = 0.0f;
+    Uint32 peakDecayTime_ = 0;
 };

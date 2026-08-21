@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstdio>
 #include <cstring>
 
 extern "C" {
@@ -20,7 +19,7 @@ AudioOutput::~AudioOutput() {
         SDL_PauseAudioDevice(dev_, 1);
         SDL_CloseAudioDevice(dev_);
     }
-    destroyFilterGraph();
+    if (sonic_) sonicDestroyStream(sonic_);
     {
         std::lock_guard<std::mutex> lock(swrMutex_);
         if (swr_) swr_free(&swr_);
@@ -48,14 +47,14 @@ bool AudioOutput::open(const AVCodecParameters* par, double ptsScale) {
         av_channel_layout_copy(&inLayout_, &par->ch_layout);
         inFmt_ = (AVSampleFormat)par->format;
 
-        // SwrContext: 固定 float→S16, 44100Hz（速度由 atempo 控制）
+        // SwrContext: 格式转换（any→S16），固定 44100Hz，不做变速
         AVChannelLayout outLayout;
         av_channel_layout_default(&outLayout, spec_.channels);
         swr_ = swr_alloc();
         if (!swr_) return false;
         av_opt_set_chlayout(swr_, "in_chlayout", &inLayout_, 0);
         av_opt_set_int(swr_, "in_sample_rate", inSampleRate_, 0);
-        av_opt_set_sample_fmt(swr_, "in_sample_fmt", AV_SAMPLE_FMT_FLT, 0);
+        av_opt_set_sample_fmt(swr_, "in_sample_fmt", inFmt_, 0);
         av_opt_set_chlayout(swr_, "out_chlayout", &outLayout, 0);
         av_opt_set_int(swr_, "out_sample_rate", spec_.freq, 0);
         av_opt_set_sample_fmt(swr_, "out_sample_fmt", AV_SAMPLE_FMT_S16, 0);
@@ -64,89 +63,22 @@ bool AudioOutput::open(const AVCodecParameters* par, double ptsScale) {
         if (ret < 0) return false;
     }
 
-    // 创建初始滤镜图（speed=1.0 时 atempo=1.0 等效直通）
-    buildFilterGraph(speed_.load(std::memory_order_relaxed));
+    // Sonic: 变速不变调（TSM），固定 44100Hz 立体声
+    sonic_ = sonicCreateStream(spec_.freq, spec_.channels);
+    if (!sonic_) return false;
+    sonicSetSpeed(sonic_, speed_.load(std::memory_order_relaxed));
+    sonicSetPitch(sonic_, 1.0f);
+    sonicSetRate(sonic_, 1.0f);
 
     ok_ = true;
     SDL_PauseAudioDevice(dev_, 0);
     return true;
 }
 
-void AudioOutput::buildFilterGraph(float speed) {
-    destroyFilterGraph();
-
-    char args[512];
-    char filterArgs[64];
-    std::snprintf(filterArgs, sizeof(filterArgs), "%.4f", speed);
-
-    filterGraph_ = avfilter_graph_alloc();
-    if (!filterGraph_) return;
-
-    srcFilter_ = avfilter_get_by_name("abuffer");
-    sinkFilter_ = avfilter_get_by_name("abuffersink");
-    if (!srcFilter_ || !sinkFilter_) { destroyFilterGraph(); return; }
-
-    // abuffer: 接收解码后的 float 帧
-    char chLayoutStr[64] = {};
-    AVChannelLayout chLayout;
-    av_channel_layout_copy(&chLayout, &inLayout_);
-    // 取第一个描述名（如 "stereo"、"5.1"）
-    av_channel_layout_describe(&chLayout, chLayoutStr, sizeof(chLayoutStr));
-    av_channel_layout_uninit(&chLayout);
-    std::snprintf(args, sizeof(args),
-        "time_base=1/%d:sample_rate=%d:sample_fmt=%s:channel_layout=%s",
-        inSampleRate_, inSampleRate_,
-        av_get_sample_fmt_name(inFmt_),
-        chLayoutStr);
-
-    if (avfilter_graph_create_filter(&bufferSrcCtx_, srcFilter_, "in", args, nullptr, filterGraph_) < 0) {
-        destroyFilterGraph(); return;
-    }
-    if (avfilter_graph_create_filter(&bufferSinkCtx_, sinkFilter_, "out", nullptr, nullptr, filterGraph_) < 0) {
-        destroyFilterGraph(); return;
-    }
-
-    // aformat: 转为 float + 匹配通道布局
-    AVFilterInOut* outputs = avfilter_inout_alloc();
-    AVFilterInOut* inputs = avfilter_inout_alloc();
-    outputs->name = av_strdup("in");
-    outputs->filter_ctx = bufferSrcCtx_;
-    outputs->pad_idx = 0;
-    outputs->next = nullptr;
-    inputs->name = av_strdup("out");
-    inputs->filter_ctx = bufferSinkCtx_;
-    inputs->pad_idx = 0;
-    inputs->next = nullptr;
-
-    char graphDesc[256];
-    std::snprintf(graphDesc, sizeof(graphDesc),
-        "aformat=sample_fmts=flt:channel_layouts=stereo,atempo=%s", filterArgs);
-
-    int ret = avfilter_graph_parse_ptr(filterGraph_, graphDesc, &inputs, &outputs, nullptr);
-    avfilter_inout_free(&inputs);
-    avfilter_inout_free(&outputs);
-    if (ret < 0) { destroyFilterGraph(); return; }
-
-    if (avfilter_graph_config(filterGraph_, nullptr) < 0) {
-        destroyFilterGraph(); return;
-    }
-
-    filterFrame_ = av_frame_alloc();
-    filterOutFrame_ = av_frame_alloc();
-}
-
-void AudioOutput::destroyFilterGraph() {
-    if (filterFrame_) { av_frame_free(&filterFrame_); filterFrame_ = nullptr; }
-    if (filterOutFrame_) { av_frame_free(&filterOutFrame_); filterOutFrame_ = nullptr; }
-    if (filterGraph_) { avfilter_graph_free(&filterGraph_); filterGraph_ = nullptr; }
-    bufferSrcCtx_ = nullptr;
-    bufferSinkCtx_ = nullptr;
-}
-
 void AudioOutput::setSpeed(float spd) {
     if (spd <= 0.01f) spd = 0.01f;
     speed_.store(spd, std::memory_order_relaxed);
-    speedChanged_.store(true, std::memory_order_relaxed);
+    if (sonic_) sonicSetSpeed(sonic_, spd);
 }
 
 bool AudioOutput::push(const FramePtr& frame) {
@@ -165,55 +97,50 @@ bool AudioOutput::tryPush(const FramePtr& frame) {
 
 bool AudioOutput::convert(const FramePtr& frame, AudioChunk& chunk) {
     std::lock_guard<std::mutex> lock(swrMutex_);
-    if (!swr_) return false;
+    if (!swr_ || !sonic_) return false;
 
-    // 速度变化时：重建滤镜图（旧 chunks 在队列中自然播放完毕，无噪点）
-    if (speedChanged_.exchange(false)) {
-        buildFilterGraph(speed_.load(std::memory_order_relaxed));
-    }
-    if (!filterGraph_) {
-        buildFilterGraph(speed_.load(std::memory_order_relaxed));
-        if (!filterGraph_) return false;
-    }
+    // SwrContext: 解码帧 → S16 @44100Hz（格式转换，不做变速）
+    int outSamples = (int)av_rescale_rnd(
+        swr_get_delay(swr_, frame->sample_rate) + frame->nb_samples,
+        spec_.freq, frame->sample_rate, AV_ROUND_UP);
 
-    // 将解码帧送入滤镜图
-    av_frame_ref(filterFrame_, frame.get());
-    int ret = av_buffersrc_add_frame_flags(bufferSrcCtx_, filterFrame_, AV_BUFFERSRC_FLAG_PUSH);
-    av_frame_unref(filterFrame_);
-    if (ret < 0) return false;
-
-    // 从滤镜图接收处理后的帧
-    ret = av_buffersink_get_frame(bufferSinkCtx_, filterOutFrame_);
-    if (ret < 0) return false;
-
-    // float → S16 转换
-    int nb = filterOutFrame_->nb_samples;
-    int ch = spec_.channels;
-    int s16Bytes = av_samples_get_buffer_size(nullptr, ch, nb, AV_SAMPLE_FMT_S16, 1);
-
-    uint8_t* s16Buf = nullptr;
-    if (av_samples_alloc(&s16Buf, nullptr, ch, nb, AV_SAMPLE_FMT_S16, 0) < 0) {
-        av_frame_unref(filterOutFrame_);
+    uint8_t* outBuf = nullptr;
+    if (av_samples_alloc(&outBuf, nullptr, spec_.channels, outSamples,
+                         AV_SAMPLE_FMT_S16, 0) < 0)
         return false;
-    }
 
-    const float* src = (const float*)filterOutFrame_->data[0];
-    int16_t* dst = (int16_t*)s16Buf;
-    int total = nb * ch;
-    for (int i = 0; i < total; ++i) {
-        float s = src[i] * 32768.0f;
-        s = std::clamp(s, -32768.0f, 32767.0f);
-        dst[i] = (int16_t)s;
-    }
+    int converted = swr_convert(swr_, &outBuf, outSamples,
+                                (const uint8_t**)frame->extended_data,
+                                frame->nb_samples);
+    if (converted <= 0) { av_freep(&outBuf); return false; }
 
-    chunk.data.assign(s16Buf, s16Buf + s16Bytes);
+    // 送入 Sonic（变速不变调）
+    int16_t* samples = (int16_t*)outBuf;
+    int totalSamples = converted * spec_.channels;
+    sonicWriteShortToStream(sonic_, samples, totalSamples);
+    av_freep(&outBuf);
+
+    // 从 Sonic 读出处理后的 S16 数据
+    int available = sonicSamplesAvailable(sonic_);
+    if (available <= 0) return false;
+
+    int maxOut = available;
+    uint8_t* s16Buf = nullptr;
+    if (av_samples_alloc(&s16Buf, nullptr, spec_.channels, maxOut,
+                         AV_SAMPLE_FMT_S16, 0) < 0)
+        return false;
+
+    int readSamples = sonicReadShortFromStream(sonic_, (int16_t*)s16Buf, maxOut);
+    if (readSamples <= 0) { av_freep(&s16Buf); return false; }
+
+    int bytes = av_samples_get_buffer_size(nullptr, spec_.channels,
+                                           readSamples, AV_SAMPLE_FMT_S16, 1);
+    chunk.data.assign(s16Buf, s16Buf + bytes);
     chunk.outRate = spec_.freq;
-    chunk.pts = filterOutFrame_->pts == AV_NOPTS_VALUE ? 0.0 :
-                filterOutFrame_->pts * av_q2d(bufferSinkCtx_->inputs[0]->time_base);
+    chunk.pts = frame->pts == AV_NOPTS_VALUE ? 0.0 : frame->pts * ptsScale_;
     if (chunk.pts < 0.0) chunk.pts = 0.0;
 
     av_freep(&s16Buf);
-    av_frame_unref(filterOutFrame_);
     return !chunk.data.empty();
 }
 
