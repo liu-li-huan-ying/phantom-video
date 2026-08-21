@@ -365,6 +365,15 @@
   - 调用 `SetWindowPos(SWP_FRAMECHANGED)` 通知系统重新计算窗口布局
   - custom_titlebar.cpp：`WM_NCCALCSIZE` 改为扩展客户区到整个窗口（减 1 像素保留边框阴影）
 - **验证**：cmake 构建成功，vplayer.exe 启动 5 秒正常退出无崩溃
+
+### M14 修复 2（2026-08-21）— 标题栏与视频分离 + SDL 绘制标题栏
+- **问题**：自定义标题栏用 GDI 绘制被 SDL_RenderPresent 覆盖；标题栏与视频重叠
+- **修复**：
+  - custom_titlebar.cpp 重写：改用 SDL_Renderer 绘制（draw() 方法），每帧在主循环调用
+  - video_renderer.cpp：render() 视频区域从 y=32 开始（标题栏高度），drawBackground() 只绘制 y≥32 区域
+  - 标题栏独立占据窗口顶部 32px，视频从下方渲染，不再重叠
+- **验证**：cmake 构建成功，vplayer.exe 启动 5 秒正常退出无崩溃
+
 ### 阶段 M15：音量标准化 + 关键帧预览（已合并自原 M14）
 - 任务：EBU R128 音量标准化实现 + 进度条关键帧预览功能
 - 内容已合并自原 M14 阶段：
