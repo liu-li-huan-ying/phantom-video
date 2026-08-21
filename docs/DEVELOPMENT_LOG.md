@@ -517,17 +517,18 @@
 #### M17-1：Seek 后首帧立即显示
 - **原理**：seek 后第一帧解码成功立即推入队列显示（不等精确目标帧）
 - `doSeek()` 设置 `seekFirstFrame_ = true`（atomic bool）
-- `decodeLoop()`：seek 后第一帧无论 PTS 都推入队列，清除标志
-- `pullFrame()`：检测首帧到达 → 立即显示 + 校准时钟 + 恢复音频
+- `decodeLoop()`：seek 后第一帧无论 PTS 都推入队列，清除标志，继续解码后续帧
+- `pullFrame()`：`audioWait_` 机制已有，首帧到达即显示+校准时钟+恢复音频
 - 效果：用户 ~50ms 内看到关键帧画面，GOP 解码完成后跳到精确目标
 
 #### M17-2：Seek 合并 150ms debounce
-- `requestSeek()` 记录 `lastSeekTime_`（SDL_GetTicks）
-- `decodeLoop()` 检查：距上次 seek < 150ms 则跳过，等 timer 到期
+- `requestSeek()` 记录 `lastSeekTime_ = SDL_GetTicks()`
+- `decodeLoop()` 检查：距上次 seek < 150ms 则跳过本轮，等 timer 到期
 - 效果：拖动进度条流畅，松手后才执行实际 seek
 
 #### M17-3：轮询延迟优化
 - `pullFrame()` 空队列 `SDL_Delay(8)` → `SDL_Delay(1)`
+- 减少首帧检测延迟 0~7ms
 
 ---
 
