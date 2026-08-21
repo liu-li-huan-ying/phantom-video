@@ -194,7 +194,10 @@ void Player::requestSeek(double t) {
     std::lock_guard<std::mutex> lock(seekMutex_);
     seekPending_ = true;
     seekTarget_ = std::clamp(t, 0.0, duration_ > 0.0 ? duration_ : t);
-    lastSeekTime_ = SDL_GetTicks();  // M17: 记录 seek 时间用于 debounce
+    lastSeekTime_ = SDL_GetTicks();
+    // UI 冻结：进度条不回退
+    uiSeeking_.store(true, std::memory_order_relaxed);
+    uiTargetPts_.store(seekTarget_, std::memory_order_relaxed);
 }
 
 bool Player::seekRequested() {
@@ -214,9 +217,12 @@ void Player::setSpeed(float s) {
     speed_.store(s);
     if (audio_) {
         audio_->setSpeed(s);
-        // dropUntil 用原子锚定点（无竞态）
         double anchor = audio_->anchorPts_.load(std::memory_order_relaxed);
-        if (anchor > 0.0) dropUntil_.store(anchor);
+        if (anchor > 0.0) {
+            dropUntil_.store(anchor);
+            uiSeeking_.store(true, std::memory_order_relaxed);
+            uiTargetPts_.store(anchor, std::memory_order_relaxed);
+        }
     }
     videoBaseTicks_ = SDL_GetPerformanceCounter();
 }
@@ -267,6 +273,16 @@ double Player::clock() const {
         if (ac >= 0.0) return ac;
     }
     return videoClock();
+}
+
+double Player::uiClock() const {
+    // seek / 切倍速期间冻结，用 targetPts；否则取 max(时钟, target) 防回退
+    if (uiSeeking_.load(std::memory_order_relaxed)) {
+        return uiTargetPts_.load(std::memory_order_relaxed);
+    }
+    double c = clock();
+    double t = uiTargetPts_.load(std::memory_order_relaxed);
+    return (c > t) ? c : t;
 }
 
 FramePtr Player::pullFrame() {

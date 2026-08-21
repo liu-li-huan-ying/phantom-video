@@ -640,7 +640,7 @@ void VideoRenderer::drawControls(const RenderStats& stats) {
     const int progY = lay.progY;
     const int progressW = lay.progW;
 
-    double pct = (stats.duration > 0) ? (stats.clock / stats.duration) : 0;
+    double pct = (stats.duration > 0) ? (stats.uiClock / stats.duration) : 0;
     if (pct < 0) pct = 0; if (pct > 1) pct = 1;
 
     bool progHover = mouseX_ >= progX && mouseX_ < progX + progressW &&

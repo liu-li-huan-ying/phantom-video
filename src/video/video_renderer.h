@@ -8,6 +8,7 @@ struct RenderStats {
     bool playing = true;
     bool paused = false;
     double clock = 0.0;
+    double uiClock = 0.0;  // UI 进度条安全时钟（seek/切倍速期间冻结）
     double duration = 0.0;
     float volume = 1.0f;
     bool muted = false;

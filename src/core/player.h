@@ -37,6 +37,11 @@ public:
 
     State state() const { return state_.load(); }
     double clock() const;
+    // UI 进度条安全读取：seek/切倍速期间冻结，永不回退
+    double uiClock() const;
+    bool uiSeeking() const { return uiSeeking_.load(std::memory_order_relaxed); }
+    double uiTargetPts() const { return uiTargetPts_.load(std::memory_order_relaxed); }
+    void clearUiSeeking() { uiSeeking_.store(false, std::memory_order_relaxed); }
     double duration() const { return duration_; }
     bool hasMedia() const { return hasMedia_.load(); }
     std::string path() const { return path_; }
@@ -87,6 +92,10 @@ private:
     double lastAudioPts_{ -1e9 };              // M18: 检测音频 PTS 跳变
     std::atomic<bool> seekFirstFrame_{ false };
     Uint32 lastSeekTime_ = 0;                    // M17: seek 合并 debounce
+
+    // UI 进度条冻结（seek / 切倍速期间不回退）
+    std::atomic<bool> uiSeeking_{ false };
+    std::atomic<double> uiTargetPts_{ 0.0 };
 
     std::mutex seekMutex_;
     bool seekPending_ = false;

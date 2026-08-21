@@ -633,3 +633,13 @@
   ```
 - **dev 目录迁入项目**：`F:\dev\` → `F:\vedioplayer\dev\`（ffmpeg/sdl2/sdl2_image/sonic），CMakeLists.txt 路径全部更新
 - **提交**：`82ca9c8` + 后续修复
+
+#### M19 进度条冻结规则（2026-08-21）
+- **问题**：频繁切倍速/seek 后进度条缩回开头，无法使用
+- **根因**：UI 直接读 `player.clock()` 实时时钟，seek/切倍速时钟 reset 导致读到 0
+- **3 条规则**：
+  1. **UI 永远不直接读实时时钟**：`RenderStats.uiClock` 由 `player.uiClock()` 填充，seek/切倍速期间返回 `uiTargetPts_`（冻结）
+  2. **seek / 切倍速期间进度条冻结**：`uiSeeking_` 原子标志 → `requestSeek()` / `setSpeed()` 设 true → 主循环检测 clock >= target 时设 false
+  3. **进度永不回退**：`uiClock()` 返回 `max(clock, uiTargetPts_)`，保证进度条单调递增
+- **改动**：`player.h` 加 `uiSeeking_` / `uiTargetPts_` / `uiClock()` / `clearUiSeeking()`；`video_renderer.h` 加 `RenderStats.uiClock`；`main.cpp` 主循环冻结逻辑
+- **提交**：`08e995c`

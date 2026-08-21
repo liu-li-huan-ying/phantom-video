@@ -545,11 +545,18 @@ auto args = utf8Args();
 
         if (player.hasMedia()) {
             FramePtr f = player.pullFrame();
+            // seek / 切倍速后，时钟追上 target 时解除 UI 冻结
+            if (player.uiSeeking()) {
+                if (player.clock() >= player.uiTargetPts() - 0.1) {
+                    player.clearUiSeeking();
+                }
+            }
             if (f) {
                 RenderStats stats;
                 stats.playing = (player.state() == Player::State::Playing);
                 stats.paused = (player.state() == Player::State::Paused);
                 stats.clock = player.clock();
+                stats.uiClock = player.uiClock();
                 stats.duration = player.duration();
                 stats.volume = player.muted() ? 0.0f : player.volume();
                 stats.muted = player.muted();
