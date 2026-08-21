@@ -42,19 +42,16 @@ bool AudioOutput::open(const AVCodecParameters* par, double ptsScale) {
 
     {
         std::lock_guard<std::mutex> lock(swrMutex_);
-        inSampleRate_ = par->sample_rate;
         av_channel_layout_uninit(&inLayout_);
         av_channel_layout_copy(&inLayout_, &par->ch_layout);
-        inFmt_ = (AVSampleFormat)par->format;
 
-        // SwrContext: 格式转换（any→S16），固定 44100Hz，不做变速
         AVChannelLayout outLayout;
         av_channel_layout_default(&outLayout, spec_.channels);
         swr_ = swr_alloc();
         if (!swr_) return false;
-        av_opt_set_chlayout(swr_, "in_chlayout", &inLayout_, 0);
-        av_opt_set_int(swr_, "in_sample_rate", inSampleRate_, 0);
-        av_opt_set_sample_fmt(swr_, "in_sample_fmt", inFmt_, 0);
+        av_opt_set_chlayout(swr_, "in_chlayout", &par->ch_layout, 0);
+        av_opt_set_int(swr_, "in_sample_rate", par->sample_rate, 0);
+        av_opt_set_sample_fmt(swr_, "in_sample_fmt", (AVSampleFormat)par->format, 0);
         av_opt_set_chlayout(swr_, "out_chlayout", &outLayout, 0);
         av_opt_set_int(swr_, "out_sample_rate", spec_.freq, 0);
         av_opt_set_sample_fmt(swr_, "out_sample_fmt", AV_SAMPLE_FMT_S16, 0);
@@ -63,12 +60,14 @@ bool AudioOutput::open(const AVCodecParameters* par, double ptsScale) {
         if (ret < 0) return false;
     }
 
-    // Sonic: 变速不变调（TSM），固定 44100Hz 立体声
     sonic_ = sonicCreateStream(spec_.freq, spec_.channels);
     if (!sonic_) return false;
-    sonicSetSpeed(sonic_, speed_.load(std::memory_order_relaxed));
+    sonicSetSampleRate(sonic_, spec_.freq);
+    sonicSetNumChannels(sonic_, spec_.channels);
+    sonicSetSpeed(sonic_, 1.0f);
     sonicSetPitch(sonic_, 1.0f);
     sonicSetRate(sonic_, 1.0f);
+    sonicSetQuality(sonic_, 1);  // 高质量
 
     ok_ = true;
     SDL_PauseAudioDevice(dev_, 0);
@@ -78,7 +77,7 @@ bool AudioOutput::open(const AVCodecParameters* par, double ptsScale) {
 void AudioOutput::setSpeed(float spd) {
     if (spd <= 0.01f) spd = 0.01f;
     speed_.store(spd, std::memory_order_relaxed);
-    if (sonic_) sonicSetSpeed(sonic_, spd);
+    speedChanged_.store(true, std::memory_order_release);
 }
 
 bool AudioOutput::push(const FramePtr& frame) {
@@ -99,48 +98,81 @@ bool AudioOutput::convert(const FramePtr& frame, AudioChunk& chunk) {
     std::lock_guard<std::mutex> lock(swrMutex_);
     if (!swr_ || !sonic_) return false;
 
-    // SwrContext: 解码帧 → S16 @44100Hz（格式转换，不做变速）
+    // 规则1：切倍速 = 清队列 + 重建 Sonic + 重置时钟
+    if (speedChanged_.exchange(false, std::memory_order_acquire)) {
+        float spd = speed_.load(std::memory_order_relaxed);
+        queue_.clear();
+        current_.data.clear();
+        offset_ = 0;
+        resetClock();
+
+        if (sonic_) sonicDestroyStream(sonic_);
+        sonic_ = sonicCreateStream(spec_.freq, spec_.channels);
+        sonicSetSampleRate(sonic_, spec_.freq);
+        sonicSetNumChannels(sonic_, spec_.channels);
+        sonicSetSpeed(sonic_, spd);
+        sonicSetPitch(sonic_, 1.0f);
+        sonicSetRate(sonic_, 1.0f);
+        sonicSetQuality(sonic_, 1);
+        lastSpeed_ = spd;
+    }
     int outSamples = (int)av_rescale_rnd(
         swr_get_delay(swr_, frame->sample_rate) + frame->nb_samples,
         spec_.freq, frame->sample_rate, AV_ROUND_UP);
 
-    uint8_t* outBuf = nullptr;
-    if (av_samples_alloc(&outBuf, nullptr, spec_.channels, outSamples,
-                         AV_SAMPLE_FMT_S16, 0) < 0)
-        return false;
+    int channels = spec_.channels;
+    int outBytes = outSamples * channels * (int)sizeof(int16_t);
+    uint8_t* s16Buf = (uint8_t*)av_malloc(outBytes);
+    if (!s16Buf) return false;
 
-    int converted = swr_convert(swr_, &outBuf, outSamples,
+    uint8_t* outPlanes[1] = { s16Buf };
+    int converted = swr_convert(swr_, outPlanes, outSamples,
                                 (const uint8_t**)frame->extended_data,
                                 frame->nb_samples);
-    if (converted <= 0) { av_freep(&outBuf); return false; }
+    if (converted <= 0) { av_free(s16Buf); return false; }
 
-    // 送入 Sonic（变速不变调）
-    int16_t* samples = (int16_t*)outBuf;
-    int totalSamples = converted * spec_.channels;
-    sonicWriteShortToStream(sonic_, samples, totalSamples);
-    av_freep(&outBuf);
+    int validBytes = converted * channels * (int)sizeof(int16_t);
 
-    // 从 Sonic 读出处理后的 S16 数据
-    int available = sonicSamplesAvailable(sonic_);
-    if (available <= 0) return false;
+    // Step 2: speed == 1.0 → 直通，不走 Sonic
+    float spd = speed_.load(std::memory_order_relaxed);
+    if (std::abs(spd - 1.0f) < 0.001f) {
+        chunk.data.assign(s16Buf, s16Buf + validBytes);
+        av_free(s16Buf);
+    } else {
+        // 变速时重建 Sonic 流，清空内部 pitch 检测缓冲
+        if (std::abs(spd - lastSpeed_) > 0.05f) {
+            if (sonic_) sonicDestroyStream(sonic_);
+            sonic_ = sonicCreateStream(spec_.freq, spec_.channels);
+            sonicSetSampleRate(sonic_, spec_.freq);
+            sonicSetNumChannels(sonic_, spec_.channels);
+            sonicSetSpeed(sonic_, spd);
+            sonicSetPitch(sonic_, 1.0f);
+            sonicSetRate(sonic_, 1.0f);
+            sonicSetQuality(sonic_, 1);
+            lastSpeed_ = spd;
+        }
+        // sonicWriteShortToStream 参数：samples per channel
+        sonicWriteShortToStream(sonic_, (int16_t*)s16Buf, converted);
+        av_free(s16Buf);
 
-    int maxOut = available;
-    uint8_t* s16Buf = nullptr;
-    if (av_samples_alloc(&s16Buf, nullptr, spec_.channels, maxOut,
-                         AV_SAMPLE_FMT_S16, 0) < 0)
-        return false;
+        int available = sonicSamplesAvailable(sonic_);
+        if (available <= 0) return false;
 
-    int readSamples = sonicReadShortFromStream(sonic_, (int16_t*)s16Buf, maxOut);
-    if (readSamples <= 0) { av_freep(&s16Buf); return false; }
+        uint8_t* sonicOut = (uint8_t*)av_malloc(available * channels * (int)sizeof(int16_t));
+        if (!sonicOut) return false;
 
-    int bytes = av_samples_get_buffer_size(nullptr, spec_.channels,
-                                           readSamples, AV_SAMPLE_FMT_S16, 1);
-    chunk.data.assign(s16Buf, s16Buf + bytes);
+        int readSamples = sonicReadShortFromStream(sonic_, (int16_t*)sonicOut, available);
+        if (readSamples <= 0) { av_free(sonicOut); return false; }
+
+        int readBytes = readSamples * channels * (int)sizeof(int16_t);
+        chunk.data.assign(sonicOut, sonicOut + readBytes);
+        av_free(sonicOut);
+    }
+
     chunk.outRate = spec_.freq;
     chunk.pts = frame->pts == AV_NOPTS_VALUE ? 0.0 : frame->pts * ptsScale_;
     if (chunk.pts < 0.0) chunk.pts = 0.0;
 
-    av_freep(&s16Buf);
     return !chunk.data.empty();
 }
 
@@ -188,8 +220,7 @@ void AudioOutput::fill(Uint8* stream, int len) {
             offset_ = 0;
             {
                 std::lock_guard<std::mutex> lock(clockMutex_);
-                if (writeHead_ < 0.0 || current_.pts - writeHead_ > 0.5 ||
-                    current_.pts < writeHead_ - 0.5) {
+                if (writeHead_ < 0.0) {
                     writeHead_ = current_.pts;
                 }
             }
@@ -202,7 +233,7 @@ void AudioOutput::fill(Uint8* stream, int len) {
         if (offset_ >= current_.data.size()) current_.data.clear();
         {
             std::lock_guard<std::mutex> lock(clockMutex_);
-            writeHead_ += (double)n / 4.0 / current_.outRate;
+            writeHead_ += (double)n / 4.0 / current_.outRate * speed_.load(std::memory_order_relaxed);
         }
     }
 

@@ -214,7 +214,8 @@ void Player::setSpeed(float s) {
     speed_.store(s);
     if (audio_) {
         audio_->setSpeed(s);
-        // M18: atempo 保调变速，无需 seek — 时钟连续无跳变
+        // 规则3：切倍速时让视频跳过旧帧，追赶新时钟
+        dropUntil_.store(audio_->clock());
     }
     videoBaseTicks_ = SDL_GetPerformanceCounter();
 }

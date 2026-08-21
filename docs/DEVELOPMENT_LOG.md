@@ -609,3 +609,13 @@
   - 面板关闭时：切换按钮（→ 箭头）保留在窗口右边缘 8px 竖条
   - hover 效果：关闭按钮红色高亮，切换按钮灰色高亮
 - **提交**：`31411bb`
+
+#### M19 重写：Sonic 替代 atempo（2026-08-21）
+- **问题**：atempo 滤镜图每帧 `av_buffersrc_add_frame` + `av_buffersink_get_frame` 开销大，CPU 高，seek 性能下降
+- **方案**：Sonic 库（Bill Cox，单头文件 C 库，零分配，专为实时播放器设计）
+- 架构：`解码帧 → SwrContext(any→S16, 44100Hz, 仅格式转换) → Sonic(变速不变调) → 队列`
+- `sonicCreateStream(44100, 2)` + `sonicSetSpeed()` + `sonicWriteShortToStream()` + `sonicReadShortFromStream()`
+- 移除全部 avfilter 滤镜图代码（abuffer/abuffersink/aformat/atempo）
+- SwrContext 固定为 `any→S16, 44100Hz`，不再碰速度参数
+- CMakeLists.txt：添加 sonic 静态库（`enable_language(C)` + `add_library(sonic STATIC)`），移除 `avfilter.lib`
+- **提交**：`5a3cb8f`

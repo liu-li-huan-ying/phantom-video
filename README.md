@@ -113,4 +113,4 @@ cmake --build build
 - [x] M16 播放列表面板 ✅（右侧可切换面板，22种格式彩色图标，GDI文字渲染，点击选曲，宽度可调）
 - [x] M17 Seek 性能优化 ✅（150ms debounce、轮询1ms、seek期间逐帧显示到目标帧）
 - [x] M18 音频同步 + 可靠性 ✅（audioSeeking_竞态修复、Seeking指示器三点动画）
-- [x] M19 倍速保调变速 ✅（FFmpeg atempo 滤镜，变速不变调，消除切换卡顿）
+- [x] M19 倍速保调变速 ✅（Sonic TSM 库，零分配单缓冲，变速不变调，CPU 接近 1x）

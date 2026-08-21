@@ -7,7 +7,7 @@
 
 extern "C" {
 #include <libswresample/swresample.h>
-#include "sonic.h"
+#include <sonic.h>
 }
 
 #include "core/blocking_queue.h"
@@ -42,15 +42,14 @@ private:
 
     SDL_AudioDeviceID dev_ = 0;
     SDL_AudioSpec spec_{};
-    SwrContext* swr_ = nullptr;     // 仅做格式转换（any→S16），不做变速
+    SwrContext* swr_ = nullptr;
     double ptsScale_ = 1.0;
     bool ok_ = false;
     std::mutex swrMutex_;
-    int inSampleRate_ = 0;
     AVChannelLayout inLayout_{};
-    AVSampleFormat inFmt_ = AV_SAMPLE_FMT_NONE;
 
-    sonicStream sonic_ = nullptr;   // Sonic TSM（变速不变调）
+    // Sonic TSM（变速不变调），工作在设备采样率 S16 交错数据上
+    sonicStream sonic_ = nullptr;
 
     BlockingQueue<AudioChunk, AudioChunkSize> queue_{ 1764000 };
     AudioChunk current_;
@@ -61,6 +60,8 @@ private:
 
     std::atomic<float> volume_{ 0.8f };
     std::atomic<float> speed_{ 1.0f };
+    std::atomic<bool> speedChanged_{ false };
+    float lastSpeed_ = 1.0f;
     std::atomic<bool> normalization_{ false };
     std::atomic<float> normGain_{ 1.0f };
     float peakTracker_ = 0.0f;

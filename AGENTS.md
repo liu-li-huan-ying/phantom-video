@@ -7,6 +7,7 @@
   - 语言：C++17（g++ 15.2.0，w64devkit，位于 D:\w64devkit）
   - 构建：CMake + MinGW Makefiles（构建前需临时改名 `D:\w64devkit\bin\sh.exe`，构建完恢复）
   - 解码：FFmpeg 9.0.1（gyan.dev stable shared 构建，位于 `F:\dev\ffmpeg-9.0.1-full_build-shared`，libavformat/avcodec/avutil/swresample，MinGW 用 `-l:xxx.lib` 链接 COFF 导入库）
+  - 变速不变调：Sonic（Bill Cox，`F:\dev\sonic\sonic.c`，零分配单缓冲 TSM）
   - 渲染/音频/窗口：SDL2（SDL_MAIN_HANDLED 方案，不链接 SDL2main）
   - 依赖定位：pkg-config（`PKG_CONFIG_PATH="F:\dev\sdl2\x86_64-w64-mingw32\lib\pkgconfig"`；FFmpeg 不走 pkg-config，CMake 直接链接 `F:\dev\ffmpeg-9.0.1-full_build-shared\lib\*.lib`）
 - 已彻底放弃 Python / Go / TypeScript 技术栈，不得重新引入。
