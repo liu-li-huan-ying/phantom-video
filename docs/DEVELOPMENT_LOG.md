@@ -856,3 +856,19 @@
   - player.cpp：doSeek/setSpeed/pullFrame audioWait/audioLoop seek+push
 - **改动文件**：`audio_output.cpp`、`player.cpp`
 - **状态**：日志已添加，待编译测试
+
+### 阶段 M27：统一日志模块 Logger（完成）
+
+- 任务：替换临时 dbg() 为正规日志模块，支持日志目录、日期命名、自动清理
+- **改动**：
+  - 新建 `src/core/logger.h` + `src/core/logger.cpp`（单例，线程安全，5 级日志）
+  - 删除 `audio_output.cpp`/`player.cpp`/`demuxer.cpp` 中 3 份重复的 `static FILE* g_dbg` + `dbg()`
+  - 所有日志调用替换为 `LOG_DBG("MODULE", ...)` 宏
+  - `Logger::init("vplayer", 7)` 自动创建 `<exe_dir>/logs/`，按 `vplayer_YYYY-MM-DD_HHMMSS.log` 命名
+  - 启动时自动清理超过 7 天的旧日志
+  - `.gitignore` 添加 `*.log`
+  - `AGENTS.md` 新增第 7 节：日志规范（级别/格式/模块标签/强制路径/文件管理）
+- **日志格式**：`[秒.毫秒] [LEVEL] [MODULE] message`（全 ASCII，Windows 兼容）
+- **模块标签**：MAIN/FILL/SEEK/SPEED/PULL/DECODE/ALOOP/DEMUX/VIDEO/AUDIO
+- **提交**：`748dda6`
+- **验证**：编译通过，运行 8 秒生成 `logs/vplayer_2026-08-23_004407.log`（73KB，1224 行），格式正确
