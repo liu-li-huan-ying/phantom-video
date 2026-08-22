@@ -9,6 +9,7 @@ public:
     bool open(const std::string& path);
     PacketPtr readPacket();
     bool seek(double seconds);
+    bool seekAudio(double seconds);  // 音频流专用 seek（用 audioIndex_ + audio time_base）
 
     int videoIndex() const { return videoIndex_; }
     int audioIndex() const { return audioIndex_; }

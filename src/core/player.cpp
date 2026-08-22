@@ -445,7 +445,7 @@ void Player::audioLoop() {
     while (!stop_.load()) {
         if (!audioDemuxer_ || !audioEnabled_.load()) break;
         if (audioSeekPending_.exchange(false)) {
-            audioDemuxer_->seek(audioSeekTarget_.load());
+            audioDemuxer_->seekAudio(audioSeekTarget_.load());
             if (audioDecoder_) audioDecoder_->flushBuffers();
             audioSeeking_.store(false);
         }

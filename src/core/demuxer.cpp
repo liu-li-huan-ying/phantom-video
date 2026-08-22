@@ -58,6 +58,13 @@ bool Demuxer::seek(double seconds) {
     return av_seek_frame(ctx_, idx, ts, AVSEEK_FLAG_BACKWARD) >= 0;
 }
 
+bool Demuxer::seekAudio(double seconds) {
+    if (audioIndex_ < 0) return false;
+    AVStream* st = ctx_->streams[audioIndex_];
+    int64_t ts = av_rescale_q((int64_t)(seconds * AV_TIME_BASE), AV_TIME_BASE_Q, st->time_base);
+    return av_seek_frame(ctx_, audioIndex_, ts, AVSEEK_FLAG_BACKWARD) >= 0;
+}
+
 AVStream* Demuxer::videoStream() const {
     return videoIndex_ >= 0 ? ctx_->streams[videoIndex_] : nullptr;
 }
