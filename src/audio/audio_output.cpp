@@ -235,7 +235,6 @@ void AudioOutput::fill(Uint8* stream, int len) {
     }
 
     // 原子处理待处理的 seek（清 current_ + 清队列 + 设时钟）
-    seekConsumed_ = false;
     double seekTarget = pendingSeek_.exchange(-1.0, std::memory_order_acq_rel);
     if (seekTarget >= 0.0) {
         current_.data.clear();
@@ -243,8 +242,6 @@ void AudioOutput::fill(Uint8* stream, int len) {
         queue_.clear();
         setClock(seekTarget);
         reanchor_ = true;
-        waitingForSeek_ = true;  // 冻结时钟，直到首块音频到达
-        seekConsumed_ = true;
     }
 
     SDL_memset(stream, 0, len);
@@ -255,14 +252,11 @@ void AudioOutput::fill(Uint8* stream, int len) {
         if (current_.data.empty()) {
             AudioChunk chunk;
             if (!queue_.tryPop(chunk)) {
-                // 队列空：输出静音
-                // waitingForSeek_ 时冻结时钟，等待首块音频到达
-                if (!waitingForSeek_) {
-                    std::lock_guard<std::mutex> lock(clockMutex_);
-                    if (writeHead_ >= 0.0) {
-                        writeHead_ += (double)space / 4.0 / spec_.freq
-                                      * speed_.load(std::memory_order_relaxed);
-                    }
+                // 队列空：输出静音，按内容时间推进时钟
+                std::lock_guard<std::mutex> lock(clockMutex_);
+                if (writeHead_ >= 0.0) {
+                    writeHead_ += (double)space / 4.0 / spec_.freq
+                                  * speed_.load(std::memory_order_relaxed);
                 }
                 break;
             }
@@ -270,16 +264,10 @@ void AudioOutput::fill(Uint8* stream, int len) {
             offset_ = 0;
             {
                 std::lock_guard<std::mutex> lock(clockMutex_);
-                if (writeHead_ < 0.0) {
+                if (writeHead_ < 0.0 || reanchor_) {
                     writeHead_ = current_.pts;
-                } else if (reanchor_) {
-                    // 仅前向修正：chunk PTS > writeHead_ 时才修正（seek 后首块）
-                    // 若 chunk PTS < writeHead_，保持不变（避免时钟跳回）
-                    if (current_.pts > writeHead_)
-                        writeHead_ = current_.pts;
                     reanchor_ = false;
                 }
-                waitingForSeek_ = false;  // 首块到达，恢复时钟推进
             }
         }
         size_t n = std::min<size_t>(current_.data.size() - offset_, (size_t)space);

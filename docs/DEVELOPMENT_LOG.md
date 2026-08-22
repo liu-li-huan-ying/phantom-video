@@ -794,3 +794,22 @@
   5. `doSeek()` 末尾移除 `dropUntil_.store(-1e9)`
 - **改动文件**：`audio_output.h/cpp`、`player.h/cpp`
 - **验证**：编译通过，冒烟测试无崩溃
+
+### 阶段 M23.5：深度优化 seek 跳转性能 ✅ 完成
+
+- 任务：消除 seek 后时钟漂移、旧帧入队竞态、reanchor 后跳等系统性问题
+- **发现的问题**：
+  1. **静音推进时钟**：seek 后队列空，fill() 静音块推进 writeHead_ → 时钟漂移到 seekTarget 之后 → reanchor 拉回 → 时钟跳变
+  2. **reanchor 后跳**：首块 PTS 可能 < seekTarget（keyframe 对齐），reanchor 设 writeHead_=chunkPTS → 时钟回退
+  3. **0.5s 丢弃阈值太松**：旧帧 PTS > seekTarget-0.5 就被推送，导致偏移
+  4. **doSeek→fill 竞态窗口**：doSeek 设 audioSeeking_=true，但 fill() 消费 pendingSeek_ 前，音频线程可能已推送旧帧
+  5. **AudioOutput 缺乏 seek 阻断机制**：push()/tryPush() 无法感知 seek 状态
+- **修复**：
+  1. `AudioOutput` 新增 `waitingForSeek_` 标志：pendingSeek_ 处理时置 true，首块到达时置 false；waitingForSeek_ 期间静音不推进时钟
+  2. `reanchor_` 改为仅前向修正：`chunk.pts > writeHead_` 时才修正，避免时钟跳回
+  3. `AudioOutput` 新增 `setSeeking(bool)` 原子标志 + `seeking_` 成员：seek 期间 push()/tryPush() 返回 false，阻断旧帧入队
+  4. `doSeek()` 设 `audio_->setSeeking(true)`；`audioLoop()` seek 处理完、读新数据前设 `setSeeking(false)`
+  5. `audioLoop` PTS 丢弃阈值从 0.5s 收紧至 0.1s
+- **改动文件**：`audio_output.h/cpp`、`player.cpp`
+- **验证**：编译通过，冒烟测试无崩溃
+- **提交**：`a635745`（音频 seek 位置修复）、`6c68525`（深度优化）

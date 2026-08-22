@@ -100,6 +100,11 @@ bool Player::openFile(const std::string& path) {
     videoBasePts_ = 0.0;
     videoBaseTicks_ = SDL_GetPerformanceCounter();
     state_.store(State::Playing);
+    audioWait_.store(false);
+    audioSeeking_.store(false);
+    seekFirstFrame_.store(false);
+    uiSeeking_.store(false);
+    uiTargetPts_.store(0.0);
 
     audioThread_ = std::thread(&Player::audioLoop, this);
     decodeThread_ = std::thread(&Player::decodeLoop, this);
