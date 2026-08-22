@@ -1,6 +1,19 @@
 #include "core/demuxer.h"
 
+#include <cstdio>
+#include <cstdarg>
 #include <libavutil/mathematics.h>
+
+static FILE* g_dbg = nullptr;
+static void dbg(const char* fmt, ...) {
+    if (!g_dbg) g_dbg = fopen("seek_trace.log", "a");
+    if (!g_dbg) return;
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(g_dbg, fmt, ap);
+    va_end(ap);
+    fflush(g_dbg);
+}
 
 Demuxer::~Demuxer() {
     if (ctx_) avformat_close_input(&ctx_);
@@ -55,6 +68,8 @@ bool Demuxer::seek(double seconds) {
     if (idx < 0) return false;
     AVStream* st = ctx_->streams[idx];
     int64_t ts = av_rescale_q((int64_t)(seconds * AV_TIME_BASE), AV_TIME_BASE_Q, st->time_base);
+    dbg("[SEEK] Demuxer::seek: seconds=%.3f idx=%d time_base=%d/%d ts=%ld\n",
+            seconds, idx, st->time_base.num, st->time_base.den, (long)ts);
     return av_seek_frame(ctx_, idx, ts, AVSEEK_FLAG_BACKWARD) >= 0;
 }
 
@@ -62,6 +77,8 @@ bool Demuxer::seekAudio(double seconds) {
     if (audioIndex_ < 0) return false;
     AVStream* st = ctx_->streams[audioIndex_];
     int64_t ts = av_rescale_q((int64_t)(seconds * AV_TIME_BASE), AV_TIME_BASE_Q, st->time_base);
+    dbg("[SEEK] Demuxer::seekAudio: seconds=%.3f idx=%d time_base=%d/%d ts=%ld\n",
+            seconds, audioIndex_, st->time_base.num, st->time_base.den, (long)ts);
     return av_seek_frame(ctx_, audioIndex_, ts, AVSEEK_FLAG_BACKWARD) >= 0;
 }
 

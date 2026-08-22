@@ -11,7 +11,7 @@ static SDL_Texture* gLogoTex = nullptr;
 static void ensureLogo(SDL_Renderer* renderer) {
     if (gLogoTex) return;
     const char* paths[] = {
-        "F:/vedioplayer/ico/vplay.bmp",
+        "ico/vplay.bmp",
         "assets/icons/vplay.bmp",
         "vplay.bmp",
     };

@@ -86,14 +86,14 @@ int main(int argc, char** argv) {
         return 1;
     }
     // --- 自定义窗口图标 ---
-    // 用户已将图标放在 F:\vedioplayer\ico\vplay.ico
+    // 图标位于项目根目录 ico/vplay.ico
     // SDL2 SDL_LoadBMP 原生仅支持 BMP 格式，ICO 格式兼容有限。
     // 步骤：将 vplay.ico 另存为 vplay.bmp (32x32 或 256x256 均可)，
     //       将 vplay.bmp 放在同一目录，代码将自动加载 BMP。
     // 若仅有 ICO 且不另存 BMP，将打印提示并使用默认系统图标。
     {
-        const char* iconBmpPath = "F:/vedioplayer/ico/vplay.bmp";
-        const char* iconIcoPath = "F:/vedioplayer/ico/vplay.ico";
+        const char* iconBmpPath = "ico/vplay.bmp";
+        const char* iconIcoPath = "ico/vplay.ico";
         SDL_Surface* icon = SDL_LoadBMP(iconBmpPath);
         if (!icon) {
             // 若无 BMP，尝试 ICO (SDL2 支持有限，建议另存为 BMP)

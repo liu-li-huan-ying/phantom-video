@@ -2,12 +2,25 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdarg>
 #include <cstring>
 
 extern "C" {
 #include <libavutil/opt.h>
 #include <libavutil/channel_layout.h>
 #include <libavutil/samplefmt.h>
+}
+
+static FILE* g_dbg = nullptr;
+static void dbg(const char* fmt, ...) {
+    if (!g_dbg) g_dbg = fopen("seek_trace.log", "a");
+    if (!g_dbg) return;
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(g_dbg, fmt, ap);
+    va_end(ap);
+    fflush(g_dbg);
 }
 
 AudioOutput::AudioOutput() {
@@ -232,11 +245,13 @@ void AudioOutput::fill(Uint8* stream, int len) {
             lastSpeed_ = newSpeed;
         }
         speed_.store(newSpeed, std::memory_order_relaxed);
+        reanchor_ = true;
     }
 
     // 原子处理待处理的 seek（清 current_ + 清队列 + 设时钟）
     double seekTarget = pendingSeek_.exchange(-1.0, std::memory_order_acq_rel);
     if (seekTarget >= 0.0) {
+        dbg("[SEEK] fill: pendingSeek consumed, target=%.3f, clearing queue\n", seekTarget);
         current_.data.clear();
         offset_ = 0;
         queue_.clear();
@@ -265,7 +280,10 @@ void AudioOutput::fill(Uint8* stream, int len) {
             {
                 std::lock_guard<std::mutex> lock(clockMutex_);
                 if (writeHead_ < 0.0 || reanchor_) {
-                    writeHead_ = current_.pts;
+                    if (writeHead_ < 0.0 || current_.pts > writeHead_) {
+                        dbg("[SEEK] fill: reanchor writeHead_=%.3f -> chunk.pts=%.3f\n", writeHead_, current_.pts);
+                        writeHead_ = current_.pts;
+                    }
                     reanchor_ = false;
                 }
             }

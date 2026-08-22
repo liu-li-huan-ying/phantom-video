@@ -1,6 +1,18 @@
 #include "core/player.h"
 
 #include <algorithm>
+#include <cstdio>
+
+static FILE* g_dbg = nullptr;
+static void dbg(const char* fmt, ...) {
+    if (!g_dbg) g_dbg = fopen("seek_trace.log", "a");
+    if (!g_dbg) return;
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(g_dbg, fmt, ap);
+    va_end(ap);
+    fflush(g_dbg);
+}
 
 #include <libavutil/hwcontext.h>
 #include <libavutil/mathematics.h>
@@ -201,6 +213,7 @@ void Player::requestSeek(double t) {
     lastSeekTime_ = SDL_GetTicks();
     uiSeeking_.store(true, std::memory_order_relaxed);
     uiTargetPts_.store(seekTarget_, std::memory_order_relaxed);
+    dbg("[SEEK] requestSeek: t=%.3f clamped=%.3f duration=%.3f\n", t, seekTarget_, duration_);
 }
 
 bool Player::seekRequested() {
@@ -323,8 +336,10 @@ FramePtr Player::pullFrame() {
     double pts = framePts(f);
     if (audioWait_.load()) {
         double seekTarget = audioSeekTarget_.load();
+        dbg("[SEEK] pullFrame audioWait: framePts=%.3f seekTarget=%.3f\n", pts, seekTarget);
         // 跳过 seek target 之前的帧（关键帧到目标之间的帧），不显示
         while (f && pts < seekTarget - 0.1) {
+            dbg("[SEEK] pullFrame dropping frame pts=%.3f\n", pts);
             videoQueue_.pop(f);
             if (!videoQueue_.peek(f)) {
                 // 队列空，等解码线程推入更多帧
@@ -340,12 +355,14 @@ FramePtr Player::pullFrame() {
         videoBaseTicks_ = SDL_GetPerformanceCounter();
         playing_ = !paused_.load();
         audioWait_.store(false);
+        dbg("[SEEK] pullFrame audioWait done: first displayed pts=%.3f clock=%.3f\n", pts, clock());
         if (onSeekingChanged) onSeekingChanged(false);
         return f;
     }
     if (pts - target > 0.05) {
         double remain = pts - target;
-        int delay = std::min((int)(remain * 1000.0), 50);
+        float spd = speed_.load(std::memory_order_relaxed);
+        int delay = std::min((int)(remain * 1000.0 / spd), 50);
         SDL_Delay(delay);
         return lastFrame_;
     }
@@ -371,11 +388,11 @@ FramePtr Player::pullFrame() {
 
 void Player::doSeek(double t) {
     if (!videoDemuxer_) return;
+    dbg("[SEEK] doSeek: t=%.3f\n", t);
     audioSeeking_.store(true);
     if (audio_) audio_->setSeeking(true);
     if (onSeekingChanged) onSeekingChanged(true);
     if (audio_) {
-        audio_->setClock(t);
         audio_->requestSeek(t);
     }
     videoQueue_.clear();
@@ -417,8 +434,12 @@ void Player::decodeLoop() {
 
         if (pkt->stream_index == videoPtsIdx_) {
             if (!videoDecoder_ || !videoDecoder_->send(pkt.get())) continue;
+            int frameCount = 0;
             while (FramePtr f = videoDecoder_->receive()) {
                 if (seekRequested() || stop_.load()) break;
+                double fp = framePts(f);
+                if (frameCount < 5) dbg("[SEEK] decodeLoop decoded frame pts=%.3f\n", fp);
+                frameCount++;
                 while (!videoQueue_.tryPush(f)) {
                     if (seekRequested() || stop_.load()) break;
                     std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -451,15 +472,15 @@ void Player::audioLoop() {
     while (!stop_.load()) {
         if (!audioDemuxer_ || !audioEnabled_.load()) break;
         if (audioSeekPending_.exchange(false)) {
+            dbg("[SEEK] audioLoop: processing seek to %.3f\n", audioSeekTarget_.load());
             audioDemuxer_->seekAudio(audioSeekTarget_.load());
             if (audioDecoder_) audioDecoder_->flushBuffers();
             audioSeeking_.store(false);
-            if (audio_) audio_->setSeeking(false);  // seek 完成，允许新帧入队
+            if (audio_) audio_->setSeeking(false);
         }
         PacketPtr pkt = audioDemuxer_->readPacket();
         if (!pkt) break;
         if (pkt->stream_index != audioDemuxer_->audioIndex()) continue;
-        if (seekRequested() || stop_.load()) continue;
         if (!audioDecoder_ || !audioDecoder_->send(pkt.get())) continue;
         while (FramePtr f = audioDecoder_->receive()) {
             if (seekRequested() || stop_.load()) break;
