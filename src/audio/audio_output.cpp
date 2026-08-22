@@ -109,8 +109,11 @@ void AudioOutput::setSpeed(float spd) {
     speed_.store(spd, std::memory_order_relaxed);
 }
 
-void AudioOutput::requestSpeedChange(float spd) {
+void AudioOutput::requestSpeedChange(float spd, double anchor) {
     if (spd <= 0.01f) spd = 0.01f;
+    if (anchor >= 0.0) {
+        pendingSpeedAnchor_.store(anchor, std::memory_order_release);
+    }
     pendingSpeed_.store(spd, std::memory_order_release);
 }
 
@@ -228,7 +231,8 @@ void AudioOutput::fill(Uint8* stream, int len) {
     // 原子处理待处理的速度变更（在 SDL 回调线程内，零竞态）
     float newSpeed = pendingSpeed_.exchange(-1.0f, std::memory_order_acq_rel);
     if (newSpeed >= 0.0f) {
-        LOG_DBG("FILL","pendingSpeed consumed: speed=%.2f writeHead_=%.3f", newSpeed, writeHead_);
+        double anchor = pendingSpeedAnchor_.exchange(-1.0, std::memory_order_acq_rel);
+        LOG_DBG("FILL","pendingSpeed consumed: speed=%.2f anchor=%.3f writeHead_=%.3f", newSpeed, anchor, writeHead_);
         // 清除 current_（旧速度数据），清空队列，重建 Sonic，保持时钟
         current_.data.clear();
         offset_ = 0;
@@ -246,6 +250,12 @@ void AudioOutput::fill(Uint8* stream, int len) {
             lastSpeed_ = newSpeed;
         }
         speed_.store(newSpeed, std::memory_order_relaxed);
+        // 原子锚定时钟：anchor 由 Player::setSpeed 在 requestSpeedChange 时传入
+        if (anchor >= 0.0) {
+            std::lock_guard<std::mutex> lock(clockMutex_);
+            writeHead_ = anchor;
+            LOG_DBG("FILL","pendingSpeed anchor: writeHead_=%.3f", writeHead_);
+        }
         reanchor_ = true;
     }
 
@@ -287,9 +297,17 @@ void AudioOutput::fill(Uint8* stream, int len) {
             {
                 std::lock_guard<std::mutex> lock(clockMutex_);
                 if (writeHead_ < 0.0 || reanchor_) {
-                    LOG_DBG("FILL","REANCHOR: writeHead_ %.3f -> chunk.pts %.3f", writeHead_, current_.pts);
-                    writeHead_ = current_.pts;
-                    reanchor_ = false;
+                    double diff = current_.pts - writeHead_;
+                    if (reanchor_ && writeHead_ > 0.0 && (diff > 2.0 || diff < -2.0)) {
+                        LOG_WARN("FILL","REANCHOR SKIP: chunk.pts %.3f way off writeHead_ %.3f (diff=%.3f), discarding chunk",
+                            current_.pts, writeHead_, diff);
+                        current_.data.clear();
+                        offset_ = 0;
+                    } else {
+                        LOG_DBG("FILL","REANCHOR: writeHead_ %.3f -> chunk.pts %.3f", writeHead_, current_.pts);
+                        writeHead_ = current_.pts;
+                        reanchor_ = false;
+                    }
                 }
             }
         }

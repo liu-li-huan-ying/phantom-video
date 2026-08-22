@@ -223,15 +223,10 @@ void Player::setSpeed(float s) {
         double anchor = audio_->clock();
         if (anchor < 0.0) anchor = 0.0;
         LOG_DBG("SPEED", "setSpeed: s=%.2f anchor=%.3f writeHead_=%.3f", s, anchor, audio_->clock());
-        // 1. 锚定时钟（fill() 处理速度变更时保持此时钟）
-        audio_->setClock(anchor);
-        LOG_DBG("SPEED", "after setClock: writeHead_=%.3f", audio_->clock());
-        // 2. 请求延迟速度变更：fill() 在 SDL 回调线程内原子处理
-        //    （清 current_ + 清 queue + 重建 Sonic + 更新 speed_ + 保持时钟）
-        audio_->requestSpeedChange(s);
-        LOG_DBG("SPEED", "after requestSpeed: pending=%d", audio_->hasPendingSpeed());
-        // 3. 等待 fill() 处理完毕（~23ms 一个回调周期），再更新 Player::speed_
-        //    确保视频时钟和音频速度一致
+        // 原子请求速度变更 + 锚定时钟：fill() 在 SDL 回调线程内一次性处理
+        audio_->requestSpeedChange(s, anchor);
+        LOG_DBG("SPEED", "after requestSpeed: pending=%d anchor=%.3f", audio_->hasPendingSpeed(), anchor);
+        // 等待 fill() 处理完毕（~23ms 一个回调周期），再更新 Player::speed_
         for (int i = 0; i < 20; ++i) {
             if (!audio_->hasPendingSpeed()) break;
             SDL_Delay(1);
@@ -385,17 +380,27 @@ void Player::doSeek(double t) {
     audioSeeking_.store(true);
     if (audio_) audio_->setSeeking(true);
     if (onSeekingChanged) onSeekingChanged(true);
-    if (audio_) {
-        audio_->requestSeek(t);
-    }
     videoQueue_.clear();
     videoClockStarted_ = true;
     videoBasePts_ = t;
     videoBaseTicks_ = SDL_GetPerformanceCounter();
     audioWait_ = true;
     seekFirstFrame_.store(true);
-    audioSeekPending_.store(true);
+
+    // 先通知 audioLoop 执行 seek，等待 seek 完成后再触发 fill() pendingSeek
+    // 避免 fill() 在 audio demuxer seek 前就消费 pendingSeek 并 reanchor 到旧数据
     audioSeekTarget_.store(t);
+    audioSeekPending_.store(true);
+    int waitMs = 0;
+    for (int i = 0; i < 50; ++i) {
+        if (!audioSeeking_.load()) break;
+        SDL_Delay(1);
+        waitMs = i + 1;
+    }
+    LOG_DBG("SEEK", "audioLoop seek done, requesting fill seek: wait=%dms", waitMs);
+    if (audio_) {
+        audio_->requestSeek(t);
+    }
     if (videoDecoder_) videoDecoder_->flushBuffers();
     if (subtitleDecoder_) {
         subtitles_.clear();

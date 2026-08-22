@@ -872,3 +872,25 @@
 - **模块标签**：MAIN/FILL/SEEK/SPEED/PULL/DECODE/ALOOP/DEMUX/VIDEO/AUDIO
 - **提交**：`748dda6`
 - **验证**：编译通过，运行 8 秒生成 `logs/vplayer_2026-08-23_004407.log`（73KB，1224 行），格式正确
+
+### 阶段 M28：seek ~2x 偏移根因定位 + 3 项修复 ✅ 完成
+
+- 任务：修复 seek 后音频时钟偏移约 2 倍目标位置的问题
+- **根因分析**（日志诊断）：
+  - 日志显示：seek 到 517.895s 后，fill() reanchor 跳到 chunk.pts=1056.740（≈2×目标）
+  - 时序：`doSeek()` 先调用 `audio_->requestSeek(t)` → fill() 立即消费 pendingSeek_ 并清队列+设 writeHead_=t+reanchor_=true；但此时 audioLoop 尚未完成 audio demuxer seek → 从旧位置读到的包被 push → fill() reanchor 到错误 pts
+  - setSpeed() 竞态：`setClock(anchor)` + `requestSpeedChange(s)` 非原子，fill() 可在两步间推进时钟
+- **修复 1：reanchor 安全检查**（`audio_output.cpp`）
+  - fill() 中 reanchor 逻辑增加安全检查：若 chunk.pts 偏离 writeHead_ 超过 ±2 秒，跳过 reanchor 并丢弃该 chunk
+  - 防御性措施：即使音频 demuxer seek 返回错误数据，也不会污染时钟
+- **修复 2：doSeek 流程修正**（`player.cpp`）
+  - 原流程：`audio_->requestSeek(t)` → `audioSeekPending_=true`（fill() 在 audioLoop seek 前消费 pendingSeek_）
+  - 新流程：`audioSeekPending_=true` → 等待 `audioSeeking_` 变 false（audioLoop 完成 seek）→ 再调 `audio_->requestSeek(t)`
+  - 确保 fill() 消费 pendingSeek_ 时，audio demuxer 已经 seek 到正确位置
+- **修复 3：setSpeed 原子化**（`audio_output.h/cpp` + `player.cpp`）
+  - 新增 `pendingSpeedAnchor_` 原子量，`requestSpeedChange(spd, anchor)` 同时设置速度和锚点
+  - fill() 消费 pendingSpeed 时原子读取 anchor 并设置 writeHead_，消除 TOCTOU 竞态
+  - Player::setSpeed() 改为调用 `requestSpeedChange(s, anchor)` 一步完成
+- **改动文件**：`audio_output.h`、`audio_output.cpp`、`player.cpp`
+- **验证**：编译通过，冒烟测试 8 秒无崩溃，日志格式正确
+- **状态**：代码已实现，待用户实际 seek/变速测试验证效果

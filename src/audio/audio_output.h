@@ -37,7 +37,7 @@ public:
     void setSpeed(float spd);                   // 仅更新速度原子量
 
     // 延迟操作：由 fill() 在 SDL 回调线程内原子处理，消除竞态
-    void requestSpeedChange(float spd);         // 设置待处理速度变更
+    void requestSpeedChange(float spd, double anchor = -1.0); // 设置待处理速度变更+锚点
     float pendingSpeed() const;                 // 读取待处理速度（-1 = 无）
     bool hasPendingSpeed() const;               // 是否有待处理速度变更
     void requestSeek(double t);                 // 设置待处理 seek（fill() 内原子清队列+设时钟）
@@ -79,6 +79,7 @@ private:
 
     // 延迟速度变更：fill() 在 SDL 回调线程内原子处理
     std::atomic<float> pendingSpeed_{ -1.0f };  // -1 = 无待处理变更
+    std::atomic<double> pendingSpeedAnchor_{ -1.0 }; // 速度变更时时钟锚点（-1 = 无）
 
     // 延迟 seek：fill() 在 SDL 回调线程内原子处理
     std::atomic<double> pendingSeek_{ -1.0 };   // -1 = 无待处理 seek
