@@ -827,3 +827,32 @@
 - **改动文件**：`audio_output.h/cpp`、`player.cpp`
 - **验证**：编译通过，冒烟测试无崩溃
 - **提交**：`6c30ef6`
+
+### 阶段 M25：修复 seek 跳转偏移（flush 顺序 + 旧包丢弃）✅ 完成
+
+- 任务：修复 seek 到 25%-50% 区间总是跳到 50% 之后的问题
+- **根因分析**：
+  1. `doSeek()` 先 `videoDemuxer_->seek(t)` 再 `flushBuffers()`，但 decodeLoop 可能在 seek 之后、flush 之前已 `readPacket()` 读到旧位置的包
+  2. 旧包送入 decoder → 解码出旧 PTS 帧 → 绕过 `audioWait_` 丢弃检查（若 `audioWait_` 已被音频线程清除）→ 显示错误位置
+  3. flush 必须在 seek 之前调用，确保 decoder 内部残留的旧数据先清掉
+- **修复**：
+  1. `doSeek()`: `flushBuffers()` 移到 `videoDemuxer_->seek(t)` 之前
+  2. `decodeLoop`: `readPacket()` 后检查 `seekRequested()`，旧包直接 `continue` 不送 decoder
+  3. `audioLoop`: 同样在 `send()` 前检查 `seekRequested()`，旧包丢弃
+- **改动文件**：`player.cpp`
+- **验证**：编译通过，冒烟测试无崩溃
+- **提交**：`d1fdd0f`
+
+### 阶段 M26：诊断日志 + seek 偏移根因分析（进行中）
+
+- 任务：收集 seek/变速时钟数据，定位 ~2x 偏移根因
+- **根因分析**（代码审查 + ffplay 源码对比）：
+  - ffplay 时钟模型：`audio_clock = frame_pts + frame_duration`，通过减去缓冲区估算当前位置，不手动推进 writeHead_
+  - 本项目模型：`writeHead_ += n/4/outRate * speed_`，手动推进。数学正确（Sonic 压缩后 PCM 消耗量 × speed = 内容时间），但与 reanchor 交互有竞态
+  - **竞态窗口**：setSpeed() 中 `setClock(anchor)` + `requestSpeedChange(s)` 非原子，fill() 可在两步间用旧速度推进 writeHead_
+  - **静音推进**：reanchor_ 等待期间 writeHead_ 以 speed_ 推进，pullFrame() 可观察到漂移后的时钟值
+- **诊断日志**：全 ASCII，写入 seek_trace.log
+  - fill()：pendingSeek/pendingSpeed 消费、reanchor 触发、SILENCE+REANCHOR
+  - player.cpp：doSeek/setSpeed/pullFrame audioWait/audioLoop seek+push
+- **改动文件**：`audio_output.cpp`、`player.cpp`
+- **状态**：日志已添加，待编译测试

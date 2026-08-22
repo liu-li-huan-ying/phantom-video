@@ -228,6 +228,7 @@ void AudioOutput::fill(Uint8* stream, int len) {
     // 原子处理待处理的速度变更（在 SDL 回调线程内，零竞态）
     float newSpeed = pendingSpeed_.exchange(-1.0f, std::memory_order_acq_rel);
     if (newSpeed >= 0.0f) {
+        dbg("[FILL] pendingSpeed consumed: speed=%.2f writeHead_=%.3f\n", newSpeed, writeHead_);
         // 清除 current_（旧速度数据），清空队列，重建 Sonic，保持时钟
         current_.data.clear();
         offset_ = 0;
@@ -251,12 +252,13 @@ void AudioOutput::fill(Uint8* stream, int len) {
     // 原子处理待处理的 seek（清 current_ + 清队列 + 设时钟）
     double seekTarget = pendingSeek_.exchange(-1.0, std::memory_order_acq_rel);
     if (seekTarget >= 0.0) {
-        dbg("[SEEK] fill: pendingSeek consumed, target=%.3f, clearing queue\n", seekTarget);
+        dbg("[FILL] pendingSeek consumed: target=%.3f writeHead_before=%.3f\n", seekTarget, writeHead_);
         current_.data.clear();
         offset_ = 0;
         queue_.clear();
         setClock(seekTarget);
         reanchor_ = true;
+        dbg("[FILL] pendingSeek done: writeHead_after=%.3f reanchor=%d\n", writeHead_, reanchor_);
     }
 
     SDL_memset(stream, 0, len);
@@ -270,8 +272,13 @@ void AudioOutput::fill(Uint8* stream, int len) {
                 // 队列空：输出静音，按内容时间推进时钟
                 std::lock_guard<std::mutex> lock(clockMutex_);
                 if (writeHead_ >= 0.0) {
+                    double before = writeHead_;
                     writeHead_ += (double)space / 4.0 / spec_.freq
                                   * speed_.load(std::memory_order_relaxed);
+                    if (reanchor_) {
+                        dbg("[FILL] SILENCE+REANCHOR: %.3f -> %.3f speed=%.2f space=%d\n",
+                            before, writeHead_, speed_.load(std::memory_order_relaxed), space);
+                    }
                 }
                 break;
             }
@@ -280,7 +287,7 @@ void AudioOutput::fill(Uint8* stream, int len) {
             {
                 std::lock_guard<std::mutex> lock(clockMutex_);
                 if (writeHead_ < 0.0 || reanchor_) {
-                    dbg("[SEEK] fill: reanchor writeHead_=%.3f -> chunk.pts=%.3f\n", writeHead_, current_.pts);
+                    dbg("[FILL] REANCHOR: writeHead_ %.3f -> chunk.pts %.3f\n", writeHead_, current_.pts);
                     writeHead_ = current_.pts;
                     reanchor_ = false;
                 }
