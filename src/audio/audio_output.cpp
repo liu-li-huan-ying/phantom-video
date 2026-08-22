@@ -1,26 +1,14 @@
 #include "audio/audio_output.h"
+#include "core/logger.h"
 
 #include <algorithm>
 #include <cmath>
-#include <cstdio>
-#include <cstdarg>
 #include <cstring>
 
 extern "C" {
 #include <libavutil/opt.h>
 #include <libavutil/channel_layout.h>
 #include <libavutil/samplefmt.h>
-}
-
-static FILE* g_dbg = nullptr;
-static void dbg(const char* fmt, ...) {
-    if (!g_dbg) g_dbg = fopen("seek_trace.log", "a");
-    if (!g_dbg) return;
-    va_list ap;
-    va_start(ap, fmt);
-    vfprintf(g_dbg, fmt, ap);
-    va_end(ap);
-    fflush(g_dbg);
 }
 
 AudioOutput::AudioOutput() {
@@ -225,10 +213,22 @@ void SDLCALL AudioOutput::sdlCallback(void* userdata, Uint8* stream, int len) {
 }
 
 void AudioOutput::fill(Uint8* stream, int len) {
+    // 诊断：每 200 次回调（约 4.6 秒）记录一次基线
+    static int g_fillCount = 0;
+    g_fillCount++;
+    if (g_fillCount == 1) {
+        LOG_DBG("FILL","FIRST CALL: len=%d spec_.freq=%d writeHead_=%.3f speed=%.2f reanchor=%d",
+            len, spec_.freq, writeHead_, speed_.load(), reanchor_);
+    }
+    if (g_fillCount % 200 == 0) {
+        LOG_DBG("FILL","tick=%u count=%d speed=%.2f reanchor=%d writeHead_=%.3f",
+            SDL_GetTicks(), g_fillCount, speed_.load(), reanchor_, writeHead_);
+    }
+
     // 原子处理待处理的速度变更（在 SDL 回调线程内，零竞态）
     float newSpeed = pendingSpeed_.exchange(-1.0f, std::memory_order_acq_rel);
     if (newSpeed >= 0.0f) {
-        dbg("[FILL] pendingSpeed consumed: speed=%.2f writeHead_=%.3f\n", newSpeed, writeHead_);
+        LOG_DBG("FILL","pendingSpeed consumed: speed=%.2f writeHead_=%.3f", newSpeed, writeHead_);
         // 清除 current_（旧速度数据），清空队列，重建 Sonic，保持时钟
         current_.data.clear();
         offset_ = 0;
@@ -252,13 +252,13 @@ void AudioOutput::fill(Uint8* stream, int len) {
     // 原子处理待处理的 seek（清 current_ + 清队列 + 设时钟）
     double seekTarget = pendingSeek_.exchange(-1.0, std::memory_order_acq_rel);
     if (seekTarget >= 0.0) {
-        dbg("[FILL] pendingSeek consumed: target=%.3f writeHead_before=%.3f\n", seekTarget, writeHead_);
+        LOG_DBG("FILL","pendingSeek consumed: target=%.3f writeHead_before=%.3f", seekTarget, writeHead_);
         current_.data.clear();
         offset_ = 0;
         queue_.clear();
         setClock(seekTarget);
         reanchor_ = true;
-        dbg("[FILL] pendingSeek done: writeHead_after=%.3f reanchor=%d\n", writeHead_, reanchor_);
+        LOG_DBG("FILL","pendingSeek done: writeHead_after=%.3f reanchor=%d", writeHead_, reanchor_);
     }
 
     SDL_memset(stream, 0, len);
@@ -276,7 +276,7 @@ void AudioOutput::fill(Uint8* stream, int len) {
                     writeHead_ += (double)space / 4.0 / spec_.freq
                                   * speed_.load(std::memory_order_relaxed);
                     if (reanchor_) {
-                        dbg("[FILL] SILENCE+REANCHOR: %.3f -> %.3f speed=%.2f space=%d\n",
+                        LOG_DBG("FILL","SILENCE+REANCHOR: %.3f -> %.3f speed=%.2f space=%d",
                             before, writeHead_, speed_.load(std::memory_order_relaxed), space);
                     }
                 }
@@ -287,7 +287,7 @@ void AudioOutput::fill(Uint8* stream, int len) {
             {
                 std::lock_guard<std::mutex> lock(clockMutex_);
                 if (writeHead_ < 0.0 || reanchor_) {
-                    dbg("[FILL] REANCHOR: writeHead_ %.3f -> chunk.pts %.3f\n", writeHead_, current_.pts);
+                    LOG_DBG("FILL","REANCHOR: writeHead_ %.3f -> chunk.pts %.3f", writeHead_, current_.pts);
                     writeHead_ = current_.pts;
                     reanchor_ = false;
                 }

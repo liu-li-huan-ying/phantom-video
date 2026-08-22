@@ -6,3 +6,4 @@ build*/
 *.pdb
 third_party/bin/
 *.tmp
+*.log

@@ -1,18 +1,7 @@
 #include "core/player.h"
+#include "core/logger.h"
 
 #include <algorithm>
-#include <cstdio>
-
-static FILE* g_dbg = nullptr;
-static void dbg(const char* fmt, ...) {
-    if (!g_dbg) g_dbg = fopen("seek_trace.log", "a");
-    if (!g_dbg) return;
-    va_list ap;
-    va_start(ap, fmt);
-    vfprintf(g_dbg, fmt, ap);
-    va_end(ap);
-    fflush(g_dbg);
-}
 
 #include <libavutil/hwcontext.h>
 #include <libavutil/mathematics.h>
@@ -213,7 +202,7 @@ void Player::requestSeek(double t) {
     lastSeekTime_ = SDL_GetTicks();
     uiSeeking_.store(true, std::memory_order_relaxed);
     uiTargetPts_.store(seekTarget_, std::memory_order_relaxed);
-    dbg("[SEEK] requestSeek: t=%.3f clamped=%.3f duration=%.3f\n", t, seekTarget_, duration_);
+        LOG_DBG("SEEK", "requestSeek: t=%.3f clamped=%.3f duration=%.3f", t, seekTarget_, duration_);
 }
 
 bool Player::seekRequested() {
@@ -233,14 +222,14 @@ void Player::setSpeed(float s) {
     if (audio_) {
         double anchor = audio_->clock();
         if (anchor < 0.0) anchor = 0.0;
-        dbg("[SPEED] setSpeed: s=%.2f anchor=%.3f writeHead_=%.3f\n", s, anchor, audio_->clock());
+        LOG_DBG("SPEED", "setSpeed: s=%.2f anchor=%.3f writeHead_=%.3f", s, anchor, audio_->clock());
         // 1. 锚定时钟（fill() 处理速度变更时保持此时钟）
         audio_->setClock(anchor);
-        dbg("[SPEED] after setClock: writeHead_=%.3f\n", audio_->clock());
+        LOG_DBG("SPEED", "after setClock: writeHead_=%.3f", audio_->clock());
         // 2. 请求延迟速度变更：fill() 在 SDL 回调线程内原子处理
         //    （清 current_ + 清 queue + 重建 Sonic + 更新 speed_ + 保持时钟）
         audio_->requestSpeedChange(s);
-        dbg("[SPEED] after requestSpeed: pending=%d\n", audio_->hasPendingSpeed());
+        LOG_DBG("SPEED", "after requestSpeed: pending=%d", audio_->hasPendingSpeed());
         // 3. 等待 fill() 处理完毕（~23ms 一个回调周期），再更新 Player::speed_
         //    确保视频时钟和音频速度一致
         for (int i = 0; i < 20; ++i) {
@@ -339,10 +328,10 @@ FramePtr Player::pullFrame() {
     double pts = framePts(f);
     if (audioWait_.load()) {
         double seekTarget = audioSeekTarget_.load();
-        dbg("[PULL] audioWait: framePts=%.3f seekTarget=%.3f clock=%.3f\n", pts, seekTarget, clock());
+        LOG_DBG("PULL", "audioWait: framePts=%.3f seekTarget=%.3f clock=%.3f", pts, seekTarget, clock());
         // 跳过 seek target 之前的帧（关键帧到目标之间的帧），不显示
         while (f && pts < seekTarget - 0.1) {
-            dbg("[SEEK] pullFrame dropping frame pts=%.3f\n", pts);
+            LOG_DBG("PULL", "dropping frame pts=%.3f", pts);
             videoQueue_.pop(f);
             if (!videoQueue_.peek(f)) {
                 // 队列空，等解码线程推入更多帧
@@ -358,7 +347,7 @@ FramePtr Player::pullFrame() {
         videoBaseTicks_ = SDL_GetPerformanceCounter();
         playing_ = !paused_.load();
         audioWait_.store(false);
-        dbg("[PULL] audioWait done: firstFramePts=%.3f clock=%.3f\n", pts, clock());
+        LOG_DBG("PULL", "audioWait done: firstFramePts=%.3f clock=%.3f", pts, clock());
         if (onSeekingChanged) onSeekingChanged(false);
         return f;
     }
@@ -379,7 +368,7 @@ FramePtr Player::pullFrame() {
     videoBaseTicks_ = SDL_GetPerformanceCounter();
     playing_ = !paused_.load();
 
-    dbg("[PULL] display: pts=%.3f clock=%.3f target=%.3f\n", pts, clock(), target);
+    LOG_DBG("PULL", "display: pts=%.3f clock=%.3f target=%.3f", pts, clock(), target);
 
     while (videoQueue_.peek(f) && f) {
         if (framePts(f) <= c - 0.05)
@@ -392,7 +381,7 @@ FramePtr Player::pullFrame() {
 
 void Player::doSeek(double t) {
     if (!videoDemuxer_) return;
-    dbg("[SEEK] doSeek: t=%.3f clock=%.3f speed=%.2f\n", t, clock(), speed_.load());
+    LOG_DBG("SEEK", "doSeek: t=%.3f clock=%.3f speed=%.2f", t, clock(), speed_.load());
     audioSeeking_.store(true);
     if (audio_) audio_->setSeeking(true);
     if (onSeekingChanged) onSeekingChanged(true);
@@ -442,7 +431,7 @@ void Player::decodeLoop() {
             while (FramePtr f = videoDecoder_->receive()) {
                 if (seekRequested() || stop_.load()) break;
                 double fp = framePts(f);
-                if (frameCount < 5) dbg("[SEEK] decodeLoop decoded frame pts=%.3f\n", fp);
+                if (frameCount < 5) LOG_DBG("DECODE", "decoded frame pts=%.3f", fp);
                 frameCount++;
                 while (!videoQueue_.tryPush(f)) {
                     if (seekRequested() || stop_.load()) break;
@@ -476,12 +465,12 @@ void Player::audioLoop() {
     while (!stop_.load()) {
         if (!audioDemuxer_ || !audioEnabled_.load()) break;
         if (audioSeekPending_.exchange(false)) {
-            dbg("[ALOOP] seek start: target=%.3f clock=%.3f\n", audioSeekTarget_.load(), audio_->clock());
+            LOG_DBG("ALOOP", "seek start: target=%.3f clock=%.3f", audioSeekTarget_.load(), audio_->clock());
             audioDemuxer_->seekAudio(audioSeekTarget_.load());
             if (audioDecoder_) audioDecoder_->flushBuffers();
             audioSeeking_.store(false);
             if (audio_) audio_->setSeeking(false);
-            dbg("[ALOOP] seek done: clock=%.3f\n", audio_->clock());
+            LOG_DBG("ALOOP", "seek done: clock=%.3f", audio_->clock());
         }
         PacketPtr pkt = audioDemuxer_->readPacket();
         if (!pkt) break;
@@ -497,7 +486,7 @@ void Player::audioLoop() {
                     if (seekRequested() || stop_.load()) break;
                     std::this_thread::sleep_for(std::chrono::milliseconds(1));
                 }
-                dbg("[ALOOP] push: pts=%.3f clock=%.3f\n", framePts(f), audio_->clock());
+                LOG_DBG("ALOOP", "push: pts=%.3f clock=%.3f", framePts(f), audio_->clock());
                 if (seekRequested() || stop_.load()) break;
         }
     }

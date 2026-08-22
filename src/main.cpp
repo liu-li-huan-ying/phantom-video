@@ -20,6 +20,7 @@
 #include "ui/custom_titlebar.h"
 #include "ui/playlist_panel.h"
 #include "video/video_renderer.h"
+#include "core/logger.h"
 
 static std::vector<std::string> utf8Args() {
     std::vector<std::string> out;
@@ -72,6 +73,9 @@ int main(int argc, char** argv) {
     (void)argc;
     (void)argv;
     SDL_SetMainReady();
+    Logger::instance().init("vplayer", 7);
+    Logger::instance().setLevel(LogLevel::Trace);
+    LOG_INFO("MAIN", "vplayer starting");
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) != 0) {
         std::printf("SDL 鍒濆鍖栧け璐? %s\n", SDL_GetError());
         return 1;
