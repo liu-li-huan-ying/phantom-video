@@ -894,3 +894,17 @@
 - **改动文件**：`audio_output.h`、`audio_output.cpp`、`player.cpp`
 - **验证**：编译通过，冒烟测试 8 秒无崩溃，日志格式正确
 - **状态**：代码已实现，待用户实际 seek/变速测试验证效果
+
+### 阶段 M29：日志分级 + 进度条预览时间戳 ✅ 完成
+
+- 任务：日常模式不产生大日志；进度条悬停缩略图下方显示目标时间
+- **日志分级**（`main.cpp` + `audio_output.cpp` + `player.cpp`）：
+  - 默认 WARN 级别（日常模式）：仅记录警告/错误，正常播放时日志 0 bytes
+  - `--debug` 命令行参数开启诊断模式（TRACE 级别）：全部记录
+  - 高频路径降级为 TRACE：`SILENCE+REANCHOR`、`ALOOP push`、`PULL display`、`PULL dropping frame`
+  - 诊断模式 5 秒播放产生 80KB 日志 vs 之前4.7MB
+- **进度条预览时间戳**（`video_renderer.cpp`）：
+  - 缩略图下方显示目标时间（黑底白字，HH:MM:SS 或 MM:SS 格式）
+  - 居中于缩略图，随鼠标位置实时更新
+- **改动文件**：`main.cpp`、`audio_output.cpp`、`player.cpp`、`video_renderer.cpp`
+- **验证**：编译通过，正常模式日志 0 bytes，诊断模式日志正常输出

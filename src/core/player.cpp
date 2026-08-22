@@ -326,7 +326,7 @@ FramePtr Player::pullFrame() {
         LOG_DBG("PULL", "audioWait: framePts=%.3f seekTarget=%.3f clock=%.3f", pts, seekTarget, clock());
         // 跳过 seek target 之前的帧（关键帧到目标之间的帧），不显示
         while (f && pts < seekTarget - 0.1) {
-            LOG_DBG("PULL", "dropping frame pts=%.3f", pts);
+            LOG_TRACE("PULL", "dropping frame pts=%.3f", pts);
             videoQueue_.pop(f);
             if (!videoQueue_.peek(f)) {
                 // 队列空，等解码线程推入更多帧
@@ -363,7 +363,7 @@ FramePtr Player::pullFrame() {
     videoBaseTicks_ = SDL_GetPerformanceCounter();
     playing_ = !paused_.load();
 
-    LOG_DBG("PULL", "display: pts=%.3f clock=%.3f target=%.3f", pts, clock(), target);
+    LOG_TRACE("PULL", "display: pts=%.3f clock=%.3f target=%.3f", pts, clock(), target);
 
     while (videoQueue_.peek(f) && f) {
         if (framePts(f) <= c - 0.05)
@@ -491,7 +491,7 @@ void Player::audioLoop() {
                     if (seekRequested() || stop_.load()) break;
                     std::this_thread::sleep_for(std::chrono::milliseconds(1));
                 }
-                LOG_DBG("ALOOP", "push: pts=%.3f clock=%.3f", framePts(f), audio_->clock());
+                LOG_TRACE("ALOOP", "push: pts=%.3f clock=%.3f", framePts(f), audio_->clock());
                 if (seekRequested() || stop_.load()) break;
         }
     }

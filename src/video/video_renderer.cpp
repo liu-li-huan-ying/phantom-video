@@ -688,6 +688,21 @@ void VideoRenderer::drawControls(const RenderStats& stats) {
             SDL_SetTextureAlphaMod(thumbTex_, (Uint8)a);
             SDL_Rect dst{ thumbX2, thumbY2, dispW, dispH };
             SDL_RenderCopy(renderer_, thumbTex_, nullptr, &dst);
+
+            // 缩略图下方显示时间戳
+            if (thumbTime_ >= 0.0) {
+                char timeBuf[16];
+                formatTimeText(timeBuf, sizeof(timeBuf), thumbTime_);
+                int textW = 0;
+                for (const char* p = timeBuf; *p; ++p) textW += 6 * 2;
+                int textX = thumbCenterX - textW / 2;
+                int textY = thumbY2 + dispH + 4;
+                // 黑色背景条
+                fillRoundedRect(renderer_, textX - 4, textY - 1, textW + 8, 14, 3,
+                                0, 0, 0, (Uint8)(200 * a / 255));
+                SDL_SetRenderDrawColor(renderer_, 255, 255, 255, (Uint8)(255 * a / 255));
+                drawFontText(renderer_, textX, textY, 2, timeBuf);
+            }
         }
     }
 

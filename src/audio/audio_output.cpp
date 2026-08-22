@@ -286,7 +286,7 @@ void AudioOutput::fill(Uint8* stream, int len) {
                     writeHead_ += (double)space / 4.0 / spec_.freq
                                   * speed_.load(std::memory_order_relaxed);
                     if (reanchor_) {
-                        LOG_DBG("FILL","SILENCE+REANCHOR: %.3f -> %.3f speed=%.2f space=%d",
+                        LOG_TRACE("FILL","SILENCE+REANCHOR: %.3f -> %.3f speed=%.2f space=%d",
                             before, writeHead_, speed_.load(std::memory_order_relaxed), space);
                     }
                 }

@@ -74,8 +74,12 @@ int main(int argc, char** argv) {
     (void)argv;
     SDL_SetMainReady();
     Logger::instance().init("vplayer", 7);
-    Logger::instance().setLevel(LogLevel::Trace);
-    LOG_INFO("MAIN", "vplayer starting");
+    // 日常模式默认 WARN（仅警告/错误），--debug 开启诊断模式（TRACE 以上全记录）
+    bool diagMode = false;
+    for (int i = 1; i < argc; ++i)
+        if (std::string(argv[i]) == "--debug") { diagMode = true; break; }
+    Logger::instance().setLevel(diagMode ? LogLevel::Trace : LogLevel::Warn);
+    LOG_INFO("MAIN", "vplayer starting (log=%s)", diagMode ? "debug" : "normal");
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) != 0) {
         std::printf("SDL 鍒濆鍖栧け璐? %s\n", SDL_GetError());
         return 1;
