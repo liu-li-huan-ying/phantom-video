@@ -270,7 +270,8 @@ void AudioOutput::fill(Uint8* stream, int len) {
                 // 队列空：输出静音，按内容时间推进时钟
                 std::lock_guard<std::mutex> lock(clockMutex_);
                 if (writeHead_ >= 0.0) {
-                    writeHead_ += (double)space / 4.0 / spec_.freq;
+                    writeHead_ += (double)space / 4.0 / spec_.freq
+                                  * speed_.load(std::memory_order_relaxed);
                 }
                 break;
             }
@@ -279,10 +280,8 @@ void AudioOutput::fill(Uint8* stream, int len) {
             {
                 std::lock_guard<std::mutex> lock(clockMutex_);
                 if (writeHead_ < 0.0 || reanchor_) {
-                    if (writeHead_ < 0.0 || current_.pts > writeHead_) {
-                        dbg("[SEEK] fill: reanchor writeHead_=%.3f -> chunk.pts=%.3f\n", writeHead_, current_.pts);
-                        writeHead_ = current_.pts;
-                    }
+                    dbg("[SEEK] fill: reanchor writeHead_=%.3f -> chunk.pts=%.3f\n", writeHead_, current_.pts);
+                    writeHead_ = current_.pts;
                     reanchor_ = false;
                 }
             }
@@ -295,7 +294,8 @@ void AudioOutput::fill(Uint8* stream, int len) {
         if (offset_ >= current_.data.size()) current_.data.clear();
         {
             std::lock_guard<std::mutex> lock(clockMutex_);
-            writeHead_ += (double)n / 4.0 / current_.outRate;
+            writeHead_ += (double)n / 4.0 / current_.outRate
+                          * speed_.load(std::memory_order_relaxed);
         }
     }
 
