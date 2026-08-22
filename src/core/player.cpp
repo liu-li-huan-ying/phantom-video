@@ -361,8 +361,7 @@ FramePtr Player::pullFrame() {
     }
     if (pts - target > 0.05) {
         double remain = pts - target;
-        float spd = speed_.load(std::memory_order_relaxed);
-        int delay = std::min((int)(remain * 1000.0 / spd), 50);
+        int delay = std::min((int)(remain * 1000.0), 50);
         SDL_Delay(delay);
         return lastFrame_;
     }

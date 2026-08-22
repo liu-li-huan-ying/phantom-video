@@ -270,8 +270,7 @@ void AudioOutput::fill(Uint8* stream, int len) {
                 // 队列空：输出静音，按内容时间推进时钟
                 std::lock_guard<std::mutex> lock(clockMutex_);
                 if (writeHead_ >= 0.0) {
-                    writeHead_ += (double)space / 4.0 / spec_.freq
-                                  * speed_.load(std::memory_order_relaxed);
+                    writeHead_ += (double)space / 4.0 / spec_.freq;
                 }
                 break;
             }
@@ -296,8 +295,7 @@ void AudioOutput::fill(Uint8* stream, int len) {
         if (offset_ >= current_.data.size()) current_.data.clear();
         {
             std::lock_guard<std::mutex> lock(clockMutex_);
-            writeHead_ += (double)n / 4.0 / current_.outRate
-                          * speed_.load(std::memory_order_relaxed);
+            writeHead_ += (double)n / 4.0 / current_.outRate;
         }
     }
 
