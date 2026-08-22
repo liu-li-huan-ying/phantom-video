@@ -372,7 +372,7 @@ FramePtr Player::pullFrame() {
 void Player::doSeek(double t) {
     if (!videoDemuxer_) return;
     audioSeeking_.store(true);
-    if (audio_) audio_->setSeeking(true);  // 阻断旧帧入队
+    if (audio_) audio_->setSeeking(true);
     if (onSeekingChanged) onSeekingChanged(true);
     if (audio_) {
         audio_->setClock(t);
@@ -386,12 +386,12 @@ void Player::doSeek(double t) {
     seekFirstFrame_.store(true);
     audioSeekPending_.store(true);
     audioSeekTarget_.store(t);
-    videoDemuxer_->seek(t);
     if (videoDecoder_) videoDecoder_->flushBuffers();
     if (subtitleDecoder_) {
         subtitles_.clear();
         subtitleDecoder_->flushBuffers();
     }
+    videoDemuxer_->seek(t);
 }
 
 void Player::decodeLoop() {
@@ -412,6 +412,8 @@ void Player::decodeLoop() {
 
         PacketPtr pkt = videoDemuxer_->readPacket();
         if (!pkt) break;
+
+        if (seekRequested() || stop_.load()) continue;
 
         if (pkt->stream_index == videoPtsIdx_) {
             if (!videoDecoder_ || !videoDecoder_->send(pkt.get())) continue;
@@ -457,6 +459,7 @@ void Player::audioLoop() {
         PacketPtr pkt = audioDemuxer_->readPacket();
         if (!pkt) break;
         if (pkt->stream_index != audioDemuxer_->audioIndex()) continue;
+        if (seekRequested() || stop_.load()) continue;
         if (!audioDecoder_ || !audioDecoder_->send(pkt.get())) continue;
         while (FramePtr f = audioDecoder_->receive()) {
             if (seekRequested() || stop_.load()) break;

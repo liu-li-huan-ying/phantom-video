@@ -813,3 +813,17 @@
 - **改动文件**：`audio_output.h/cpp`、`player.cpp`
 - **验证**：编译通过，冒烟测试无崩溃
 - **提交**：`a635745`（音频 seek 位置修复）、`6c68525`（深度优化）
+
+### 阶段 M24：切视频进度条不重置 + seek 偏移回归修复 ✅ 完成
+
+- 任务：修复切换视频后进度条仍显示上一个视频进度 + seek 偏移问题
+- **发现的问题**：
+  1. **进度条不重置**：`openFile()` 没有重置 `uiSeeking_`、`uiTargetPts_`、`audioWait_`、`dropUntil_`、`audioSeeking_`；切视频后 `uiClock()` 仍返回旧值
+  2. **seek 偏移**：M23.5 引入的 `waitingForSeek_` 冻结时钟，但首块音频 PTS 在 seekTarget 之前（keyframe 对齐）→ reanchor 不触发 → 时钟与实际音频错位
+- **修复**：
+  1. `openFile()` 新增重置：`audioWait_`、`audioSeeking_`、`seekFirstFrame_`、`uiSeeking_`、`uiTargetPts_`
+  2. 去掉 `waitingForSeek_`/`seekConsumed_` 机制，恢复简单 reanchor：首块到达直接 `writeHead_ = chunk.pts`
+  3. 静音块恢复推进时钟（与 PTS 同步）
+- **改动文件**：`audio_output.h/cpp`、`player.cpp`
+- **验证**：编译通过，冒烟测试无崩溃
+- **提交**：`6c30ef6`
