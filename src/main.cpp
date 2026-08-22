@@ -16,6 +16,7 @@
 #include "core/player.h"
 #include "core/playlist.h"
 #include "core/thumbnail_extractor.h"
+#include "core/thumbnail_worker.h"
 #include "ui/osd.h"
 #include "ui/custom_titlebar.h"
 #include "ui/playlist_panel.h"
@@ -156,6 +157,8 @@ int main(int argc, char** argv) {
     VideoRenderer vrender;
     OSD osd;
     ThumbnailExtractor thumbnail;
+    ThumbnailCache thumbCache(vrender.renderer());
+    ThumbnailWorker thumbWorker;
     if (!vrender.init(win)) {
         std::printf("鍒涘缓娓叉煋鍣ㄥけ璐? %s\n", SDL_GetError());
         SDL_DestroyWindow(win);
@@ -214,6 +217,8 @@ auto args = utf8Args();
         if (player.openFile(p)) {
             loadExternalSubtitle(player, p);
             thumbnail.open(p);  // M15: 打开缩略图提取器
+            thumbCache.clear();  // M30b: 切视频清缓存
+            thumbWorker.start(&thumbnail, &thumbCache, vrender.renderer());
             if (cfg.resume) {
                 auto it = cfg.history.find(p);
                 if (it != cfg.history.end() && it->second > 2.0) {
@@ -282,6 +287,8 @@ auto args = utf8Args();
                 if (player.openFile(e.drop.file)) {
                     loadExternalSubtitle(player, e.drop.file);
                     thumbnail.open(e.drop.file);
+                    thumbCache.clear();
+                    thumbWorker.start(&thumbnail, &thumbCache, vrender.renderer());
                     playlist.scanDirectory(e.drop.file);
                     std::string base = e.drop.file;
                     std::size_t slash = base.find_last_of("\\/");
@@ -323,7 +330,7 @@ auto args = utf8Args();
                         player.setVolume(v);
                         if (v == 0) { player.setVolume(0.0001f); }
                     } else if (player.hasMedia()) {
-                        // 进度条 hover 缩略图
+                        // M30b: 进度条 hover 缩略图（异步提取 + LRU 缓存）
                         int winW = 0, winH = 0;
                         SDL_GetWindowSize(win, &winW, &winH);
                         ControlLayout lay = ControlLayout::compute(winW, winH, panel.width());
@@ -333,34 +340,20 @@ auto args = utf8Args();
                             float pct = (float)(mx - lay.progX) / lay.progW;
                             if (pct < 0) pct = 0; if (pct > 1) pct = 1;
                             double targetTime = pct * player.duration();
-                            // 只在时间差距较大时重新提取（避免频繁 seek）
-                            static double lastThumbTime = -1;
-                            if (std::abs(targetTime - lastThumbTime) > 1.0) {
-                                lastThumbTime = targetTime;
-                                if (thumbnail.isOpen()) {
-                                    uint8_t* pixels = nullptr;
-                                    int tw = 0, th = 0;
-                                    if (thumbnail.getFrame(targetTime, &pixels, tw, th) && pixels) {
-                                        SDL_Texture* tex = SDL_CreateTexture(
-                                            vrender.renderer(), SDL_PIXELFORMAT_RGB24,
-                                            SDL_TEXTUREACCESS_STREAMING, tw, th);
-                                        if (tex) {
-                                            void* tbits = nullptr;
-                                            int pitch = 0;
-                                            if (SDL_LockTexture(tex, nullptr, &tbits, &pitch) == 0) {
-                                                for (int row = 0; row < th; ++row)
-                                                    memcpy((Uint8*)tbits + row * pitch,
-                                                           pixels + row * tw * 3, tw * 3);
-                                                SDL_UnlockTexture(tex);
-                                                SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
-                                                vrender.setThumbnail(tex, tw, th, targetTime);
-                                            } else {
-                                                SDL_DestroyTexture(tex);
-                                            }
-                                        }
-                                        av_free(pixels);
-                                    }
+                            // 先查 LRU 缓存
+                            auto* cached = thumbCache.get(targetTime, 500);
+                            if (cached) {
+                                vrender.setThumbnail(cached->tex, cached->w, cached->h, targetTime);
+                            } else {
+                                // 缓存未命中，提交异步请求
+                                static double lastThumbTime = -1;
+                                if (std::abs(targetTime - lastThumbTime) > 1.0) {
+                                    lastThumbTime = targetTime;
+                                    if (thumbnail.isOpen())
+                                        thumbWorker.request(targetTime);
                                 }
+                                // 显示上一帧缩略图（如果有）
+                                vrender.setThumbnail(nullptr, 0, 0, -1);
                             }
                         } else {
                             vrender.setThumbnail(nullptr, 0, 0, -1);
@@ -540,6 +533,9 @@ auto args = utf8Args();
                     volHideAt = SDL_GetTicks() + 2000;
                     break;
                 }
+                case SDLK_i:
+                    osd.toggleInfo();
+                    break;
                 case SDLK_ESCAPE:
                 case SDLK_q:
                     running = false;
@@ -611,6 +607,16 @@ auto args = utf8Args();
             panel.setPlaylist(&playlist);
             panel.draw(playlist.index(), pw, ph);
         }
+        // M30c: OSD 信息叠加
+        if (osd.isInfoVisible()) {
+            int ww = 0, wh = 0;
+            SDL_GetWindowSize(win, &ww, &wh);
+            osd.drawInfoOverlay(ww, wh,
+                player.videoWidth(), player.videoHeight(),
+                player.videoBitrate(), player.videoFps(), player.videoCodecName(),
+                player.audioSampleRate(), player.audioBitrate(), player.audioCodecName(),
+                player.usingHardware(), player.duration());
+        }
 
         SDL_RenderPresent(vrender.renderer());
         SDL_Delay(8);
@@ -624,6 +630,7 @@ auto args = utf8Args();
     cfg.volume = player.volume();
     saveConfig(configPath(), cfg);
 
+    thumbWorker.stop();
     player.close();
     vrender.shutdown();
     titlebar.shutdown();

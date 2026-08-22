@@ -14,6 +14,7 @@ extern "C" {
 #include <string>
 #include <vector>
 
+#include "ui/easing.h"
 #include <windows.h>
 
 static const unsigned char kDigitFont[][7] = {
@@ -578,14 +579,22 @@ void VideoRenderer::drawControls(const RenderStats& stats) {
         controlsVisible_ = false;
     }
 
-    // fade in/out animation
-    if (controlsVisible_) {
-        controlsAlpha_ = std::min(255, controlsAlpha_ + 30);
-    } else {
-        controlsAlpha_ = std::max(0, controlsAlpha_ - 30);
+    // M30a: 控件 alpha 缓动动画
+    bool controlsHover = mouseY_ >= lay.barY && mouseY_ < winH;
+    float targetAlpha = controlsVisible_ ? 1.0f : 0.0f;
+    if (targetAlpha != animControlsTo_) {
+        animControlsFrom_ = animControlsAlpha_;
+        animControlsTo_ = targetAlpha;
+        animControlsStart_ = now;
     }
-    if (controlsAlpha_ <= 0) return;
-    int a = controlsAlpha_;
+    {
+        float t = (now - animControlsStart_) / (float)kControlsFadeMs;
+        t = std::min(t, 1.0f);
+        float eased = easeOutCubic(t);
+        animControlsAlpha_ = lerpf(animControlsFrom_, animControlsTo_, eased);
+    }
+    int a = (int)(animControlsAlpha_ * 255);
+    if (a <= 0) return;
 
     // ---- background: vertical gradient ----
     std::vector<SDL_Vertex> gv;
@@ -628,8 +637,9 @@ void VideoRenderer::drawControls(const RenderStats& stats) {
             Uint8 r = active ? 77 : 255, g = active ? 144 : 255, b2 = active ? 255 : 255;
             fillRoundedRect(renderer_, b.x, b.y, b.w, b.h, 8, r, g, b2, bgA);
         }
-        // 图标：hover 时白色不透明度 255，否则 200；active 时图标缩放 1.1x
-        int iconSize = hover ? 26 : 24;
+        // 图标：hover 时 ease-out 缩放 24→26，active 时图标缩放 1.1x
+        float iconScale = hover ? 1.08f : 1.0f;
+        int iconSize = (int)(24 * iconScale);
         int iconAlpha = (int)((hover ? 255 : 200) * a / 255);
         drawIconOrTexture(renderer_, iconTexture(icon), icon,
                           b.x + b.w / 2, b.y + b.h / 2, iconSize, iconAlpha);
@@ -645,7 +655,21 @@ void VideoRenderer::drawControls(const RenderStats& stats) {
 
     bool progHover = mouseX_ >= progX && mouseX_ < progX + progressW &&
                      mouseY_ >= progY - 10 && mouseY_ < progY + 12;
-    int trackH = (progHover || stats.draggingVolume) ? 10 : 4;
+
+    // M30a: 进度条展开/收起缓动动画
+    float targetTrackH = (progHover || stats.draggingVolume) ? 10.0f : 4.0f;
+    if (targetTrackH != animTrackTo_) {
+        animTrackFrom_ = animTrackH_;
+        animTrackTo_ = targetTrackH;
+        animTrackStart_ = now;
+    }
+    {
+        float t = (now - animTrackStart_) / (float)kTrackExpandMs;
+        t = std::min(t, 1.0f);
+        float eased = easeOutCubic(t);
+        animTrackH_ = lerpf(animTrackFrom_, animTrackTo_, eased);
+    }
+    int trackH = (int)animTrackH_;
     int trackY = progY - trackH / 2;
 
     // track 背景（深灰 + 圆角）
@@ -659,12 +683,33 @@ void VideoRenderer::drawControls(const RenderStats& stats) {
     }
     // hover/drag 时发光 thumb + 阴影
     if (progHover || stats.draggingVolume) {
-        int thumbX = progX + fillW - 8;
+        // M30a: thumb 缩放缓动动画
+        float targetThumbScale = 1.15f;
+        if (targetThumbScale != animThumbTo_) {
+            animThumbFrom_ = animThumbScale_;
+            animThumbTo_ = targetThumbScale;
+            animThumbStart_ = now;
+        }
+        {
+            float t = (now - animThumbStart_) / (float)kThumbHoverMs;
+            t = std::min(t, 1.0f);
+            float eased = easeOutBack(t);
+            animThumbScale_ = lerpf(animThumbFrom_, animThumbTo_, eased);
+        }
+
+        int thumbBaseW = 16, thumbBaseH = trackH + 8;
+        int thumbW2 = (int)(thumbBaseW * animThumbScale_);
+        int thumbH2 = (int)(thumbBaseH * animThumbScale_);
+        int thumbX = progX + fillW - thumbW2 / 2;
+        int thumbCX = progX + fillW;
+        int thumbCY = trackY + trackH / 2;
+        int thumbXDraw = thumbCX - thumbW2 / 2;
+        int thumbYDraw = thumbCY - thumbH2 / 2;
         // 发光阴影
-        fillRoundedRect(renderer_, thumbX - 4, trackY - 6, 24, trackH + 12, 8,
+        fillRoundedRect(renderer_, thumbXDraw - 6, thumbYDraw - 6, thumbW2 + 12, thumbH2 + 12, 8,
                         77, 144, 255, (Uint8)(60 * a / 255));
         // 圆形 thumb
-        fillRoundedRect(renderer_, thumbX, trackY - 4, 16, trackH + 8, 8,
+        fillRoundedRect(renderer_, thumbXDraw, thumbYDraw, thumbW2, thumbH2, 8,
                         255, 255, 255, (Uint8)(255 * a / 255));
 
         // M15: 缩略图预览（在进度条上方，居中于鼠标位置）

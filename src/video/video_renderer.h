@@ -92,7 +92,6 @@ private:
     bool controlsVisible_ = true;
     int mouseX_ = -1;
     int mouseY_ = -1;
-    int controlsAlpha_ = 255;
     void drawControls(const RenderStats& stats);
     void drawSubtitle(const RenderStats& stats);
     void drawToast();
@@ -120,4 +119,26 @@ private:
     Uint32 pauseOverlayUntil_ = 0; // 显示截止时间
     PauseIcon pauseOverlayIcon_ = PauseIcon::None;
     int seekingAlpha_ = 0;         // M18: Seeking 指示器 alpha
+
+    // M30a: 动画状态
+    float animControlsAlpha_ = 1.0f;    // 控件 alpha (0~1 浮点)
+    float animControlsFrom_ = 1.0f;     // 动画起始值
+    float animControlsTo_ = 1.0f;       // 动画目标值
+    Uint32 animControlsStart_ = 0;      // 动画起始时间 (SDL_GetTicks)
+    static constexpr int kControlsFadeMs = 200; // 过渡时长
+
+    float animTrackH_ = 4.0f;           // 进度条高度 (4~10)
+    float animTrackFrom_ = 4.0f;
+    float animTrackTo_ = 4.0f;
+    Uint32 animTrackStart_ = 0;
+    static constexpr int kTrackExpandMs = 180;
+
+    float animThumbScale_ = 1.0f;       // thumb 缩放 (1.0~1.15)
+    float animThumbFrom_ = 1.0f;
+    float animThumbTo_ = 1.0f;
+    Uint32 animThumbStart_ = 0;
+    static constexpr int kThumbHoverMs = 160;
+
+    bool wasProgHover_ = false;         // 上一帧进度条 hover 状态
+    bool wasControlsHover_ = false;     // 上一帧控件区 hover 状态
 };

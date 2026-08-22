@@ -52,6 +52,16 @@ public:
     bool hasSubtitle() const { return subtitleLoaded_ || subtitleIndex_ >= 0; }
     AudioOutput& audio() { return *audio_; }
 
+    // M30c: 媒体信息查询
+    int videoWidth() const { return videoWidth_; }
+    int videoHeight() const { return videoHeight_; }
+    int videoBitrate() const { return videoBitrate_; }  // kbps
+    float videoFps() const { return videoFps_; }
+    int audioSampleRate() const { return audioSampleRate_; }
+    int audioBitrate() const { return audioBitrate_; }  // kbps
+    const char* videoCodecName() const { return videoCodecName_; }
+    const char* audioCodecName() const { return audioCodecName_; }
+
     FramePtr pullFrame();
 
 private:
@@ -113,6 +123,16 @@ private:
     std::string path_;
     std::string error_;
     int videoPtsIdx_ = -1;
+
+    // M30c: 媒体信息缓存（openFile 时填充）
+    int videoWidth_ = 0;
+    int videoHeight_ = 0;
+    int videoBitrate_ = 0;
+    float videoFps_ = 0.0f;
+    int audioSampleRate_ = 0;
+    int audioBitrate_ = 0;
+    char videoCodecName_[32] = {};
+    char audioCodecName_[32] = {};
 
     FramePtr lastFrame_;
     std::atomic<double> videoBasePts_{ 0.0 };

@@ -77,6 +77,33 @@ bool Player::openFile(const std::string& path) {
                     av_q2d(videoDemuxer_->videoStream()->time_base);
     }
 
+    // M30c: 提取媒体信息
+    {
+        AVStream* vs = videoDemuxer_->videoStream();
+        if (vs) {
+            AVCodecParameters* par = vs->codecpar;
+            videoWidth_ = par->width;
+            videoHeight_ = par->height;
+            videoBitrate_ = par->bit_rate > 0 ? (int)(par->bit_rate / 1000) : 0;
+            if (vs->avg_frame_rate.den > 0)
+                videoFps_ = (float)av_q2d(vs->avg_frame_rate);
+            const AVCodecDescriptor* desc = avcodec_descriptor_get(par->codec_id);
+            if (desc && desc->name)
+                snprintf(videoCodecName_, sizeof(videoCodecName_), "%s", desc->name);
+        }
+        if (videoDemuxer_->audioIndex() >= 0) {
+            AVStream* as = videoDemuxer_->audioStream();
+            if (as) {
+                AVCodecParameters* par = as->codecpar;
+                audioSampleRate_ = par->sample_rate;
+                audioBitrate_ = par->bit_rate > 0 ? (int)(par->bit_rate / 1000) : 0;
+                const AVCodecDescriptor* desc = avcodec_descriptor_get(par->codec_id);
+                if (desc && desc->name)
+                    snprintf(audioCodecName_, sizeof(audioCodecName_), "%s", desc->name);
+            }
+        }
+    }
+
     subtitles_.clear();
     subtitleLoaded_.store(false);
     subtitleIndex_ = videoDemuxer_->subtitleIndex();
@@ -145,6 +172,10 @@ void Player::close() {
     playing_ = false;
     videoClockStarted_ = false;
     duration_ = 0.0;
+    videoWidth_ = videoHeight_ = videoBitrate_ = 0;
+    videoFps_ = 0.0f;
+    audioSampleRate_ = audioBitrate_ = 0;
+    videoCodecName_[0] = audioCodecName_[0] = '\0';
     path_.clear();
     error_.clear();
 }
