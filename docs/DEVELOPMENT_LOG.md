@@ -775,3 +775,22 @@
   - race 安全：queue 空时 fill() 不推进 writeHead_
 - **改动**：`player.cpp` doSeek() 中增加 clearQueue() + setClock(t)
 - **效果**：seek 后音频时钟立即就位，视频不超前，字幕和声音同步
+- **提交**：`6121b3b`
+
+### 阶段 M23：全面竞态审计 — 5 项修复消除音画不同步根因 ✅ 完成
+
+- 任务：系统性排查音画不同步的所有潜在因素（架构/变量/加锁/代码组合）
+- **发现的问题**：
+  1. **首块不重锚**（严重）：seek 后 `writeHead_` 被设为 target，但静音推进时钟超前；首块到达时不重置 → 时钟永远超前于实际音频
+  2. **doSeek clearQueue+setClock 竞态**（严重）：从解码线程直接调用 `clearQueue()`/`setClock()` 与 `fill()` 存在竞态窗口，可能播放旧数据或时钟跳变
+  3. **音频线程 seek 后推旧数据**（中等）：`audioSeeking_` 在 demuxer seek 后、`readPacket()` 前设 false；旧位置解码的帧可推入队列
+  4. **videoBasePts_/videoBaseTicks_ 无同步**（中等）：解码线程写、主线程读，无原子/锁保护 → 撕裂读
+  5. **dropUntil_ 被 doSeek 重置**（低）：`setSpeed()` 设的 `dropUntil_=anchor` 被 `doSeek()` 的 `-1e9` 覆盖
+- **修复**：
+  1. `AudioOutput` 新增 `reanchor_` 标志：`pendingSeek_` 处理时置 true，首块到达时重置 `writeHead_ = chunk.pts`
+  2. `doSeek()` 移除 `clearQueue()`+`setClock()`：完全由 `pendingSeek_` 在 `fill()` 内原子处理
+  3. `audioLoop` seek 后检查 `framePts(f) < seekTarget - 0.5` → 丢弃旧位置数据
+  4. `videoBasePts_`/`videoBaseTicks_` 改为 `std::atomic` → 消除撕裂读
+  5. `doSeek()` 末尾移除 `dropUntil_.store(-1e9)`
+- **改动文件**：`audio_output.h/cpp`、`player.h/cpp`
+- **验证**：编译通过，冒烟测试无崩溃

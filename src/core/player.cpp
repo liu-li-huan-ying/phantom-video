@@ -361,13 +361,10 @@ void Player::doSeek(double t) {
     audioSeeking_.store(true);
     if (onSeekingChanged) onSeekingChanged(true);
     if (audio_) {
-        // 立即初始化音频时钟到 seek target，防止视频用 videoClock 超前
-        // （先清队列再设时钟，fill() 不会在中间推进时钟因为 queue 空时输出静音不改 writeHead_）
-        audio_->clearQueue();
+        // 立即初始化音频时钟，防止进度条/视频同步使用旧值
         audio_->setClock(t);
-        // 延迟 seek 的 current_ 清理由 fill() 内 pendingSeek_ 处理（原子操作）
+        // pendingSeek_ 在 fill() 内原子处理 current_ 清理 + 首块重锚
         audio_->requestSeek(t);
-        // 音频 demuxer seek 由 audioLoop 线程处理（audioSeekPending_ 机制）
     }
     videoQueue_.clear();
     videoClockStarted_ = true;
@@ -383,7 +380,6 @@ void Player::doSeek(double t) {
         subtitles_.clear();
         subtitleDecoder_->flushBuffers();
     }
-    dropUntil_.store(-1e9);
 }
 
 void Player::decodeLoop() {
@@ -453,6 +449,9 @@ void Player::audioLoop() {
             if (seekRequested() || stop_.load()) break;
             if (audioSeeking_.load()) continue;
             if (framePts(f) < dropUntil_.load()) continue;
+            // seek 后丢弃旧位置数据：PTS 远低于 seek target 的帧是旧位置解码产物
+            double seekTarget = audioSeekTarget_.load();
+            if (seekTarget > 0.0 && framePts(f) < seekTarget - 0.5) continue;
             while (!audio_ || !audio_->tryPush(f)) {
                 if (seekRequested() || stop_.load()) break;
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));

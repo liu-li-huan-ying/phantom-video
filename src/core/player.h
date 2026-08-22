@@ -115,8 +115,8 @@ private:
     int videoPtsIdx_ = -1;
 
     FramePtr lastFrame_;
-    double videoBasePts_ = 0.0;
-    Uint64 videoBaseTicks_ = 0;
+    std::atomic<double> videoBasePts_{ 0.0 };
+    std::atomic<Uint64> videoBaseTicks_{ 0 };
     bool videoClockStarted_ = false;
     bool playing_ = false;
 };

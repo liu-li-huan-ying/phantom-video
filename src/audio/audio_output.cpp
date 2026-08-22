@@ -235,6 +235,7 @@ void AudioOutput::fill(Uint8* stream, int len) {
         offset_ = 0;
         queue_.clear();
         setClock(seekTarget);
+        reanchor_ = true;  // 首块到达时重锚 writeHead_
     }
 
     SDL_memset(stream, 0, len);
@@ -256,8 +257,9 @@ void AudioOutput::fill(Uint8* stream, int len) {
             offset_ = 0;
             {
                 std::lock_guard<std::mutex> lock(clockMutex_);
-                if (writeHead_ < 0.0) {
+                if (writeHead_ < 0.0 || reanchor_) {
                     writeHead_ = current_.pts;
+                    reanchor_ = false;
                 }
             }
         }
