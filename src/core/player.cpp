@@ -317,17 +317,25 @@ FramePtr Player::pullFrame() {
 
     double pts = framePts(f);
     if (audioWait_.load()) {
-        // seek 期间逐帧显示，用 tryPop 避免阻塞主线程
+        double seekTarget = audioSeekTarget_.load();
+        // 跳过 seek target 之前的帧（关键帧到目标之间的帧），不显示
+        while (f && pts < seekTarget - 0.1) {
+            videoQueue_.pop(f);
+            if (!videoQueue_.peek(f)) {
+                // 队列空，等解码线程推入更多帧
+                SDL_Delay(1);
+                return lastFrame_;
+            }
+            pts = framePts(f);
+        }
+        // 到达 seek target 或之后的帧 → 显示并恢复正常同步
         videoQueue_.pop(f);
         lastFrame_ = f;
-        double seekTarget = audioSeekTarget_.load();
-        if (pts >= seekTarget - 0.1 || pts < videoBasePts_ - 1.0) {
-            videoBasePts_ = pts;
-            videoBaseTicks_ = SDL_GetPerformanceCounter();
-            playing_ = !paused_.load();
-            audioWait_.store(false);
-            if (onSeekingChanged) onSeekingChanged(false);
-        }
+        videoBasePts_ = pts;
+        videoBaseTicks_ = SDL_GetPerformanceCounter();
+        playing_ = !paused_.load();
+        audioWait_.store(false);
+        if (onSeekingChanged) onSeekingChanged(false);
         return f;
     }
     if (pts - target > 0.05) {
