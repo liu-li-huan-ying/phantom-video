@@ -908,3 +908,20 @@
   - 居中于缩略图，随鼠标位置实时更新
 - **改动文件**：`main.cpp`、`audio_output.cpp`、`player.cpp`、`video_renderer.cpp`
 - **验证**：编译通过，正常模式日志 0 bytes，诊断模式日志正常输出
+
+### 阶段 M30：控件动画 + 缩略图优化 + OSD 增强（规划中）
+
+- 任务：三项 UI/性能增强
+- **M30a 控件动画**：
+  - 新建 `src/ui/easing.h`：纯头文件缓动函数库（ease-in/out/in-out、overshoot）
+  - 控件 alpha 动画：hover 时 fade in 200ms，离开时 fade out 200ms
+  - 按钮 hover 缩放：1.0 → 1.15 ease-out；点击弹性回弹 0.9 → 1.0
+  - 进度条展开/收起：高度 4px ↔ 8px，thumb 12px ↔ 18px
+- **M30b 缩略图优化**：
+  - LRU 缓存：30 条纹理，`abs(entry.time - time) < 500ms` 命中
+  - 多线程 worker：独立线程提取，主线程 cache.get() 读取
+  - 切视频时 clear() 释放所有纹理
+- **M30c OSD 增强**：
+  - player 新增查询接口：videoBitrate/audioBitrate/videoWidth/Height/Fps/audioSampleRate/hwDecoding
+  - 按 I 键切换 OSD 显示（半透明背景，含码率/分辨率/帧率/采样率/硬解状态）
+  - Shift+I 切换详细模式（解码器名/profile/level）
