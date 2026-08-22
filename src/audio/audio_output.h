@@ -43,6 +43,10 @@ public:
     void requestSeek(double t);                 // 设置待处理 seek（fill() 内原子清队列+设时钟）
     bool hasPendingSeek() const;                // 是否有待处理 seek
 
+    // seek 阻断：doSeek() 设 true，audioLoop 处理完 seek 后设 false
+    // 期间 push()/tryPush() 返回 false，阻止旧帧入队
+    void setSeeking(bool s);
+
 private:
     static void SDLCALL sdlCallback(void* userdata, Uint8* stream, int len);
     void fill(Uint8* stream, int len);
@@ -79,8 +83,11 @@ private:
     // 延迟 seek：fill() 在 SDL 回调线程内原子处理
     std::atomic<double> pendingSeek_{ -1.0 };   // -1 = 无待处理 seek
     bool reanchor_ = false;                     // seek 后首块到达时重锚 writeHead_
+    bool waitingForSeek_ = false;               // seek 后等待首块音频，静音不推进时钟
+    bool seekConsumed_ = false;                 // 本次 fill() 是否消费了 pendingSeek_
     std::atomic<bool> normalization_{ false };
     std::atomic<float> normGain_{ 1.0f };
     float peakTracker_ = 0.0f;
     Uint32 peakDecayTime_ = 0;
+    std::atomic<bool> seeking_{ false };  // seek 期间阻断 push
 };

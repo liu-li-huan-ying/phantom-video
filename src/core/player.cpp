@@ -367,11 +367,10 @@ FramePtr Player::pullFrame() {
 void Player::doSeek(double t) {
     if (!videoDemuxer_) return;
     audioSeeking_.store(true);
+    if (audio_) audio_->setSeeking(true);  // 阻断旧帧入队
     if (onSeekingChanged) onSeekingChanged(true);
     if (audio_) {
-        // 立即初始化音频时钟，防止进度条/视频同步使用旧值
         audio_->setClock(t);
-        // pendingSeek_ 在 fill() 内原子处理 current_ 清理 + 首块重锚
         audio_->requestSeek(t);
     }
     videoQueue_.clear();
@@ -448,6 +447,7 @@ void Player::audioLoop() {
             audioDemuxer_->seekAudio(audioSeekTarget_.load());
             if (audioDecoder_) audioDecoder_->flushBuffers();
             audioSeeking_.store(false);
+            if (audio_) audio_->setSeeking(false);  // seek 完成，允许新帧入队
         }
         PacketPtr pkt = audioDemuxer_->readPacket();
         if (!pkt) break;
@@ -457,9 +457,8 @@ void Player::audioLoop() {
             if (seekRequested() || stop_.load()) break;
             if (audioSeeking_.load()) continue;
             if (framePts(f) < dropUntil_.load()) continue;
-            // seek 后丢弃旧位置数据：PTS 远低于 seek target 的帧是旧位置解码产物
             double seekTarget = audioSeekTarget_.load();
-            if (seekTarget > 0.0 && framePts(f) < seekTarget - 0.5) continue;
+            if (seekTarget > 0.0 && framePts(f) < seekTarget - 0.1) continue;
             while (!audio_ || !audio_->tryPush(f)) {
                 if (seekRequested() || stop_.load()) break;
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
