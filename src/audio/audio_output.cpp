@@ -246,10 +246,11 @@ void AudioOutput::fill(Uint8* stream, int len) {
         if (current_.data.empty()) {
             AudioChunk chunk;
             if (!queue_.tryPop(chunk)) {
-                // 队列空：输出静音，按实际播放时间推进时钟（speed 不影响时钟）
+                // 队列空：输出静音，按内容时间推进时钟（乘 speed 保持与 PTS 同一时间基准）
                 std::lock_guard<std::mutex> lock(clockMutex_);
                 if (writeHead_ >= 0.0) {
-                    writeHead_ += (double)space / 4.0 / spec_.freq;
+                    writeHead_ += (double)space / 4.0 / spec_.freq
+                                  * speed_.load(std::memory_order_relaxed);
                 }
                 break;
             }
@@ -271,7 +272,8 @@ void AudioOutput::fill(Uint8* stream, int len) {
         if (offset_ >= current_.data.size()) current_.data.clear();
         {
             std::lock_guard<std::mutex> lock(clockMutex_);
-            writeHead_ += (double)n / 4.0 / current_.outRate;
+            writeHead_ += (double)n / 4.0 / current_.outRate
+                          * speed_.load(std::memory_order_relaxed);
         }
     }
 
