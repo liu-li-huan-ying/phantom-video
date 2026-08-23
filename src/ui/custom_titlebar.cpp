@@ -1,4 +1,5 @@
 #include "ui/custom_titlebar.h"
+#include "core/config.h"
 #include <SDL_image.h>
 #include <cmath>
 #include <cstring>
@@ -10,13 +11,16 @@ static SDL_Texture* gLogoTex = nullptr;
 
 static void ensureLogo(SDL_Renderer* renderer) {
     if (gLogoTex) return;
-    const char* paths[] = {
-        "ico/vplay.bmp",
+    // M31j: 资源相对 exe 目录解析，双击关联文件启动（CWD 为视频目录）时也能找到 logo
+    const char* rels[] = {
         "assets/icons/vplay.bmp",
+        "ico/vplay.bmp",
         "vplay.bmp",
     };
-    for (auto path : paths) {
-        SDL_Surface* surf = IMG_Load(path);
+    std::string base = exeDir();
+    for (auto rel : rels) {
+        std::string path = base + rel;
+        SDL_Surface* surf = IMG_Load(path.c_str());
         if (!surf) continue;
         gLogoTex = SDL_CreateTextureFromSurface(renderer, surf);
         SDL_FreeSurface(surf);

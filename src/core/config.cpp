@@ -9,18 +9,25 @@
 #include <windows.h>
 #endif
 
-std::string configPath() {
+std::string exeDir() {
 #ifdef _WIN32
     wchar_t buf[MAX_PATH] = {};
     DWORD n = GetModuleFileNameW(nullptr, buf, MAX_PATH);
     std::wstring ws(buf, n);
     std::size_t slash = ws.find_last_of(L"\\/");
     if (slash != std::wstring::npos) ws.resize(slash + 1);
-    ws += L"vplayer.ini";
     int len = WideCharToMultiByte(CP_UTF8, 0, ws.c_str(), -1, nullptr, 0, nullptr, nullptr);
     std::string out(len > 0 ? len - 1 : 0, '\0');
     if (len > 0) WideCharToMultiByte(CP_UTF8, 0, ws.c_str(), -1, out.data(), len, nullptr, nullptr);
     return out;
+#else
+    return "";
+#endif
+}
+
+std::string configPath() {
+#ifdef _WIN32
+    return exeDir() + "vplayer.ini";
 #else
     return "vplayer.ini";
 #endif

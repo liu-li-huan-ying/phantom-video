@@ -105,23 +105,19 @@ int main(int argc, char** argv) {
         return 1;
     }
     // --- 自定义窗口图标 ---
-    // 图标位于项目根目录 ico/vplay.ico
-    // SDL2 SDL_LoadBMP 原生仅支持 BMP 格式，ICO 格式兼容有限。
-    // 步骤：将 vplay.ico 另存为 vplay.bmp (32x32 或 256x256 均可)，
-    //       将 vplay.bmp 放在同一目录，代码将自动加载 BMP。
-    // 若仅有 ICO 且不另存 BMP，将打印提示并使用默认系统图标。
+    // M31j: 相对 exe 目录解析（CWD 可能是双击打开的视频所在目录）。
+    // 窗口图标与标题栏 logo 同源：assets/icons/vplay.bmp（CMake 拷贝到 build/assets）。
     {
-        const char* iconBmpPath = "ico/vplay.bmp";
-        const char* iconIcoPath = "ico/vplay.ico";
-        SDL_Surface* icon = SDL_LoadBMP(iconBmpPath);
+        std::string base = exeDir();
+        const char* rels[] = { "assets/icons/vplay.bmp", "ico/vplay.bmp", "ico/vplay.ico" };
+        SDL_Surface* icon = nullptr;
+        for (auto rel : rels) {
+            if (icon) break;
+            std::string p = base + rel;
+            icon = SDL_LoadBMP(p.c_str());
+        }
         if (!icon) {
-            // 若无 BMP，尝试 ICO (SDL2 支持有限，建议另存为 BMP)
-            icon = SDL_LoadBMP(iconIcoPath);
-            if (!icon) {
-                fprintf(stderr, "[warn] 图标加载失败：%s / %s (ICO/SDL2 有限支持)\n",
-                        iconIcoPath, iconBmpPath);
-                fprintf(stderr, "      将使用默认系统图标。请将 vplay.ico 另存为 vplay.bmp 以启用自定义图标。\n");
-            }
+            fprintf(stderr, "[warn] window icon not found (assets/icons/vplay.bmp)\n");
         }
         if (icon) {
             SDL_SetWindowIcon(win, icon);

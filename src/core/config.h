@@ -11,5 +11,6 @@ struct AppConfig {
 };
 
 std::string configPath();
+std::string exeDir();   // exe 所在目录（带尾部分隔符），用于定位随包资源
 bool loadConfig(const std::string& path, AppConfig& out);
 bool saveConfig(const std::string& path, const AppConfig& cfg);
