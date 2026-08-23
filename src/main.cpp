@@ -430,10 +430,13 @@ auto args = utf8Args();
                     int winW = 0, winH = 0;
                     SDL_GetWindowSize(win, &winW, &winH);
                     bool hitControlTop = false;
-                    // ---- M32c: 顶栏点击拦截（最高优先级）----
+                    // ---- M32c: 顶栏点击拦截 ----
                     if (my < VideoRenderer::TOPBAR_H) {
                         int act = vrender.topBarClick(mx, my);
-                        switch (act) {
+                        // M32f.4: 列表展开时其头部区域让位给面板（关闭钮在此）
+                        bool inPanelZone = panel.isOpen() && mx >= winW - panel.width();
+                        if (act >= 0) {
+                            switch (act) {
                         case VideoRenderer::TB_CAMERA: {
                             auto dir = exeDir() + "shots";
                             std::filesystem::create_directories(dir);
@@ -458,6 +461,7 @@ auto args = utf8Args();
                         default: break;  // 空白区=拖拽（由 WndProc HTCAPTION 处理）
                         }
                         hitControlTop = true;
+                        if (inPanelZone) hitControlTop = false;  // 面板头部让位
                     }
                     if (hitControlTop) break;
                     // ---- M32e: 设置模态点击路由（模态打开时独占）----

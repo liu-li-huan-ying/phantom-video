@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <atomic>
 #include <string>
 #include <unordered_map>
@@ -42,9 +42,9 @@ private:
     SDL_Renderer* renderer_ = nullptr;
     bool open_ = false;
     float openAnim_ = 0.0f;
-    int baseWidth_ = 640;  // M32f.3: 加长一倍
-    int minWidth_ = 640;
-    int maxWidth_ = 640;
+    int baseWidth_ = 430;  // M32f.5: 三分之二（640*2/3≈430）
+    int minWidth_ = 430;
+    maxWidth_ = 430;
     bool resizing_ = false;
     int resizeStartX_ = 0;
     int resizeStartW_ = 0;
