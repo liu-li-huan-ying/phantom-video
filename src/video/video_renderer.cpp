@@ -610,19 +610,19 @@ ControlLayout ControlLayout::compute(int winW, int winH, int panelWidth) {
     ControlLayout l;
     const int mL = 16, mR = 16;
     int areaW = winW - panelWidth;
-    // 单行布局：seek带18 + 行(42) + 底距14 ≈ 76
-    l.top = winH - 76;
+    // 单行布局：seek带18 + 行(42) + 底距16 ≈ 80
+    l.top = winH - 80;
     l.progX = mL + 2;
     l.progW = areaW - mL - mR - 4;
     l.progY = l.top + 9;          // track 中心线
-    l.row1Y = l.top + 20;         // 行顶（高42）
+    l.row1Y = l.top + 24;         // 行顶（高42）
     l.row2Y = l.row1Y + 7;        // 文本钮命中带（高28）垂直居中于行
-    constexpr int S = 34, P = 40, G = 4;
+    constexpr int S = 34, P = 40, G = 6;
     // 左簇
     l.prevX = mL;
     l.playX = l.prevX + S + G;
     l.nextX = l.playX + P + G;
-    l.timeX = l.nextX + S + 16;
+    l.timeX = l.nextX + S + 18;
     l.timeY = l.row1Y + 13;
     // 右簇（右对齐，向左排）
     int x = areaW - mR;
@@ -698,7 +698,7 @@ void VideoRenderer::drawControls(const RenderStats& stats) {
             Uint8 bgA = (Uint8)(20 * a / 255);
             fillRoundedRect(renderer_, b.x, b.y, b.w, b.h, 8, 255, 255, 255, bgA);
         }
-        int iconSize = (int)(18 * (hover ? 1.08f : 1.0f));
+        int iconSize = (int)(20 * (hover ? 1.08f : 1.0f));
         int iconAlpha = (int)(228 * a / 255);
         drawIconOrTexture(renderer_, iconTexture(icon), icon,
                           b.x + b.w / 2, b.y + b.h / 2, iconSize, iconAlpha);
@@ -709,7 +709,7 @@ void VideoRenderer::drawControls(const RenderStats& stats) {
             fillRoundedRect(renderer_, b.x, b.y, b.w, b.h, 8, 255, 255, 255,
                             (Uint8)(20 * a / 255));
         svgicon::draw(renderer_, stats.playing && !stats.paused ? "pause" : "play",
-                      b.x + b.w / 2, b.y + b.h / 2, 21, 255, 255, 255, (Uint8)a);
+                      b.x + b.w / 2, b.y + b.h / 2, 22, 255, 255, 255, (Uint8)a);
     };
 
     // ---- progress bar: full-width slim bar at the very bottom ----

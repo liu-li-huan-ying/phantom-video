@@ -192,6 +192,8 @@ static SDL_Texture* rasterize(SDL_Renderer* r,
     const int SS = 3;
     int W = size * SS;
     if (W <= 0) return nullptr;
+    // M32a.2 关键修复：path 坐标是 24 视图框单位，必须缩放到目标尺寸！
+    const float k = (float)W / 24.f;
 
     struct Edge { float x0, y0, x1, y1; };
     std::vector<Edge> edges;
@@ -200,7 +202,7 @@ static SDL_Texture* rasterize(SDL_Renderer* r,
             const Vec2& p0 = poly[i - 1];
             const Vec2& p1 = poly[i];
             if (p0.y != p1.y)
-                edges.push_back({ p0.x * SS, p0.y * SS, p1.x * SS, p1.y * SS });
+                edges.push_back({ p0.x * k, p0.y * k, p1.x * k, p1.y * k });
         }
     }
     std::vector<Uint8> cov((size_t)W * W, 0);
@@ -253,17 +255,19 @@ static SDL_Texture* rasterize(SDL_Renderer* r,
 }
 
 // ---------------- 缓存与绘制 ----------------
+// 注意：缓存键不含 alpha（淡入动画每帧 alpha 不同，会导致缓存爆炸）。
+// 纹理恒以全 alpha 光栅化，绘制时用 SDL_SetTextureAlphaMod 调制。
 struct CacheKey {
     std::string id;
     int size;
-    Uint32 rgba;
+    Uint32 rgb;
     bool operator==(const CacheKey& o) const {
-        return size == o.size && rgba == o.rgba && id == o.id;
+        return size == o.size && rgb == o.rgb && id == o.id;
     }
 };
 struct KeyHash {
     size_t operator()(const CacheKey& k) const {
-        return std::hash<std::string>()(k.id) ^ (k.size * 2654435761u) ^ k.rgba;
+        return std::hash<std::string>()(k.id) ^ (k.size * 2654435761u) ^ k.rgb;
     }
 };
 static std::unordered_map<CacheKey, SDL_Texture*, KeyHash> g_cache;
@@ -273,17 +277,18 @@ void draw(SDL_Renderer* r, const char* id, int cx, int cy, int size,
     if (ca == 0 || size <= 0) return;
     const Def* def = find(id);
     if (!def) return;
-    Uint32 rgba = ((Uint32)ca << 24) | ((Uint32)cb << 16) | ((Uint32)cg << 8) | cr;
-    CacheKey key{ id, size, rgba };
+    Uint32 rgb = ((Uint32)cb << 16) | ((Uint32)cg << 8) | cr;
+    CacheKey key{ id, size, rgb };
     auto it = g_cache.find(key);
     SDL_Texture* tex = nullptr;
     if (it != g_cache.end()) {
         tex = it->second;
     } else {
-        tex = rasterize(r, parsePath(def->path), size, cr, cg, cb, ca);
+        tex = rasterize(r, parsePath(def->path), size, cr, cg, cb, 255);
         if (!tex) return;
         g_cache[key] = tex;
     }
+    SDL_SetTextureAlphaMod(tex, ca);
     SDL_Rect dst{ cx - size / 2, cy - size / 2, size, size };
     SDL_RenderCopy(r, tex, nullptr, &dst);
 }
