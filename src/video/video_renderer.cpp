@@ -446,9 +446,10 @@ void VideoRenderer::drawTopBar() {
 
     SDL_Rect rs[6];
     topBarRects(w, rs);
-    const char* ids[6] = { "camera", "pip", "list", "minimize",
+    // M32c.1: 用户要求镜像顺序 —— 视觉左→右：截图,画中画,列表,最小化,最大化,关闭
+    const char* ids[6] = { "close",
                            (SDL_GetWindowFlags(window_) & SDL_WINDOW_MAXIMIZED) ? "exitfull" : "maximize",
-                           "close" };
+                           "minimize", "list", "pip", "camera" };
     for (int i = 0; i < 6; ++i) {
         bool hov = mouseX_ >= rs[i].x && mouseX_ < rs[i].x + rs[i].w &&
                    mouseY_ >= rs[i].y && mouseY_ < rs[i].y + rs[i].h;
