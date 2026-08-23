@@ -1146,3 +1146,6 @@
   （截图=sws转RGB24存PNG至 exe/shots/、画中画占位、列表开关、最小化、最大化/还原、关闭）；
   CustomTitlebar 保留 WndProc 拖拽但视觉让位；视频全出血。待用户验收拖拽与按钮交互。
 - 下一步：M32d 弹出菜单精修 / M32e 设置模态 / M32f 播放列表卡片化 / M32g Toast+中央钮+扫描线
+
+- **M32d ✅（commit 798c1a3）**：倍速弹出菜单精修完成——面板 rgba(24,24,26,.98)/r10/阴影近似、选中项 accent2 蓝字、hover 白.08 行背景、右对齐灰提示(慢/正常/快)、GDI 文本、menuW130/itemH30。点击命中几何同步(speedMenuItemRect)。
+- 待做：M32e 设置模态 / M32f 播放列表卡片化 / M32g Toast+中央钮+扫描线
