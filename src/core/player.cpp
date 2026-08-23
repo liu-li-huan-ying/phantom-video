@@ -544,7 +544,10 @@ void Player::decodeLoop() {
         }
 
         PacketPtr pkt = videoDemuxer_->readPacket();
-        if (!pkt) break;
+        if (!pkt) {
+            LOG_WARN("DECODE", "readPacket null -> decodeLoop exit (pos~%.3f)", videoPtsScale_.load() > 0 ? 0.0 : 0.0);
+            break;
+        }
 
         if (seekRequested() || stop_.load()) continue;
 

@@ -1186,3 +1186,12 @@
   - 起播假死（音频先跑视频丢弃追赶）——方案已定：无续播时走 seek(0) 同步启动
   - M33: 播放列表真实缩略图异步提取 + LRU 缓存（当前为提亮占位图）
 - **M32 阶段关闭条件**：用户验收通过后关闭
+
+- **已知问题（M32g.3 回退，待深挖）**：
+  1. 起播假死仍存在（回退了 seek(0)/seek(0.5) 延迟修复）
+  2. 新发现：openFile 后任何延迟 seek(400ms, t=0/0.5) 都会在 ~200ms 内触发
+     两路 demuxer 同时 readPacket=AVERROR_EOF → 视频/音频双死 → Ended 链式跳转。
+     手动拖动跳转同路径却正常。已加 DEMUX readPacket fail / DECODE exit /
+     MAIN Ended 日志（保留），复现脚本 repro_next.ps1 思路可一键复现。
+  - 下一步假设：非 ts 值问题；疑与 openFile 后初始状态下 seek 引发的底层
+    AVIO EOF 标志残留有关，需对比手动跳转时的调用差异定位。
