@@ -44,7 +44,7 @@ private:
     float openAnim_ = 0.0f;
     int baseWidth_ = 430;  // M32f.5: 三分之二（640*2/3≈430）
     int minWidth_ = 430;
-    maxWidth_ = 430;
+    int maxWidth_ = 430;
     bool resizing_ = false;
     int resizeStartX_ = 0;
     int resizeStartW_ = 0;
