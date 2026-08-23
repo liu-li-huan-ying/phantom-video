@@ -1248,11 +1248,7 @@ void VideoRenderer::drawPauseOverlay(const RenderStats& stats) {
 
     SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
 
-    // 半透明暗色遮罩（M32g: titleH 已归零）
-    SDL_SetRenderDrawColor(renderer_, 0, 0, 0, (Uint8)(pauseOverlayAlpha_ * 0.35f));
-    SDL_Rect overlay{ 0, 0, winW - panelWidth_, winH };
-    SDL_RenderFillRect(renderer_, &overlay);
-
+    // M32g.4: 移除旧版全屏压暗遮罩（效果图无此设计，仅中央按钮自带底色）
     int cx = (winW - panelWidth_) / 2;
     int cy = winH / 2;
     Uint8 a = (Uint8)pauseOverlayAlpha_;
