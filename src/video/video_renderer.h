@@ -84,6 +84,14 @@ public:
     SDL_Renderer* renderer() { return renderer_; }
     GdiTextCache gdi_;
 
+    // ---- M32c: 顶部栏 ----
+    static const int TOPBAR_H = 52;
+    // 六个按钮矩形（右→左）：camera,pip,list,min,max,close
+    static void topBarRects(int winW, SDL_Rect out[6]);
+    void drawTopBar();
+    int topBarClick(int mx, int my);          // -1=无, 0..5 对应上述顺序
+    void setShotPath(const std::string& p) { pendingShotPath_ = p; }
+
     // M16: 暂停叠加图标
     enum class PauseIcon { None, Play, Pause };
     void showPauseOverlay(PauseIcon icon);
@@ -120,6 +128,7 @@ private:
     int subTexH_ = 0;
     std::string subtitleCache_;
     std::string toastText_;
+    std::string pendingShotPath_;  // M32c: 待保存截图路径
     Uint32 toastUntil_ = 0;
     bool speedMenuOpen_ = false;
     SDL_Texture* iconTex_[12] = {};

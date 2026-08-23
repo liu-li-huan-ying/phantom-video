@@ -410,6 +410,57 @@ SDL_Rect VideoRenderer::speedMenuItemRect(const ControlLayout& lay, int index) {
     return SDL_Rect{ menuX, menuY + index * itemH, menuW, itemH };
 }
 
+// ---- M32c: 顶部栏 ----
+void VideoRenderer::topBarRects(int winW, SDL_Rect out[6]) {
+    // 右→左：camera, pip, list, minimize, maximize, close；34px，间距2，右边距10
+    int x = winW - 10 - 34;
+    for (int i = 0; i < 6; ++i) {
+        out[i] = SDL_Rect{ x, (TOPBAR_H - 34) / 2, 34, 34 };
+        x -= 34 + 2;
+    }
+}
+
+int VideoRenderer::topBarClick(int mx, int my) {
+    if (my < 0 || my >= TOPBAR_H) return -1;
+    int w = 0, h = 0;
+    SDL_GetWindowSize(window_, &w, &h);
+    SDL_Rect rs[6];
+    topBarRects(w, rs);
+    for (int i = 0; i < 6; ++i)
+        if (mx >= rs[i].x && mx < rs[i].x + rs[i].w) return i;
+    return -1;
+}
+
+void VideoRenderer::drawTopBar() {
+    int w = 0, h = 0;
+    SDL_GetWindowSize(window_, &w, &h);
+    SDL_Color cTop{ 0, 0, 0, 0 }, cBot{ 0, 0, 0, 140 };
+    SDL_Vertex q[] = {
+        { {0,0}, cTop,{} }, { {(float)w,0}, cTop,{} }, { {(float)w,(float)TOPBAR_H}, cBot,{} },
+        { {0,0}, cTop,{} }, { {(float)w,(float)TOPBAR_H}, cBot,{} }, { {0,(float)TOPBAR_H}, cBot,{} },
+    };
+    SDL_RenderGeometry(renderer_, nullptr, q, 6, nullptr, 0);
+
+    const char* title = SDL_GetWindowTitle(window_);
+    if (title && *title) gdi_.drawText(16, (TOPBAR_H - 18) / 2 + 2, title, 14, 255, 255, 255);
+
+    SDL_Rect rs[6];
+    topBarRects(w, rs);
+    const char* ids[6] = { "camera", "pip", "list", "minimize",
+                           (SDL_GetWindowFlags(window_) & SDL_WINDOW_MAXIMIZED) ? "exitfull" : "maximize",
+                           "close" };
+    for (int i = 0; i < 6; ++i) {
+        bool hov = mouseX_ >= rs[i].x && mouseX_ < rs[i].x + rs[i].w &&
+                   mouseY_ >= rs[i].y && mouseY_ < rs[i].y + rs[i].h;
+        if (hov)
+            fillRoundedRect(renderer_, rs[i].x, rs[i].y, rs[i].w, rs[i].h, 8,
+                            255, 255, 255, 20);
+        svgicon::draw(renderer_, ids[i],
+                      rs[i].x + rs[i].w / 2, rs[i].y + rs[i].h / 2, 18,
+                      0xd4, 0xd4, 0xd8, hov ? 255 : 212);
+    }
+}
+
 void VideoRenderer::drawToast() {
     Uint32 now = SDL_GetTicks();
     if (now >= toastUntil_ || toastText_.empty()) return;
@@ -921,7 +972,7 @@ void VideoRenderer::drawBackground() {
     if (!renderer_) return;
     int w = 0, h = 0;
     SDL_GetWindowSize(window_, &w, &h);
-    const int titleH = 32;  // 标题栏高度
+    const int titleH = 0;  // 标题栏高度
     int areaW = w - panelWidth_;  // 减去面板宽度
     // 视频区域纯黑 (0,0,0)，与标题栏 (30,30,30) 形成层次感
     SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255);
@@ -931,6 +982,31 @@ void VideoRenderer::drawBackground() {
 
 void VideoRenderer::render(const AVFrame* frame, const RenderStats& stats) {
     if (!renderer_ || !frame) return;
+
+    // M32c: 截图请求 —— 用 sws 把当前帧转 RGB24 存 PNG
+    if (!pendingShotPath_.empty()) {
+        int dstW = frame->width, dstH = frame->height;
+        SwsContext* sc = sws_getContext(dstW, dstH, (AVPixelFormat)frame->format,
+                                        dstW, dstH, AV_PIX_FMT_RGB24,
+                                        SWS_BILINEAR, nullptr, nullptr, nullptr);
+        if (sc) {
+            AVFrame* rgb = av_frame_alloc();
+            rgb->format = AV_PIX_FMT_RGB24;
+            rgb->width = dstW; rgb->height = dstH;
+            av_frame_get_buffer(rgb, 1);
+            sws_scale(sc, frame->data, frame->linesize, 0, dstH,
+                      rgb->data, rgb->linesize);
+            SDL_Surface* surf = SDL_CreateRGBSurfaceWithFormatFrom(
+                rgb->data[0], dstW, dstH, 24, rgb->linesize[0], SDL_PIXELFORMAT_RGB24);
+            if (surf) {
+                IMG_SavePNG(surf, pendingShotPath_.c_str());
+                SDL_FreeSurface(surf);
+            }
+            av_frame_free(&rgb);
+            sws_freeContext(sc);
+        }
+        pendingShotPath_.clear();
+    }
 
     int fmt = frame->format;
     if (frame->width != fw_ || frame->height != fh_ || fmt != pixFmt_) {
@@ -990,7 +1066,7 @@ void VideoRenderer::render(const AVFrame* frame, const RenderStats& stats) {
 
     int winW = 0, winH = 0;
     SDL_GetWindowSize(window_, &winW, &winH);
-    const int titleH = 32;  // 标题栏高度
+    const int titleH = 0;  // 标题栏高度
     int areaY = titleH;     // 视频区域从标题栏下方开始
     int areaW = winW - panelWidth_;  // 减去播放列表面板宽度
     int areaH = winH - titleH;
@@ -1008,6 +1084,7 @@ void VideoRenderer::render(const AVFrame* frame, const RenderStats& stats) {
     drawSubtitle(stats);
     drawToast();
     drawControls(stats);
+    drawTopBar();
     drawPauseOverlay(stats);
     drawSeekingOverlay(stats);
 }

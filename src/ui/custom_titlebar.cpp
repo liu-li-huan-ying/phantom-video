@@ -1,5 +1,6 @@
 #include "ui/custom_titlebar.h"
 #include "core/config.h"
+#include "video/video_renderer.h"
 #include <SDL_image.h>
 #include <cmath>
 #include <cstring>
@@ -61,19 +62,21 @@ LRESULT CALLBACK CustomTitlebar::wndProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
     return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
-int CustomTitlebar::hitTest(int x, int y) {
-    if (y >= 0 && y < height) {
-        RECT rc;
-        GetClientRect(hwnd_, &rc);
-        int w = rc.right - rc.left;
-        int btnStart = w - kBtnW * 3;
-        if (x >= btnStart && x < btnStart + kBtnW) return 100;
-        if (x >= btnStart + kBtnW && x < btnStart + kBtnW * 2) return 101;
-        if (x >= btnStart + kBtnW * 2 && x < btnStart + kBtnW * 3) return 102;
-        return 2;
+    int CustomTitlebar::hitTest(int x, int y) {
+        // M32c: 顶栏区域让位给 SDL 覆盖式顶栏 —— 按钮矩形内为客户区(HTCLIENT)，
+        // 其余顶部区域仍作为拖拽 caption
+        if (y >= 0 && y < VideoRenderer::TOPBAR_H) {
+            RECT rc;
+            GetClientRect(hwnd_, &rc);
+            SDL_Rect rs[6];
+            VideoRenderer::topBarRects(rc.right - rc.left, rs);
+            for (int i = 0; i < 6; ++i)
+                if (x >= rs[i].x && x < rs[i].x + rs[i].w && y >= rs[i].y && y < rs[i].y + rs[i].h)
+                    return 1;
+            return 2;
+        }
+        return 1;
     }
-    return 1;
-}
 
 LRESULT CustomTitlebar::handleMsg(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {

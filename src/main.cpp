@@ -10,6 +10,8 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
+#include <ctime>
 #include <fstream>
 #include <string>
 #include <thread>
@@ -394,6 +396,37 @@ auto args = utf8Args();
                     int mx = e.button.x, my = e.button.y;
                     int winW = 0, winH = 0;
                     SDL_GetWindowSize(win, &winW, &winH);
+                    bool hitControlTop = false;
+                    // ---- M32c: 顶栏点击拦截（最高优先级）----
+                    if (my < VideoRenderer::TOPBAR_H) {
+                        int act = vrender.topBarClick(mx, my);
+                        switch (act) {
+                        case 0: {  // 截图
+                            auto dir = exeDir() + "shots";
+                            std::filesystem::create_directories(dir);
+                            char ts[40];
+                            time_t now = time(nullptr);
+                            strftime(ts, sizeof(ts), "%Y%m%d_%H%M%S", localtime(&now));
+                            std::string path = dir + "\\shot_" + ts + ".png";
+                            vrender.setShotPath(path);
+                            vrender.showToast("已截图");
+                            break;
+                        }
+                        case 1: vrender.showToast("画中画开发中"); break;      // pip
+                        case 2: panel.toggle(); break;                          // 播放列表
+                        case 3: SDL_MinimizeWindow(win); break;                 // 最小化
+                        case 4:                                                  // 最大化/还原
+                            if (SDL_GetWindowFlags(win) & SDL_WINDOW_MAXIMIZED)
+                                SDL_RestoreWindow(win);
+                            else
+                                SDL_MaximizeWindow(win);
+                            break;
+                        case 5: running = false; break;                         // 关闭
+                        default: break;  // 空白区=拖拽（由 WndProc HTCAPTION 处理）
+                        }
+                        hitControlTop = true;
+                    }
+                    if (hitControlTop) break;
                     // M16: 播放列表面板事件优先处理
                     if (panel.handleMouseDown(mx, my, winW, winH)) {
                         vrender.setPanelWidth(panel.width());
@@ -689,7 +722,8 @@ auto args = utf8Args();
             vrender.clear();
         }
         // 绘制自定义标题栏（每帧，覆盖 SDL 渲染）
-        titlebar.draw(vrender.renderer());
+        // M32c: 顶栏由 VideoRenderer::drawTopBar 绘制（覆盖式），不再画旧标题栏
+        // titlebar.draw(vrender.renderer());
         // M16: 绘制播放列表面板
         {
             int pw = 0, ph = 0;
