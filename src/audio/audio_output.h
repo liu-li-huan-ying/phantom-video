@@ -41,6 +41,12 @@ public:
     float pendingSpeed() const;                 // 读取待处理速度（-1 = 无）
     bool hasPendingSpeed() const;               // 是否有待处理速度变更
     void requestSeek(double t);                 // 设置待处理 seek（fill() 内原子清队列+设时钟）
+    // M31i: 播种内容时间基准。解码器 frame->pts 的 time_base 随文件而异（不可信），
+    // chunk.pts 改为从 seek/变速锚点起按 PCM 样本数自行累积。
+    void markContentSeed(double t) {
+        contentSeed_.store(t, std::memory_order_release);
+        seedGen_.fetch_add(1, std::memory_order_acq_rel);
+    }
     bool hasPendingSeek() const;                // 是否有待处理 seek
 
     // seek 阻断：doSeek() 设 true，audioLoop 处理完 seek 后设 false
@@ -56,10 +62,17 @@ private:
     SDL_AudioDeviceID dev_ = 0;
     SDL_AudioSpec spec_{};
     SwrContext* swr_ = nullptr;
-    double ptsScale_ = 1.0;
+    double ptsScale_ = 1.0;                     // 已废弃用于 chunk.pts（M31i），仅保留兼容
+    int inSampleRate_ = 44100;                  // 输入采样率（内容时间累积用）
     bool ok_ = false;
     std::mutex swrMutex_;
     AVChannelLayout inLayout_{};
+
+    // M31i: 内容时间自累积状态（仅 convert()/ALOOP 线程写，原子发布种子）
+    std::atomic<unsigned int> seedGen_{0};
+    std::atomic<double> contentSeed_{-1.0};
+    unsigned int seenGen_ = 0xFFFFFFFF;
+    double contentLocal_ = -1.0;
 
     sonicStream sonic_ = nullptr;
     std::mutex sonicMutex_;
@@ -84,6 +97,8 @@ private:
     // 延迟 seek：fill() 在 SDL 回调线程内原子处理
     std::atomic<double> pendingSeek_{ -1.0 };   // -1 = 无待处理 seek
     bool reanchor_ = false;                     // seek 后首块到达时重锚 writeHead_
+    int reanchorSkipCnt_ = 0;                   // 连续 SKIP 计数（达到预算强制锚定，防永久静音）
+    static constexpr int kReanchorForceAfter = 300;
     std::atomic<bool> normalization_{ false };
     std::atomic<float> normGain_{ 1.0f };
     float peakTracker_ = 0.0f;

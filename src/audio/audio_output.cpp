@@ -30,6 +30,8 @@ AudioOutput::~AudioOutput() {
 
 bool AudioOutput::open(const AVCodecParameters* par, double ptsScale) {
     ptsScale_ = ptsScale;
+    inSampleRate_ = par->sample_rate > 0 ? par->sample_rate : 44100;
+    markContentSeed(0.0);
 
     SDL_AudioSpec want{};
     want.freq = 44100;
@@ -132,6 +134,7 @@ void AudioOutput::setSpeed(float spd) {
 
 void AudioOutput::requestSpeedChange(float spd, double anchor) {
     if (spd <= 0.01f) spd = 0.01f;
+    seeking_.store(true, std::memory_order_release);  // M31i: 同 requestSeek，门控至 fill 消费
     if (anchor >= 0.0) {
         pendingSpeedAnchor_.store(anchor, std::memory_order_release);
     }
@@ -148,6 +151,9 @@ bool AudioOutput::hasPendingSpeed() const {
 }
 
 void AudioOutput::requestSeek(double t) {
+    // M31i: 重新门控推送。ALOOP 可能在 doSeek 等待期间已完成 seek 并解除门控，
+    // 若不重新上闸，fill 消费前队列会被灌入数秒内容，首块 pts 远离锚点。
+    seeking_.store(true, std::memory_order_release);
     pendingSeek_.store(t, std::memory_order_release);
     LOG_DBG("FILL", "requestSeek: t=%.3f", t);
 }
@@ -249,8 +255,16 @@ bool AudioOutput::convert(const FramePtr& frame, AudioChunk& chunk) {
     }
 
     chunk.outRate = spec_.freq;
-    chunk.pts = frame->pts == AV_NOPTS_VALUE ? 0.0 : frame->pts * ptsScale_;
-    if (chunk.pts < 0.0) chunk.pts = 0.0;
+    // M31i: chunk.pts 由内容时间自累积计算，不再信任 frame->pts
+    // （其 time_base 随容器/解码路径而异：有的文件 90000 系、有的 44100 系）
+    unsigned int g = seedGen_.load(std::memory_order_acquire);
+    if (g != seenGen_) {
+        contentLocal_ = contentSeed_.load(std::memory_order_acquire);
+        seenGen_ = g;
+    }
+    if (contentLocal_ < 0.0) contentLocal_ = 0.0;
+    chunk.pts = contentLocal_;
+    contentLocal_ += (double)frame->nb_samples / (double)inSampleRate_;
     lastPts_ = chunk.pts;
 
     return !chunk.data.empty();
@@ -318,6 +332,8 @@ void AudioOutput::fill(Uint8* stream, int len) {
             LOG_DBG("FILL","pendingSpeed anchor: writeHead_=%.3f", writeHead_);
         }
         reanchor_ = true;
+        reanchorSkipCnt_ = 0;
+        setSeeking(false);  // M31i: 队列已清空，放行 ALOOP 推送
     }
 
     // 原子处理待处理的 seek（清 current_ + 清队列 + 设时钟）
@@ -329,6 +345,8 @@ void AudioOutput::fill(Uint8* stream, int len) {
         queue_.clear();
         setClock(seekTarget);
         reanchor_ = true;
+        reanchorSkipCnt_ = 0;
+        setSeeking(false);  // M31i: 队列已清空，放行 ALOOP 推送
         LOG_DBG("FILL","pendingSeek done: writeHead_after=%.3f reanchor=%d", writeHead_, reanchor_);
     }
 
@@ -366,16 +384,30 @@ void AudioOutput::fill(Uint8* stream, int len) {
             std::lock_guard<std::mutex> lock(clockMutex_);
             if (writeHead_ < 0.0 || reanchor_) {
                 double diff = current_.pts - writeHead_;
-                if (reanchor_ && writeHead_ > 0.0 && (diff > 2.0 || diff < -2.0)) {
-                    LOG_WARN("FILL","REANCHOR SKIP: chunk.pts %.3f way off writeHead_ %.3f (diff=%.3f), discarding chunk",
-                        current_.pts, writeHead_, diff);
+                bool wayOff = reanchor_ && writeHead_ > 0.0 && (diff > 2.0 || diff < -2.0);
+                if (wayOff && reanchorSkipCnt_ < kReanchorForceAfter) {
+                    // M31i: 有界丢弃。生产者持续跑远时 diff 只增不减，
+                    // 无预算的丢弃会退化为永久静音（M31a-M31h 反复复现）。
+                    ++reanchorSkipCnt_;
+                    if (reanchorSkipCnt_ == 1 || reanchorSkipCnt_ % 200 == 0) {
+                        LOG_WARN("FILL","REANCHOR SKIP #%d: chunk.pts %.3f writeHead_ %.3f (diff=%.3f)",
+                                 reanchorSkipCnt_, current_.pts, writeHead_, diff);
+                    }
                     current_.data.clear();
                     offset_ = 0;
                 } else {
-                    LOG_DBG("FILL","REANCHOR: writeHead_ %.3f -> chunk.pts %.3f speed=%.2f",
-                        writeHead_, current_.pts, speed_.load());
-                    writeHead_ = current_.pts;
-                    reanchor_ = false;
+                    if (wayOff) {
+                        LOG_WARN("FILL","REANCHOR FORCE after %d skips: adopt chunk.pts %.3f (diff=%.3f)",
+                                 reanchorSkipCnt_, current_.pts, diff);
+                    } else if (reanchor_) {
+                        LOG_DBG("FILL","REANCHOR: writeHead_ %.3f -> chunk.pts %.3f speed=%.2f",
+                                writeHead_, current_.pts, speed_.load());
+                    }
+                    if (reanchor_) {
+                        writeHead_ = current_.pts;
+                        reanchor_ = false;
+                    }
+                    reanchorSkipCnt_ = 0;
                 }
             }
         }

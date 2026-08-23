@@ -279,6 +279,7 @@ void Player::setSpeed(float s) {
             waitMs = i + 1;
         }
         LOG_DBG("SPEED", "audioLoop reseek done: anchor=%.3f wait=%dms", anchor, waitMs);
+        audio_->markContentSeed(anchor);  // M31i: chunk 内容时间从变速锚点重新播种
         // 原子请求速度变更 + 锚定时钟：fill() 在 SDL 回调线程内一次性处理
         audio_->requestSpeedChange(s, anchor);
         LOG_DBG("SPEED", "after requestSpeed: pending=%d anchor=%.3f", audio_->hasPendingSpeed(), anchor);
@@ -516,6 +517,7 @@ void Player::doSeek(double t) {
     LOG_DBG("SEEK", "audioLoop seek done, requesting fill seek: wait=%dms", waitMs);
     if (audio_) {
         audio_->requestSeek(t);
+        audio_->markContentSeed(t);  // M31i: chunk 内容时间从 seek 目标重新播种
     }
     if (videoDecoder_) videoDecoder_->flushBuffers();
     if (subtitleDecoder_) {
@@ -591,7 +593,9 @@ void Player::audioLoop() {
             audioDemuxer_->seekAudio(audioSeekTarget_.load());
             if (audioDecoder_) audioDecoder_->flushBuffers();
             audioSeeking_.store(false);
-            if (audio_) audio_->setSeeking(false);
+            // 注意：不在此处解除 push 门控（setSeeking(false)）。
+            // M31i: 门控由 fill() 在消费 pendingSeek/pendingSpeed 并清空队列后统一放行，
+            // 否则 ALOOP 在 fill 消费前抢先灌入数秒内容，首块 pts 远离锚点触发 SKIP 风暴。
             LOG_DBG("ALOOP", "seek done: clock=%.3f", audio_->clock());
         }
         PacketPtr pkt = audioDemuxer_->readPacket();
