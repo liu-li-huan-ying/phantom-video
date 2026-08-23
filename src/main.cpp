@@ -9,8 +9,11 @@
 #include <dwmapi.h>
 
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <string>
+#include <thread>
+#include <chrono>
 #include <vector>
 
 #include "core/config.h"
@@ -199,6 +202,19 @@ auto args = utf8Args();
     panel.setPlaylist(&playlist);
 
     player.setVolume(cfg.volume);
+
+    // M31k: 自动化测试钩子（仅当环境变量存在时生效，正常用户无感知）
+    if (const char* s = std::getenv("VPLAYER_AUTOTEST_SEEK")) {
+        double t = std::atof(s);
+        if (t > 0.0) {
+            // 等待首帧就绪后再发起绝对跳转
+            std::thread([t, &player]() {
+                std::this_thread::sleep_for(std::chrono::milliseconds(4000));
+                LOG_INFO("MAIN", "AUTOTEST seek -> %.3f", t);
+                player.seek(t);
+            }).detach();
+        }
+    }
 
     auto openCurrent = [&]() {
         if (playlist.empty()) {

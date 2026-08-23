@@ -1068,14 +1068,24 @@
   - 全部 seek 落点 ±0.06s、延迟 2-12ms；无 MUTED；SILENCE 仅剩启动期 3 条
 - **状态**：待用户实测确认后关闭此问题
 
-### 阶段 M31 收尾：用户实测通过 ✅（2026-08-23）
+### 阶段 M31k：seek 落点自校准 + 音频守卫去 framePts 化 ✅ 完成（用户文件实证）
 
-- 用户确认：音画同步恢复正常，logo/图标显示正常
-- 本轮音频问题最终修复栈：
-  - M31e ptsScale videoTb（部分正确，后被 M31i 取代）
-  - M31g 变速时 audioLoop 重定位到锚点
-  - M31h seekAudio 用 videoTb 换算 seek 目标
-  - M31i 三件套：chunk.pts 自算（锚点播种+PCM样本累积）/ 推送门控移交 fill() / SKIP 预算强制锚定
-- 附带修复：M31j 窗口图标与标题栏 logo 相对 exe 目录解析；AVCHK 音画偏差诊断日志
-- 经验教训：音频链路调试必须用自动化对照实验（合成视频+脚本驱动），
-  单靠用户描述+WARN 日志在多因素耦合下会反复误诊
+- **用户 WARN 日志 + 直接 ffprobe 其真实文件**（影视飓风iPhone摄影.mp4: vtb=1/90000, atb=1/44100, 10125s）：
+  - seek 7176.5 → 首帧"显示"4961.4 = 7176×(90000/44100) 触发末尾夹逼到 10125s 的数学指纹，分毫不差
+  - M31h 的 videoTb 换算在该类文件上放大目标 2.04 倍 → 拖到10分钟听到20分钟内容
+  - 冲到 EOF → closeQueue 永久闭队 → 切倍率也无声的28秒
+  - 同构大文件实测：解码帧 raw pts 为音频流原生单位（44100系），framePts(×videoTb) 显示减半
+    → 丢弃守卫永不满足无限磨帧；而另一合成文件解码帧却是 videoTb 系——
+    **解码器输出 pts 的 time_base 逐文件漂移，任何静态假设必错**
+- **修复**：
+  1. seekAudio 回归规范公式（音频流自身 time_base）
+  2. 运行时自校准：seek 后用首个音频 packet 的 dts（容器权威坐标）实测落点，
+     误差>1s 时按乘法增益 corrected=T×(T/est) 重试（≤2次），对线性误差与末尾夹逼均收敛
+  3. ALOOP 音频丢弃守卫改用样本数自累积位置 aContentSec_（与 chunk 自算标签同源），
+     彻底移除对 framePts 的依赖
+  4. main.cpp 增加 VPLAYER_AUTOTEST_SEEK 环境变量钩子（自动化测试用）
+- **验证**：
+  - 用户同构大文件(9541s)：AUTOTEST seek 7200 → 首推 pts=7200.000 精确命中；
+    SKIP/FORCE/SILENCE/丢弃/校准 全部为 0
+  - 合成文件回归：12 次 seek 全部落点 ±0.15s 内；SKIP=0 FORCE=0
+- **状态**：待用户实测确认

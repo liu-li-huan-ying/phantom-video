@@ -593,9 +593,15 @@ void Player::audioLoop() {
             audioDemuxer_->seekAudio(audioSeekTarget_.load());
             if (audioDecoder_) audioDecoder_->flushBuffers();
             audioSeeking_.store(false);
+            // M31k: 启动落点自校准。不同 mp4 的 seek 内部路径行为不一致，
+            // 静态 time_base 公式无法通吃（有的精准、有的放大 2.04 倍触发末尾截断）。
+            // 用首个音频 packet 的 dts（容器权威坐标）实测误差，加法修正重试。
+            calTarget_ = audioSeekTarget_.load();
+            calActive_ = true;
+            calTries_ = 0;
+            aContentSec_ = calTarget_;  // 音频帧内容位置从目标重新播种
             // 注意：不在此处解除 push 门控（setSeeking(false)）。
-            // M31i: 门控由 fill() 在消费 pendingSeek/pendingSpeed 并清空队列后统一放行，
-            // 否则 ALOOP 在 fill 消费前抢先灌入数秒内容，首块 pts 远离锚点触发 SKIP 风暴。
+            // 门控由 fill() 在消费 pendingSeek/pendingSpeed 并清空队列后统一放行。
             LOG_DBG("ALOOP", "seek done: clock=%.3f", audio_->clock());
         }
         PacketPtr pkt = audioDemuxer_->readPacket();
@@ -604,23 +610,52 @@ void Player::audioLoop() {
             break;
         }
         if (pkt->stream_index != audioDemuxer_->audioIndex()) continue;
+        if (calActive_) {
+            double tbSec = audioDemuxer_->audioTbSeconds();
+            double est = (pkt->dts != AV_NOPTS_VALUE && tbSec > 0.0)
+                             ? (double)pkt->dts * tbSec : calTarget_;
+            bool needFix = std::abs(calTarget_ - est) > 1.0 && calTries_ < 2;
+            // 乘法增益校正：corrected_in = T × (T / est)。对线性尺度误差一次收敛；
+            // 对"末尾截断"(est≈duration) 也能按比例回拉（additive 会负值乒乓）。
+            double corrected = needFix
+                ? ((est > 0.5 && calTarget_ > 0.5)
+                       ? calTarget_ * (calTarget_ / est)
+                       : calTarget_ + (calTarget_ - est))
+                : calTarget_;
+            if (needFix) {
+                LOG_WARN("DEMUX", "audio seek recalibrate #%d: landed=%.3f want=%.3f -> retry %.3f",
+                         calTries_ + 1, est, calTarget_, corrected);
+                audioDemuxer_->seekAudio(corrected);
+                if (audioDecoder_) audioDecoder_->flushBuffers();
+                ++calTries_;
+                continue;
+            }
+            if (calTries_ > 0)
+                LOG_INFO("DEMUX", "audio seek calibrated: landed=%.3f want=%.3f tries=%d",
+                         est, calTarget_, calTries_);
+            calActive_ = false;
+        }
         if (!audioDecoder_ || !audioDecoder_->send(pkt.get())) continue;
             while (FramePtr f = audioDecoder_->receive()) {
                 if (seekRequested() || audioSeekPending_.load() || stop_.load()) break;
                 if (audioSeeking_.load()) {
-                    LOG_DBG("ALOOP", "dropping frame during seek: pts=%.3f", framePts(f));
+                    LOG_DBG("ALOOP", "dropping frame during seek: pts=%.3f", aContentSec_);
                     continue;
                 }
-                double fp = framePts(f);
-                if (fp < dropUntil_.load()) continue;
+                // M31k: 内容位置自累积（不信任 framePts——其 time_base 随文件在
+                // 44100/90000 系间漂移，曾致丢弃守卫永不满足而无限磨帧）
+                double fpos = aContentSec_;
+                if (f->sample_rate > 0)
+                    aContentSec_ += (double)f->nb_samples / (double)f->sample_rate;
+                if (fpos < dropUntil_.load()) continue;
                 double seekTarget = audioSeekTarget_.load();
-                if (seekTarget > 0.0 && fp < seekTarget - 0.1) {
+                if (seekTarget > 0.0 && fpos < seekTarget - 0.1) {
                     // M31h: seek 后快进丢弃。正常应仅几帧；若大量出现说明 seek 落点偏差
                     static int skipRun = 0;
                     skipRun++;
                     if (skipRun == 1 || skipRun % 500 == 0) {
                         LOG_WARN("ALOOP", "post-seek discard x%d: pts=%.3f target=%.3f (gap=%.3fs)",
-                                 skipRun, fp, seekTarget, seekTarget - fp);
+                                 skipRun, fpos, seekTarget, seekTarget - fpos);
                     }
                     continue;
                 }
@@ -628,7 +663,7 @@ void Player::audioLoop() {
                     if (seekRequested() || audioSeekPending_.load() || stop_.load()) break;
                     std::this_thread::sleep_for(std::chrono::milliseconds(1));
                 }
-                LOG_TRACE("ALOOP", "push: pts=%.3f clock=%.3f", framePts(f), audio_->clock());
+                LOG_TRACE("ALOOP", "push: pts=%.3f clock=%.3f", fpos, audio_->clock());
                 if (seekRequested() || stop_.load()) break;
         }
     }

@@ -17,6 +17,7 @@ public:
     PacketPtr readPacket();
     bool seek(double seconds);
     bool seekAudio(double seconds);  // 音频流专用 seek（用 audioIndex_ + audio time_base）
+    double audioTbSeconds() const;   // 音频流 time_base 秒值（自校准 seek 用，M31k）
 
     int videoIndex() const { return videoIndex_; }
     int audioIndex() const { return audioIndex_; }

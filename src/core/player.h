@@ -112,6 +112,13 @@ private:
     std::atomic<bool> audioSeeking_{ false };  // M18: seek 期间跳过旧帧
     double lastAudioPts_{ -1e9 };              // M18: 检测音频 PTS 跳变
     std::atomic<bool> seekFirstFrame_{ false };
+    // M31k: 音频 seek 落点自校准状态（仅 audioLoop 线程访问）
+    double calTarget_ = 0.0;
+    bool calActive_ = false;
+    int calTries_ = 0;
+    // M31k: 音频帧内容位置自累积（解码帧 pts 的 time_base 随文件而异不可信，
+    // 与 AudioOutput 的 chunk 自算标签同源：按 PCM 样本数推进）
+    double aContentSec_ = 0.0;
     Uint32 lastSeekTime_ = 0;                    // M17: seek 合并 debounce
 
     // UI 进度条冻结（seek / 切倍速期间不回退）

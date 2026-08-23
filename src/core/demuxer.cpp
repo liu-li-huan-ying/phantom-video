@@ -78,17 +78,21 @@ bool Demuxer::seek(double seconds) {
 bool Demuxer::seekAudio(double seconds) {
     if (audioIndex_ < 0) return false;
     AVStream* st = ctx_->streams[audioIndex_];
-    // M31h: 本容器族所有流解码后 PTS 均为视频流 time_base 单位（M31e 实证：
-    // chunk.pts 需乘 video time_base 才正确）。seek 目标必须用同一尺度换算，
-    // 否则落点 = 目标 × (audio_den/video_den)，ALOOP 被迫静默快进数十秒音频，
-    // 造成与跳转距离成正比的静音卡顿。
-    AVStream* vs = videoStream();
-    AVRational tb = (vs && vs->time_base.num > 0) ? vs->time_base : st->time_base;
-    int64_t ts = av_rescale_q((int64_t)(seconds * AV_TIME_BASE), AV_TIME_BASE_Q, tb);
-    LOG_DBG("DEMUX", "seekAudio: seconds=%.3f idx=%d audio_tb=%d/%d seek_tb=%d/%d ts=%ld",
-            seconds, audioIndex_, st->time_base.num, st->time_base.den,
-            tb.num, tb.den, (long)ts);
+    // M31k: 回归规范公式（ts 用音频流自身 time_base）。实测不同 mp4 的 seek 内部路径
+    // 行为不一致（合成文件 videoTb=1/15360 时 M31h 公式落点精准，用户文件 1/90000 时
+    // 却放大 2.04 倍触发末尾截断），静态公式无法通吃。落点误差由 ALOOP 的
+    // 自校准机制用 packet dts 实测并加法修正（见 player.cpp）。
+    int64_t ts = av_rescale_q((int64_t)(seconds * AV_TIME_BASE), AV_TIME_BASE_Q, st->time_base);
+    LOG_DBG("DEMUX", "seekAudio: seconds=%.3f idx=%d audio_tb=%d/%d ts=%ld",
+            seconds, audioIndex_, st->time_base.num, st->time_base.den, (long)ts);
     return av_seek_frame(ctx_, audioIndex_, ts, AVSEEK_FLAG_BACKWARD) >= 0;
+}
+
+double Demuxer::audioTbSeconds() const {
+    if (audioIndex_ < 0) return 0.0;
+    AVStream* st = ctx_->streams[audioIndex_];
+    if (st->time_base.num <= 0) return 0.0;
+    return av_q2d(st->time_base);
 }
 
 AVStream* Demuxer::videoStream() const {
