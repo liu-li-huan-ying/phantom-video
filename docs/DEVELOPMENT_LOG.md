@@ -1132,3 +1132,12 @@
 
 - **M32b ✅（commit 6ca553d）**：底部控制栏两行布局完成——三段渐变底、进度条(白.18轨道/hover 4→6px/buffered 42% 白.30/accent 蓝 fill/13px 白圆 thumb)、行1(prev34/play42白底深icon/next34/时间灰字)、行2(字幕=内封轨循环切换、倍速+蓝色数值、画质占位、音量钮+横滑条拖拽、设置占位、全屏)、倍速菜单重锚定。main.cpp 点击区全部重写为 inR 命中测试。
 - 待做：M32c 顶栏 / M32d 弹出菜单精修 / M32e 设置模态 / M32f 播放列表卡片化 / M32g Toast+中央钮+扫描线
+
+- **M32c 实施方案（下一环节）**：顶部栏复刻
+  - 视觉：stage 内覆盖式 52px 顶栏，黑 .55→0 渐变；左=文件名标题(GDI 白14px)；右=截图/画中画/播放列表/最小化/最大化/关闭 六个 34px 图标钮(svgicon 已有 close/minimize/maximize/list/camera/pip path)
+  - 关键决策：
+    1. CustomTitlebar 保留 WndProc 子类化（窗口拖拽依赖它）但跳过其 draw()，视觉由新顶栏接管
+    2. 真实动作接线：截图=当前帧 IMG_SavePNG 到 exe/logs/shots/；播放列表=panel 显隐切换；最小化=SDL_MinimizeWindow；最大化=SDL_MaximizeWindow/Restore 切换；关闭=退出主循环；画中画=占位 toast
+    3. 章节 chips：暂不实现（无章节数据源），预留 theme 中样式
+  - 命中测试：main.cpp 点击链最前端拦截 my<52 区域
+  - 验收：拖拽/双击最大化/截图落盘/列表开合 全部可用
