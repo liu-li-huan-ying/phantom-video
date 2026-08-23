@@ -422,7 +422,7 @@ auto args = utf8Args();
                         nextTrack(); hitControl = true;
                     }
                     // ---- 行2：字幕 / 倍速 / 画质 / 音量 / 设置 / 全屏 ----
-                    else if (inR(lay.subX, lay.row2Y, 44, 28)) {
+                    else if (inR(lay.subX, lay.row1Y + 4, 44, 34)) {
                         // 字幕：内封字幕轨循环切换（-1=关闭）
                         int cnt = player.subtitleStreamCount();
                         if (cnt <= 0) {
@@ -438,7 +438,7 @@ auto args = utf8Args();
                         }
                         hitControl = true;
                     }
-                    else if (inR(lay.spdX - 9, lay.row2Y, 80, 28)) {
+                    else if (inR(lay.spdX - 9, lay.row1Y + 4, 84, 34)) {
                         vrender.toggleSpeedMenu();
                         volHideAt = SDL_GetTicks() + 2000;
                         hitControl = true;
@@ -460,27 +460,27 @@ auto args = utf8Args();
                         }
                         if (!inMenu) vrender.setSpeedMenuOpen(false);
                     }
-                    else if (inR(lay.qualX, lay.row2Y, 48, 28)) {
+                    else if (inR(lay.qualX, lay.row1Y + 4, 48, 34)) {
                         vrender.showToast("本地播放，已是最佳画质");
                         hitControl = true;
                     }
-                    else if (inR(lay.volBxX, lay.row2Y, 34, 34)) {
+                    else if (inR(lay.volBxX, lay.row1Y + 4, 34, 34)) {
                         player.toggleMute();
                         volHideAt = SDL_GetTicks() + 2000;
                         hitControl = true;
                     }
-                    else if (inR(lay.volSlX, lay.row2Y + 8, lay.volSlW, 18)) {
+                    else if (inR(lay.volSlX, lay.row1Y + 12, lay.volSlW, 18)) {
                         draggingVolume = true;
                         float v = (float)(mx - lay.volSlX) / lay.volSlW;
                         if (v < 0) v = 0; if (v > 1) v = 1;
                         player.setVolume(v == 0 ? 0.0001f : v);
                         hitControl = true;
                     }
-                    else if (inR(lay.setX, lay.row2Y, 44, 28)) {
+                    else if (inR(lay.setX, lay.row1Y + 4, 44, 34)) {
                         vrender.showToast("设置面板开发中");
                         hitControl = true;
                     }
-                    else if (inR(lay.fs2X, lay.row2Y, 34, 34)) {
+                    else if (inR(lay.fs2X, lay.row1Y + 4, 34, 34)) {
                         fullscreen = !fullscreen;
                         SDL_SetWindowFullscreen(win,
                             fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);

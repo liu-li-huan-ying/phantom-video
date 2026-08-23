@@ -610,27 +610,30 @@ ControlLayout ControlLayout::compute(int winW, int winH, int panelWidth) {
     ControlLayout l;
     const int mL = 16, mR = 16;
     int areaW = winW - panelWidth;
-    // 总高：seek带18 + 4 + 行1(42) + 6 + 行2(28) + 底距10 ≈ 108
-    l.top = winH - 110;
+    // 单行布局：seek带18 + 行(42) + 底距14 ≈ 76
+    l.top = winH - 76;
     l.progX = mL + 2;
     l.progW = areaW - mL - mR - 4;
     l.progY = l.top + 9;          // track 中心线
-    l.row1Y = l.top + 22;
-    constexpr int S = 34, P = 42, G = 8;
+    l.row1Y = l.top + 20;         // 行顶（高42）
+    l.row2Y = l.row1Y + 7;        // 文本钮命中带（高28）垂直居中于行
+    constexpr int S = 34, P = 40, G = 4;
+    // 左簇
     l.prevX = mL;
     l.playX = l.prevX + S + G;
     l.nextX = l.playX + P + G;
-    l.timeX = l.nextX + S + 14;
-    l.timeY = l.row1Y + 12;
-    l.row2Y = l.row1Y + P + 6;    // 行高28 → 距底 110-22-48-28=12 ✓
-    l.subX  = mL;
-    l.spdX  = l.subX + 48;
-    l.qualX = l.spdX + 76;
-    l.volBxX= l.qualX + 88;
-    l.volSlX= l.volBxX + 36;
-    l.volSlW= 70;
-    l.setX  = l.volSlX + l.volSlW + 6;
-    l.fs2X  = l.setX + 48;
+    l.timeX = l.nextX + S + 16;
+    l.timeY = l.row1Y + 13;
+    // 右簇（右对齐，向左排）
+    int x = areaW - mR;
+    l.fs2X  = x -= S;            x -= S + 10;
+    l.setX   = x -= 44;          x -= 44 + 12;
+    l.volSlW = 70;
+    l.volSlX = x -= l.volSlW;    x -= l.volSlW + 2;
+    l.volBxX = x -= S;           x -= S + 12;
+    l.qualX  = x -= 48;          x -= 48 + 12;
+    l.spdX   = x -= 84;          x -= 84 + 12;
+    l.subX   = x -= 44;
     // legacy 别名
     l.barY = l.top; l.btnY = l.row1Y; l.btnSize = P;
     l.modeX = l.subX; l.speedX = l.spdX; l.volX = l.volBxX; l.fsX = l.fs2X;
@@ -700,12 +703,13 @@ void VideoRenderer::drawControls(const RenderStats& stats) {
         drawIconOrTexture(renderer_, iconTexture(icon), icon,
                           b.x + b.w / 2, b.y + b.h / 2, iconSize, iconAlpha);
     };
-    // M32b: 播放大钮 —— 白底 .92 + 深色图标（CSS: rgba(255,255,255,.92)/#0b0b0b）
-    auto drawPlayBtn = [&](const Btn& b, Icon icon, bool hover) {
-        Uint8 bgA = (Uint8)((hover ? 255 : 235) * a / 255);
-        fillRoundedRect(renderer_, b.x, b.y, b.w, b.h, 8, 255, 255, 255, bgA);
+    // M32b.2: 播放钮 —— 无底色，与其他按钮同排，白色图标稍大
+    auto drawPlayBtn = [&](const Btn& b, bool hover) {
+        if (hover)
+            fillRoundedRect(renderer_, b.x, b.y, b.w, b.h, 8, 255, 255, 255,
+                            (Uint8)(20 * a / 255));
         svgicon::draw(renderer_, stats.playing && !stats.paused ? "pause" : "play",
-                      b.x + b.w / 2, b.y + b.h / 2, 20, 0x0b, 0x0b, 0x0b, (Uint8)a);
+                      b.x + b.w / 2, b.y + b.h / 2, 21, 255, 255, 255, (Uint8)a);
     };
 
     // ---- progress bar: full-width slim bar at the very bottom ----
@@ -852,30 +856,30 @@ void VideoRenderer::drawControls(const RenderStats& stats) {
             mouseX_ >= lay.qualX && mouseX_ < lay.qualX + 44 &&
             mouseY_ >= lay.row2Y && mouseY_ < lay.row2Y + 28,
             0xa1, 0xa1, 0xa6);
-    drawBtn(Btn{ lay.volBxX, lay.row2Y, 34, 34 },
+    drawBtn(Btn{ lay.volBxX, lay.row1Y + 4, 34, 34 },
             stats.muted ? Icon::Mute : Icon::Volume,
             mouseX_ >= lay.volBxX && mouseX_ < lay.volBxX + 34 &&
-            mouseY_ >= lay.row2Y && mouseY_ < lay.row2Y + 34, false);
+            mouseY_ >= lay.row1Y + 4 && mouseY_ < lay.row1Y + 38, false);
     rowText(lay.setX, "设置",
             mouseX_ >= lay.setX && mouseX_ < lay.setX + 44 &&
             mouseY_ >= lay.row2Y && mouseY_ < lay.row2Y + 28,
             0xe4, 0xe4, 0xe7);
-    drawBtn(Btn{ lay.fs2X, lay.row2Y, 34, 34 },
+    drawBtn(Btn{ lay.fs2X, lay.row1Y + 4, 34, 34 },
             stats.fullscreen ? Icon::ExitFullscreen : Icon::Fullscreen,
             mouseX_ >= lay.fs2X && mouseX_ < lay.fs2X + 34 &&
-            mouseY_ >= lay.row2Y && mouseY_ < lay.row2Y + 34, false);
+            mouseY_ >= lay.row1Y + 4 && mouseY_ < lay.row1Y + 38, false);
 
     // 行1 传输钮（最后绘制保证在上层）
     drawBtn(prevBtn, Icon::Prev, hit(prevBtn), false);
-    drawPlayBtn(playBtn, Icon::Pause, hit(playBtn));
+    drawPlayBtn(playBtn, hit(playBtn));
     drawBtn(nextBtn, Icon::Next, hit(nextBtn), false);
 
     // M32b: 音量横条（volwrap hover 或拖动时显示在音量钮右侧）
     {
-        Btn volWrap{ lay.volBxX, lay.row2Y, 34 + 6 + lay.volSlW, 34 };
+        Btn volWrap{ lay.volBxX, lay.row1Y + 4, 34 + 6 + lay.volSlW, 34 };
         bool volHover = hit(volWrap);
         if (volHover || stats.draggingVolume) {
-            int slx = lay.volSlX, sly = lay.row2Y + 15;
+            int slx = lay.volSlX, sly = lay.row1Y + 21;
             fillRoundedRect(renderer_, slx, sly - 2, lay.volSlW, 4, 2,
                             255, 255, 255, (Uint8)(51 * a / 255));
             float v = stats.muted ? 0.f : stats.volume;
