@@ -1255,9 +1255,9 @@ void VideoRenderer::drawPauseOverlay(const RenderStats& stats) {
     // M32g: 效果图中央播放钮 —— 72px 圆、黑.55底、白.75描边
     {
         const int D = 72;
-        fillRR(renderer_, cx - D/2 - 2, cy - D/2 - 2, D + 4, D + 4, D/2 + 2,
+        fillRoundedRect(renderer_, cx - D/2 - 2, cy - D/2 - 2, D + 4, D + 4, D/2 + 2,
                255, 255, 255, (Uint8)(a * 0.75f / 255));
-        fillRR(renderer_, cx - D/2, cy - D/2, D, D, D/2,
+        fillRoundedRect(renderer_, cx - D/2, cy - D/2, D, D, D/2,
                0, 0, 0, (Uint8)(a * 0.55f / 255));
         svgicon::draw(renderer_,
                       pauseOverlayIcon_ == PauseIcon::Play ? "play" : "pause",
