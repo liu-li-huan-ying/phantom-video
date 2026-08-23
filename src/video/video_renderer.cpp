@@ -15,6 +15,7 @@ extern "C" {
 #include <vector>
 
 #include "ui/easing.h"
+#include "ui/svgicon.h"
 #include <windows.h>
 
 static const unsigned char kDigitFont[][7] = {
@@ -71,7 +72,7 @@ static void formatTimeText(char* buf, size_t n, double sec) {
 
 // ---- vector icon drawing ----
 
-static void drawIcon(SDL_Renderer* r, Icon icon, int cx, int cy, int size, int alpha) {
+static void drawIconLegacy(SDL_Renderer* r, Icon icon, int cx, int cy, int size, int alpha) {
     SDL_SetRenderDrawColor(r, 255, 255, 255, alpha);
     float s = (float)size / 24.0f;
     auto px = [&](float x) { return (int)std::lround(cx + x * s); };
@@ -185,6 +186,28 @@ static void drawIcon(SDL_Renderer* r, Icon icon, int cx, int cy, int size, int a
         break;
     }
     }
+}
+
+// M32a: 图标绘制统一入口 —— 优先使用效果图原始 SVG path 光栅化结果（1:1 形状），
+// 未收录的图标（播放模式等）回退旧像素实现。
+static void drawIcon(SDL_Renderer* r, Icon icon, int cx, int cy, int size, int alpha) {
+    const char* id = nullptr;
+    switch (icon) {
+    case Icon::Play:          id = "play"; break;
+    case Icon::Pause:         id = "pause"; break;
+    case Icon::Prev:          id = "prev"; break;
+    case Icon::Next:          id = "next"; break;
+    case Icon::Volume:        id = "volume"; break;
+    case Icon::Mute:          id = "mute"; break;
+    case Icon::Fullscreen:    id = "full"; break;
+    case Icon::ExitFullscreen:id = "exitfull"; break;
+    default: break;
+    }
+    if (id) {
+        svgicon::draw(r, id, cx, cy, size, 255, 255, 255, (Uint8)alpha);
+        return;
+    }
+    drawIconLegacy(r, icon, cx, cy, size, alpha);
 }
 
 // ---- icon PNG textures (Material Icons, Apache 2.0) ----
@@ -322,6 +345,7 @@ bool VideoRenderer::init(SDL_Window* window) {
 
 void VideoRenderer::shutdown() {
     clearStyledSubtitle();
+    svgicon::shutdown();
     assRenderer_.shutdown();
     assRendererInit_ = false;
     destroySubtitleTexture();
