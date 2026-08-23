@@ -994,3 +994,22 @@
   - `writeHead_` 正常递增（4.621 → 9.265），无 REANCHOR SKIP 或 SILENCE 警告
   - 音频正常播放
 - **状态**：修复完成，待提交
+
+### 阶段 M31f：变速后 reanchor SKIP 永久静音修复 ✅ 完成
+
+- **任务**：修复 M31e 后仍存在的变速（尤其慢放 <1x）后失声问题
+- **根因分析**：
+  - 日志显示：每次 pendingSpeed 消费后，queue 被清空、writeHead_=anchor、reanchor_=true
+  - 但 audioLoop 的解码器输出位置与 anchor 存在竞态差距（解码器已读到 anchor 之后8s+）
+  - 新 chunk.pts 远离 writeHead_（diff >2s）→ REANCHOR SKIP → 所有后续 chunk 被丢弃 → 永久静音
+  - 47,806 次 REANCHOR SKIP，0 次成功 reanchor（速度变更场景）
+  - 慢放时更严重：speed=0.25 时 writeHead_ 推进极慢（0.006s/callback），解码器持续产出 pts=3230+ 的 chunk，差距持续扩大
+- **修复**：
+  - `src/audio/audio_output.cpp` REANCHOR 逻辑：移除2秒阈值丢弃机制
+  - 旧：diff >2s → REANCHOR SKIP（丢弃 chunk，reanchor_ 永不清除）
+  - 新：无论 diff 多大，始终接受第一个 chunk 并设置 writeHead_=chunk.pts、reanchor_=false
+  - diff >2s 时记录 DEBUG 日志 `REANCHOR JUMP`（便于诊断，但不丢弃数据）
+- **测试**：
+  - 构建成功，`--debug` 模式运行 15 秒无 REANCHOR SKIP / SILENCE
+  - 需用户实际操作变速+跳转验证
+- **状态**：修复完成，待提交

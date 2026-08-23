@@ -367,16 +367,14 @@ void AudioOutput::fill(Uint8* stream, int len) {
             if (writeHead_ < 0.0 || reanchor_) {
                 double diff = current_.pts - writeHead_;
                 if (reanchor_ && writeHead_ > 0.0 && (diff > 2.0 || diff < -2.0)) {
-                    LOG_WARN("FILL","REANCHOR SKIP: chunk.pts %.3f way off writeHead_ %.3f (diff=%.3f), discarding chunk",
-                        current_.pts, writeHead_, diff);
-                    current_.data.clear();
-                    offset_ = 0;
-                } else {
+                    LOG_DBG("FILL","REANCHOR: writeHead_ %.3f -> chunk.pts %.3f (JUMP %.3fs) speed=%.2f",
+                        writeHead_, current_.pts, diff, speed_.load());
+                } else if (reanchor_) {
                     LOG_DBG("FILL","REANCHOR: writeHead_ %.3f -> chunk.pts %.3f speed=%.2f",
                         writeHead_, current_.pts, speed_.load());
-                    writeHead_ = current_.pts;
-                    reanchor_ = false;
                 }
+                writeHead_ = current_.pts;
+                reanchor_ = false;
             }
         }
         }
