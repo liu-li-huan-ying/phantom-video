@@ -543,6 +543,27 @@ auto args = utf8Args();
                 case SDLK_i:
                     osd.toggleInfo();
                     break;
+                case SDLK_b: {
+                    // M31b: 字幕轨切换（循环 + 关闭）
+                    int count = player.subtitleStreamCount();
+                    if (count > 0) {
+                        int cur = player.currentSubtitleTrack();
+                        int next = cur + 1;
+                        if (next >= count) next = -1;  // -1 = 关闭
+                        if (next >= 0) {
+                            player.switchSubtitleTrack(next);
+                            std::string msg = "Sub: " + player.subtitleStreamName(next);
+                            vrender.showToast(msg.c_str());
+                        } else {
+                            player.switchSubtitleTrack(-1);
+                            vrender.showToast("Sub: OFF");
+                        }
+                    } else {
+                        vrender.showToast("No subtitle tracks");
+                    }
+                    volHideAt = SDL_GetTicks() + 2000;
+                    break;
+                }
                 case SDLK_MINUS:
                 case SDLK_KP_MINUS: {
                     double d = player.subtitleDelay() - 0.5;

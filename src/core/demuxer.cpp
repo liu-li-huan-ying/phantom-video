@@ -15,6 +15,20 @@ bool Demuxer::open(const std::string& path) {
     audioIndex_ = av_find_best_stream(ctx_, AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0);
     subtitleIndex_ = av_find_best_stream(ctx_, AVMEDIA_TYPE_SUBTITLE, -1, -1, nullptr, 0);
 
+    // M31b: 枚举所有字幕流
+    subtitleStreams_.clear();
+    for (unsigned i = 0; i < ctx_->nb_streams; ++i) {
+        if (ctx_->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_SUBTITLE) {
+            SubtitleStreamInfo info;
+            info.index = (int)i;
+            AVDictionaryEntry* lang = av_dict_get(ctx_->streams[i]->metadata, "language", nullptr, 0);
+            if (lang && lang->value) info.language = lang->value;
+            AVDictionaryEntry* title = av_dict_get(ctx_->streams[i]->metadata, "title", nullptr, 0);
+            if (title && title->value) info.title = title->value;
+            subtitleStreams_.push_back(std::move(info));
+        }
+    }
+
     if (ctx_->duration != AV_NOPTS_VALUE) {
         duration_ = (double)ctx_->duration / AV_TIME_BASE;
     } else {
@@ -95,4 +109,10 @@ const AVCodecParameters* Demuxer::audioCodecpar() const {
 const AVCodecParameters* Demuxer::subtitleCodecpar() const {
     if (subtitleIndex_ < 0) return nullptr;
     return ctx_->streams[subtitleIndex_]->codecpar;
+}
+
+const AVCodecParameters* Demuxer::subtitleCodecparByIndex(int idx) const {
+    if (idx < 0 || idx >= (int)ctx_->nb_streams) return nullptr;
+    if (ctx_->streams[idx]->codecpar->codec_type != AVMEDIA_TYPE_SUBTITLE) return nullptr;
+    return ctx_->streams[idx]->codecpar;
 }

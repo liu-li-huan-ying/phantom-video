@@ -108,10 +108,19 @@ bool Player::openFile(const std::string& path) {
     subtitleLoaded_.store(false);
     subtitleIndex_ = videoDemuxer_->subtitleIndex();
     subtitleDecoder_.reset();
+    currentSubtitleTrack_ = -1;
     if (subtitleIndex_ >= 0) {
         auto sdec = std::make_unique<SubtitleDecoder>();
         if (sdec->open(videoDemuxer_->subtitleCodecpar()))
             subtitleDecoder_ = std::move(sdec);
+        // 找到默认字幕轨在 vector 中的索引
+        const auto& streams = videoDemuxer_->subtitleStreams();
+        for (int i = 0; i < (int)streams.size(); ++i) {
+            if (streams[i].index == subtitleIndex_) {
+                currentSubtitleTrack_ = i;
+                break;
+            }
+        }
     }
 
     path_ = path;
@@ -285,6 +294,57 @@ bool Player::loadExternalSubtitle(const std::string& path) {
     subtitles_ = std::move(track);
     subtitleLoaded_.store(true);
     return true;
+}
+
+// M31b: 多字幕轨切换
+int Player::subtitleStreamCount() const {
+    if (!videoDemuxer_) return 0;
+    return videoDemuxer_->subtitleStreamCount();
+}
+
+std::string Player::subtitleStreamName(int idx) const {
+    if (!videoDemuxer_) return {};
+    const auto& streams = videoDemuxer_->subtitleStreams();
+    if (idx < 0 || idx >= (int)streams.size()) return {};
+    const auto& s = streams[idx];
+    if (!s.title.empty()) return s.title;
+    if (!s.language.empty()) return s.language;
+    return "Track " + std::to_string(idx + 1);
+}
+
+bool Player::switchSubtitleTrack(int idx) {
+    if (!videoDemuxer_) return false;
+
+    // 关闭旧解码器
+    subtitleDecoder_.reset();
+    subtitles_.clear();
+    subtitleLoaded_.store(false);
+
+    // idx == -1 表示关闭字幕
+    if (idx < 0) {
+        currentSubtitleTrack_ = -1;
+        subtitleIndex_ = -1;
+        LOG_INFO("SUB", "Subtitles disabled");
+        return true;
+    }
+
+    const auto& streams = videoDemuxer_->subtitleStreams();
+    if (idx >= (int)streams.size()) return false;
+
+    // 切换到新轨
+    currentSubtitleTrack_ = idx;
+    int streamIdx = streams[idx].index;
+    subtitleIndex_ = streamIdx;
+    const AVCodecParameters* par = videoDemuxer_->subtitleCodecparByIndex(streamIdx);
+    if (!par) return false;
+
+    auto sdec = std::make_unique<SubtitleDecoder>();
+    if (sdec->open(par)) {
+        subtitleDecoder_ = std::move(sdec);
+        LOG_INFO("SUB", "Switched to subtitle track %d (stream %d)", idx, streamIdx);
+        return true;
+    }
+    return false;
 }
 
 std::string Player::subtitleText(double t) const {

@@ -56,6 +56,12 @@ public:
     void setSubtitleDelay(double d) { subtitleDelay_.store(d); }
     double subtitleDelay() const { return subtitleDelay_.load(); }
 
+    // M31b: 多字幕轨切换
+    int subtitleStreamCount() const;
+    std::string subtitleStreamName(int idx) const;
+    int currentSubtitleTrack() const { return currentSubtitleTrack_; }
+    bool switchSubtitleTrack(int idx);
+
     // M30c: 媒体信息查询
     int videoWidth() const { return videoWidth_; }
     int videoHeight() const { return videoHeight_; }
@@ -123,6 +129,7 @@ private:
     int subtitleIndex_ = -1;
     std::unique_ptr<SubtitleDecoder> subtitleDecoder_;
     std::atomic<double> subtitleDelay_{ 0.0 };  // M31a: 字幕延迟（秒）
+    int currentSubtitleTrack_ = -1;              // M31b: 当前字幕轨索引
 
     double duration_ = 0.0;
     std::string path_;

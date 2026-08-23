@@ -1,7 +1,14 @@
 #pragma once
 #include <string>
+#include <vector>
 
 #include "core/types.h"
+
+struct SubtitleStreamInfo {
+    int index = -1;
+    std::string language;
+    std::string title;
+};
 
 class Demuxer {
 public:
@@ -22,10 +29,16 @@ public:
     const AVCodecParameters* audioCodecpar() const;
     const AVCodecParameters* subtitleCodecpar() const;
 
+    // M31b: 多字幕轨枚举
+    const std::vector<SubtitleStreamInfo>& subtitleStreams() const { return subtitleStreams_; }
+    int subtitleStreamCount() const { return (int)subtitleStreams_.size(); }
+    const AVCodecParameters* subtitleCodecparByIndex(int idx) const;
+
 private:
     AVFormatContext* ctx_ = nullptr;
     int videoIndex_ = -1;
     int audioIndex_ = -1;
     int subtitleIndex_ = -1;
     double duration_ = 0.0;
+    std::vector<SubtitleStreamInfo> subtitleStreams_;  // M31b
 };
