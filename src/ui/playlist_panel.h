@@ -17,6 +17,8 @@ public:
     void shutdown();
     void toggle();
     bool isOpen() const { return open_; }
+    // M32f.2: 面板内部不再自行开合，仅发出请求；窗口尺寸变化由主循环统一处理
+    bool consumeToggleRequest();
     int width() const;
     void setPlaylist(const Playlist* pl) { playlist_ = pl; }
 
@@ -53,6 +55,7 @@ private:
     int mx_ = 0, my_ = 0;  // 鼠标位置（供 draw 关闭按钮 hover 检测）
     int clickedIdx_ = -1;
     bool dragStarted_ = false;
+    bool toggleRequested_ = false;  // M32f.2: 内部开合请求（主循环消费）
 
     const Playlist* playlist_ = nullptr;
 

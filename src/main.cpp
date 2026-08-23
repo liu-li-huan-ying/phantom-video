@@ -281,6 +281,30 @@ auto args = utf8Args();
     auto nextTrack = [&]() {
         if (playlist.next()) openCurrent();
     };
+    // M32f.2: 播放列表开合 —— 窗口整体向右膨出 320px（播放器本体尺寸不变）
+    auto applyPlaylistToggle = [&]() {
+        constexpr int PW = 320;
+        bool opening = !panel.isOpen();
+        if (opening && (fullscreen || (SDL_GetWindowFlags(win) & SDL_WINDOW_MAXIMIZED))) {
+            vrender.showToast("退出全屏后再打开播放列表");
+            return;
+        }
+        int w = 0, h = 0;
+        SDL_GetWindowSize(win, &w, &h);
+        int newW = opening ? w + PW : std::max(640, w - PW);
+        if (opening) {
+            // 超出屏幕右缘则整体左移钳制
+            int di = SDL_GetWindowDisplayIndex(win);
+            SDL_Rect b{};
+            if (di < 0 || SDL_GetDisplayUsableBounds(di, &b) != 0) { b.x = 0; b.w = newW + 100; }
+            int px = 0, py = 0;
+            SDL_GetWindowPosition(win, &px, &py);
+            if (px + newW > b.x + b.w)
+                SDL_SetWindowPosition(win, std::max(b.x, b.x + b.w - newW), py);
+        }
+        SDL_SetWindowSize(win, newW, h);
+        panel.toggle();
+    };
     auto prevTrack = [&]() {
         if (playlist.prev()) openCurrent();
     };
@@ -417,7 +441,7 @@ auto args = utf8Args();
                             break;
                         }
                         case VideoRenderer::TB_PIP: vrender.showToast("画中画开发中"); break;      // pip
-                        case VideoRenderer::TB_LIST: panel.toggle(); break;
+                        case VideoRenderer::TB_LIST: applyPlaylistToggle(); break;
                         case VideoRenderer::TB_MIN: SDL_MinimizeWindow(win); break;
                         case VideoRenderer::TB_MAX:                                                  // 最大化/还原
                             if (SDL_GetWindowFlags(win) & SDL_WINDOW_MAXIMIZED)
@@ -463,6 +487,11 @@ auto args = utf8Args();
                     // M16: 播放列表面板事件优先处理
                     if (panel.handleMouseDown(mx, my, winW, winH)) {
                         vrender.setPanelWidth(panel.width());
+                        // M32f.2: 面板内部开合请求 → 窗口向右膨出/收回
+                        if (panel.consumeToggleRequest()) {
+                            applyPlaylistToggle();
+                            break;
+                        }
                         // 检查面板点击选曲
                         int clicked = panel.clickedIndex();
                         if (clicked >= 0 && clicked < (int)playlist.size()) {

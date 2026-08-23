@@ -82,6 +82,12 @@ void PlaylistPanel::toggle() {
     }
 }
 
+bool PlaylistPanel::consumeToggleRequest() {
+    if (!toggleRequested_) return false;
+    toggleRequested_ = false;
+    return true;
+}
+
 int PlaylistPanel::width() const {
     return open_ ? baseWidth_ : 0;
 }
@@ -342,22 +348,13 @@ bool PlaylistPanel::handleMouseDown(int mx, int my, int winW, int winH) {
 
     int w = width();
 
-    // 面板关闭按钮（左边界 X 图标）
-    if (open_ && w > 0) {
-        int panelX = winW - w;
-        if (mx >= panelX && mx < panelX + 28 && my >= panelTop && my < panelTop + kHeaderH) {
-            toggle();
-            return true;
-        }
-    }
-
     // 面板打开时的拖拽/点击在面板区域内处理
     if (w > 0) {
         int panelX = winW - w;
-        // M32f: 关闭钮点击（头部右侧）
+        // M32f: 关闭钮点击（头部右侧）—— 只发请求，窗口扩缩由主循环处理
         if (open_ && mx >= panelX + w - 14 - 28 && mx < panelX + w - 14 &&
             my >= panelTop + 8 && my < panelTop + 36) {
-            toggle();
+            toggleRequested_ = true;
             return true;
         }
         // 拖拽调整宽度
@@ -378,9 +375,9 @@ bool PlaylistPanel::handleMouseDown(int mx, int my, int winW, int winH) {
         if (mx >= panelX && my >= panelTop && my < panelBot) return true;
     }
 
-    // 面板关闭时：右边缘切换按钮
+    // 面板关闭时：右边缘切换按钮 —— 只发请求
     if (!open_ && mx >= winW - kEdgeW && mx < winW && my >= 0 && my < winH) {
-        toggle();
+        toggleRequested_ = true;
         return true;
     }
 
