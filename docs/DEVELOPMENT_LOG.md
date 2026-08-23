@@ -1005,11 +1005,15 @@
   - 47,806 次 REANCHOR SKIP，0 次成功 reanchor（速度变更场景）
   - 慢放时更严重：speed=0.25 时 writeHead_ 推进极慢（0.006s/callback），解码器持续产出 pts=3230+ 的 chunk，差距持续扩大
 - **修复**：
-  - `src/audio/audio_output.cpp` REANCHOR 逻辑：移除2秒阈值丢弃机制
-  - 旧：diff >2s → REANCHOR SKIP（丢弃 chunk，reanchor_ 永不清除）
-  - 新：无论 diff 多大，始终接受第一个 chunk 并设置 writeHead_=chunk.pts、reanchor_=false
-  - diff >2s 时记录 DEBUG 日志 `REANCHOR JUMP`（便于诊断，但不丢弃数据）
+  - `src/audio/audio_output.h`：新增 `reanchorSpeed_` 标志区分变速/seek 重锚
+  - `src/audio/audio_output.cpp`：pendingSpeed 设置 `reanchorSpeed_=true`，pendingSeek 设置 `reanchorSpeed_=false`
+  - **seek reanchor**：保留2秒阈值，检测失败的 seek
+  - **变速 reanchor**：无阈值，始终接受第一个 chunk 并锚定时钟
+  - JUMP 日志记录大偏移但不丢弃数据
+- **二次修复**（M31f.1）：
+  - M31f 初版完全移除阈值导致 seek 后音频位置错误
+  - 区分两种 reanchor 模式后，seek 仍保留2秒阈值检测失败跳转
 - **测试**：
-  - 构建成功，`--debug` 模式运行 15 秒无 REANCHOR SKIP / SILENCE
+  - 构建成功，`--debug` 模式运行验证
   - 需用户实际操作变速+跳转验证
 - **状态**：修复完成，待提交
