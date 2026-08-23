@@ -354,6 +354,12 @@ std::string Player::subtitleText(double t) const {
     return subtitles_.textAt(t + delay);
 }
 
+std::string Player::rawSubtitleText(double t) const {
+    if (!subtitleLoaded_.load() && !subtitleDecoder_) return {};
+    double delay = subtitleDelay_.load();
+    return subtitles_.rawDialogueAt(t + delay);
+}
+
 void Player::toggleMute() {
     muted_.store(!muted_.load());
     if (audio_) audio_->setVolume(muted_.load() ? 0.0f : volume_.load());

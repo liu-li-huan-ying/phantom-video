@@ -932,3 +932,43 @@
   - 新增文件：`src/ui/easing.h`
   - 修改文件：`video_renderer.h/cpp`（动画状态+绘制）、`main.cpp`（OSD/I键）、`osd.h/cpp`（字体扩展+drawInfoOverlay）、`player.h/cpp`（媒体信息查询）
 - **效果**：控件平滑过渡、信息显示一键切换、缩略图同步提取可靠
+
+### 阶段 M31：字幕增强（ASS 样式渲染器）✅ 完成
+
+- 任务：实现轻量 ASS override tag 解析器 + 渲染器，无需 libass 依赖链
+- **背景**：libass 需要 freetype/fontconfig/fribidi/harfbuzz/glib2 等 15-20 个 DLL ~30MB，影响打包/移植性
+- **方案**：参考 ASS.js 架构（解析→分段→渲染），使用 SDL_ttf 实现轻量渲染
+- **新增文件**：
+  - `src/subtitle/ass_renderer.h` — ASSRenderer 类定义
+  - `src/subtitle/ass_renderer.cpp` — 完整实现（~490 行）
+- **支持的 ASS override tags**：
+  - 样式：`\b`（粗体）、`\i`（斜体）、`\u`（下划线）、`\s`（删除线）
+  - 字体：`\fn`（字体名）、`\fs`（字号）、`\fscx/\fscy`（缩放）、`\fsp`（字间距）
+  - 颜色：`\c`、`\1c`-`\4c`（BGR+Alpha 格式）、`\alpha`、`\1a`
+  - 效果：`\bord`（描边宽度）、`\shad`（阴影深度）
+  - 定位：`\an`（对齐方式 1-9）
+  - 待支持（future）：`\pos`、`\move`、`\fad/\fade`、`\t`、`\clip`、`\frz`
+- **渲染流程**：
+  1. 解析 ASS 文件 [V4+ Styles] 节 → 存储样式表
+  2. Dialogue 行解析 override tags → 生成 StyledSegment 列表
+  3. 每个 segment 用 SDL_ttf 渲染（支持 outline 描边）
+  4. 按 alignment + margin 定位到视频帧
+- **架构改动**：
+  - SubtitleEvent 增加 `rawAss` 字段（保留原始 Dialogue 行含 tags）
+  - SubtitleTrack 增加 `rawDialogueAt()` + `assContent()` 接口
+  - RenderStats 增加 `rawSubtitle` 字段（传递原始 ASS 行到渲染器）
+  - VideoRenderer 持有 ASSRenderer 实例，`drawSubtitle()` 优先尝试 styled 渲染
+  - main.cpp `loadExternalSubtitle()` 在加载 .ass/.ssa 时自动解析样式
+- **SDL_ttf 集成**：
+  - 下载 SDL2_ttf 2.22.0（`G:\vedioplayer\dev\sdl2_ttf\`）
+  - CMakeLists.txt 新增 SDL_ttf 头文件路径 + 链接 + DLL 拷贝
+- **编译问题修复**：
+  - `TTF_Font` 前向声明与 `SDL_ttf.h` typedef 冲突 → 改用 `struct _TTF_Font; typedef struct _TTF_Font TTF_Font;`
+  - `ass_renderer.h` 缺少 `<map>` include
+  - `main.cpp` 缺少 `<fstream>` include（用于读取 ASS 文件内容）
+  - SDL_ttf 头文件路径嵌套（`include/SDL2/SDL2/`）→ CMake include path 修正
+- **测试**：
+  - 创建 `testdata/test.ass` + `testdata/4.ass`（4 种样式：Default/Bold/Color/Italic）
+  - 日志确认：4 styles parsed, rendered subtitle: 273x32 align=2 segs=1
+  - 编译通过，运行无崩溃
+- **状态**：代码完成，待用户实际观看带 ASS 字幕的视频验证效果

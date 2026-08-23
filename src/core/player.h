@@ -49,6 +49,7 @@ public:
     bool usingHardware() const { return hwDecode_.load(); }
     bool loadExternalSubtitle(const std::string& path);
     std::string subtitleText(double t) const;
+    std::string rawSubtitleText(double t) const;
     bool hasSubtitle() const { return subtitleLoaded_ || subtitleIndex_ >= 0; }
     AudioOutput& audio() { return *audio_; }
 

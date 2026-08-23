@@ -35,6 +35,7 @@ add_executable(vplayer ${PLAYER_SOURCES})
 target_include_directories(vplayer PRIVATE
   ${SDL2_INCLUDE_DIRS}
   "${DEV_DIR}/sdl2_image/x86_64-w64-mingw32/include/SDL2"
+  "${DEV_DIR}/sdl2_ttf/include/SDL2/SDL2"
   ${FFMPEG_INCLUDE_DIRS}
   "${DEV_DIR}/sonic"
   ${CMAKE_SOURCE_DIR}/src)
@@ -55,7 +56,8 @@ foreach(f ${SDL2_CFLAGS_OTHER})
 endforeach()
 
 target_link_libraries(vplayer PRIVATE ${SDL2_LINK} ${FFMPEG_LIBS} sonic shell32 dwmapi
-  "${DEV_DIR}/sdl2_image/x86_64-w64-mingw32/lib/libSDL2_image.dll.a")
+  "${DEV_DIR}/sdl2_image/x86_64-w64-mingw32/lib/libSDL2_image.dll.a"
+  "${DEV_DIR}/sdl2_ttf/lib/libSDL2_ttf.dll.a")
 
 # 拷贝运行时 DLL 到构建目录
 add_custom_command(TARGET vplayer POST_BUILD
@@ -67,6 +69,7 @@ add_custom_command(TARGET vplayer POST_BUILD
     "${FFMPEG_ROOT}/bin/swscale-10.dll"
     "${DEV_DIR}/sdl2/x86_64-w64-mingw32/bin/SDL2.dll"
     "${DEV_DIR}/sdl2_image/x86_64-w64-mingw32/bin/SDL2_image.dll"
+    "${DEV_DIR}/sdl2_ttf/bin/SDL2_ttf.dll"
     $<TARGET_FILE_DIR:vplayer>
   COMMENT "拷贝运行时 DLL")
 

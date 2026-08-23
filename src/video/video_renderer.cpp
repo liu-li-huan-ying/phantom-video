@@ -315,10 +315,15 @@ bool VideoRenderer::init(SDL_Window* window) {
         renderer_ = SDL_CreateRenderer(window, -1, 0);
         if (!renderer_) return false;
     }
+    assRenderer_.init(renderer_);
+    assRendererInit_ = true;
     return true;
 }
 
 void VideoRenderer::shutdown() {
+    clearStyledSubtitle();
+    assRenderer_.shutdown();
+    assRendererInit_ = false;
     destroySubtitleTexture();
     if (texture_) {
         SDL_DestroyTexture(texture_);
@@ -462,6 +467,27 @@ void VideoRenderer::destroySubtitleTexture() {
 }
 
 void VideoRenderer::drawSubtitle(const RenderStats& stats) {
+    // Try styled ASS rendering first
+    if (stats.rawSubtitle && *stats.rawSubtitle && assRendererInit_) {
+        std::string raw(stats.rawSubtitle);
+        if (raw != styledSubCache_) {
+            assRenderer_.freeRendered(styledSub_);
+            int winW = 0, winH = 0;
+            SDL_GetWindowSize(window_, &winW, &winH);
+            styledSub_ = assRenderer_.render(raw, winW, winH, 1920, 1080);
+            styledSubCache_ = raw;
+        }
+        if (!styledSub_.textures.empty()) {
+            for (size_t i = 0; i < styledSub_.textures.size(); ++i) {
+                SDL_RenderCopy(renderer_, styledSub_.textures[i],
+                               &styledSub_.srcRects[i], &styledSub_.dstRects[i]);
+            }
+            return;
+        }
+    }
+
+    // Fallback: plain text rendering (existing Win32 GDI method)
+    clearStyledSubtitle();
     if (!stats.subtitle || !*stats.subtitle) {
         destroySubtitleTexture();
         return;
@@ -541,6 +567,17 @@ void VideoRenderer::drawSubtitle(const RenderStats& stats) {
     SDL_GetWindowSize(window_, &winW, &winH);
     SDL_Rect dst{ (winW - subTexW_) / 2, winH - 60 - subTexH_ - 8, subTexW_, subTexH_ };
     SDL_RenderCopy(renderer_, (SDL_Texture*)subtitleTexture_, nullptr, &dst);
+}
+
+void VideoRenderer::setAssContent(const std::string& assContent) {
+    if (assRendererInit_) {
+        assRenderer_.loadStyles(assContent);
+    }
+}
+
+void VideoRenderer::clearStyledSubtitle() {
+    assRenderer_.freeRendered(styledSub_);
+    styledSubCache_.clear();
 }
 
 ControlLayout ControlLayout::compute(int winW, int winH, int panelWidth) {

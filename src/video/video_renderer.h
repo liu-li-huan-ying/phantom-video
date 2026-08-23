@@ -3,6 +3,7 @@
 #include <functional>
 #include <string>
 #include "core/types.h"
+#include "subtitle/ass_renderer.h"
 
 struct RenderStats {
     bool playing = true;
@@ -17,6 +18,7 @@ struct RenderStats {
     int playMode = 1;  // PlayMode: 0=Single 1=Loop 2=Shuffle
     bool draggingVolume = false;
     const char* subtitle = nullptr;
+    const char* rawSubtitle = nullptr;  // 原始 ASS Dialogue 行（含 override tags）
     std::function<void()> onPlayPause;
     std::function<void()> onToggleFullscreen;
     std::function<bool(double)> onSeekTo;
@@ -67,6 +69,10 @@ public:
 
     // M15: 缩略图预览
     void setThumbnail(SDL_Texture* tex, int w, int h, double timeSec);
+
+    // M31: 轻量 ASS 渲染
+    void setAssContent(const std::string& assContent);
+    void clearStyledSubtitle();
 
     // M16: 暂停叠加图标
     enum class PauseIcon { None, Play, Pause };
@@ -141,4 +147,10 @@ private:
 
     bool wasProgHover_ = false;         // 上一帧进度条 hover 状态
     bool wasControlsHover_ = false;     // 上一帧控件区 hover 状态
+
+    // M31: 轻量 ASS 渲染
+    ASSRenderer assRenderer_;
+    RenderedSubtitle styledSub_;        // 当前渲染的样式字幕
+    std::string styledSubCache_;        // 样式字幕缓存（原始 ASS 行）
+    bool assRendererInit_ = false;
 };

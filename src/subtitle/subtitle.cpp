@@ -29,6 +29,15 @@ std::string SubtitleTrack::textAt(double t) const {
     return out;
 }
 
+std::string SubtitleTrack::rawDialogueAt(double t) const {
+    std::string out;
+    for (const auto& e : events_) {
+        if (t < e.start) break;
+        if (t >= e.start && t < e.end) out = e.rawAss;
+    }
+    return out;
+}
+
 static std::string readWholeFile(const std::string& path) {
     std::ifstream f(path, std::ios::binary);
     if (!f) return {};
@@ -135,6 +144,7 @@ std::string SubtitleTrack::assDialogueText(const std::string& line) {
 bool SubtitleTrack::loadAss(const std::string& path) {
     std::string content = readWholeFile(path);
     if (content.empty()) return false;
+    assContent_ = content;
 
     std::istringstream in(content);
     std::string line;
@@ -162,8 +172,14 @@ bool SubtitleTrack::loadAss(const std::string& path) {
             if (comma == std::string::npos) break;
             pos = comma + 1;
         }
-        std::string text = assStripTags(line.substr(pos));
-        add(parseAssTime(startS), parseAssTime(endS), text);
+        std::string rawText = line.substr(pos);
+        std::string text = assStripTags(rawText);
+        SubtitleEvent ev;
+        ev.start = parseAssTime(startS);
+        ev.end = parseAssTime(endS);
+        ev.text = std::move(text);
+        ev.rawAss = "Dialogue: 0," + startS + "," + endS + ",Default,,0,0,0,," + rawText;
+        events_.push_back(std::move(ev));
     }
     std::sort(events_.begin(), events_.end(),
               [](const SubtitleEvent& a, const SubtitleEvent& b) { return a.start < b.start; });

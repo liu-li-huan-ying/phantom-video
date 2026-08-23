@@ -5,6 +5,7 @@
 *.dll
 *.pdb
 third_party/bin/
+dev/
 *.tmp
 *.log
 c.json

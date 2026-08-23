@@ -9,6 +9,7 @@
 #include <dwmapi.h>
 
 #include <cstdio>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -55,7 +56,8 @@ static std::string replaceExt(const std::string& path, const char* newExt) {
     return path + newExt;
 }
 
-static void loadExternalSubtitle(Player& player, const std::string& video) {
+static void loadExternalSubtitle(Player& player, const std::string& video,
+                                 VideoRenderer* vrender = nullptr) {
     for (const char* ext : { ".srt", ".ass", ".ssa", ".sub" }) {
         std::string cand = replaceExt(video, ext);
         FILE* f = std::fopen(cand.c_str(), "rb");
@@ -63,6 +65,15 @@ static void loadExternalSubtitle(Player& player, const std::string& video) {
             std::fclose(f);
             if (player.loadExternalSubtitle(cand)) {
                 std::printf("已加载字幕: %s\n", cand.c_str());
+                // Set ASS styles on renderer if available
+                if (vrender && (ext[1] == 'a' || ext[1] == 's')) {  // .ass or .ssa
+                    std::ifstream ifs(cand, std::ios::binary);
+                    if (ifs) {
+                        std::string content((std::istreambuf_iterator<char>(ifs)),
+                                            std::istreambuf_iterator<char>());
+                        vrender->setAssContent(content);
+                    }
+                }
                 return;
             }
         }
@@ -211,8 +222,8 @@ auto args = utf8Args();
             std::snprintf(title, sizeof(title), "VPlayer - %s", base.c_str());
         SDL_SetWindowTitle(win, title);
         titlebar.setTitle(title);
-        if (player.openFile(p)) {
-            loadExternalSubtitle(player, p);
+          if (player.openFile(p)) {
+            loadExternalSubtitle(player, p, &vrender);
             thumbnail.open(p);  // M15: 打开缩略图提取器
             if (cfg.resume) {
                 auto it = cfg.history.find(p);
@@ -278,9 +289,9 @@ auto args = utf8Args();
             case SDL_QUIT:
                 running = false;
                 break;
-            case SDL_DROPFILE:
-                if (player.openFile(e.drop.file)) {
-                    loadExternalSubtitle(player, e.drop.file);
+              case SDL_DROPFILE:
+                  if (player.openFile(e.drop.file)) {
+                    loadExternalSubtitle(player, e.drop.file, &vrender);
                     thumbnail.open(e.drop.file);
                     playlist.scanDirectory(e.drop.file);
                     std::string base = e.drop.file;
@@ -621,12 +632,17 @@ auto args = utf8Args();
                 stats.playMode = (int)playlist.mode();
                 stats.draggingVolume = draggingVolume;
                 static std::string subtitleBuf;
+                static std::string rawSubBuf;
                 if (player.hasSubtitle()) {
                     subtitleBuf = player.subtitleText(stats.clock);
+                    rawSubBuf = player.rawSubtitleText(stats.clock);
                     stats.subtitle = subtitleBuf.c_str();
+                    stats.rawSubtitle = rawSubBuf.c_str();
                 } else {
                     subtitleBuf.clear();
+                    rawSubBuf.clear();
                     stats.subtitle = nullptr;
+                    stats.rawSubtitle = nullptr;
                 }
                 stats.onPlayPause = [&]() { player.togglePause(); return true; };
                 stats.onToggleFullscreen = [&]() { fullscreen = !fullscreen; SDL_SetWindowFullscreen(win, fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0); return true; };
