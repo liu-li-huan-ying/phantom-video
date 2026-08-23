@@ -69,7 +69,7 @@ LRESULT CALLBACK CustomTitlebar::wndProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
             RECT rc;
             GetClientRect(hwnd_, &rc);
             SDL_Rect rs[6];
-            VideoRenderer::topBarRects(rc.right - rc.left, rs);
+            VideoRenderer::topBarRects(rc.right - rc.left - VideoRenderer::overlayPanelWidth(), rs);
             for (int i = 0; i < 6; ++i)
                 if (x >= rs[i].x && x < rs[i].x + rs[i].w && y >= rs[i].y && y < rs[i].y + rs[i].h)
                     return 1;

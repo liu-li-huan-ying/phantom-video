@@ -779,6 +779,7 @@ auto args = utf8Args();
                 stats.onPrevTrack = [&]() { prevTrack(); };
                 stats.onCycleMode = [&]() { cyclePlayMode(); };
                 stats.onCycleSpeed = [&]() { cycleSpeed(1); };
+                vrender.setPanelWidth(panel.width());  // M32f.2: 每帧同步面板宽
                 vrender.render(f.get(), stats);
             }
             else if (player.state() == Player::State::Ended) {

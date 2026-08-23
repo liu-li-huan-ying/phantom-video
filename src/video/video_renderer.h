@@ -1,5 +1,6 @@
 #pragma once
 #include <SDL.h>
+#include <atomic>
 #include <functional>
 #include <string>
 #include "core/types.h"
@@ -85,7 +86,8 @@ public:
     int settingsClick(int mx, int my);
     bool speedMenuOpen() const { return speedMenuOpen_; }
     void setSpeedMenuOpen(bool b) { speedMenuOpen_ = b; }
-    void setPanelWidth(int w) { panelWidth_ = w; }
+    void setPanelWidth(int w) { panelWidth_ = w; s_panelW_.store(w, std::memory_order_release); }
+    static int overlayPanelWidth() { return s_panelW_.load(std::memory_order_acquire); }
     int panelWidth() const { return panelWidth_; }
     static SDL_Rect speedMenuItemRect(const ControlLayout& lay, int index);
 
@@ -100,6 +102,7 @@ public:
 
     // ---- M32c: 顶部栏 ----
     static const int TOPBAR_H = 52;
+    inline static std::atomic<int> s_panelW_{ 0 };  // M32f.2: 命中测试用的面板宽镜像
     // 动作枚举 = 视觉左→右顺序（单一事实来源，绘制/命中共用）
     enum TopBarAction { TB_CAMERA = 0, TB_PIP, TB_LIST, TB_MIN, TB_MAX, TB_CLOSE, TB_COUNT };
     // 六个按钮矩形（按下标 = TopBarAction）

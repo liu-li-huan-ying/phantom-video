@@ -412,7 +412,7 @@ SDL_Rect VideoRenderer::speedMenuItemRect(const ControlLayout& lay, int index) {
 
 // ---- M32c: 顶部栏 ----
 void VideoRenderer::topBarRects(int winW, SDL_Rect out[TB_COUNT]) {
-    // 左→右按枚举顺序排布；34px，间距2，右边距10
+    // winW 此处 = 播放器区宽度（不含列表）；左→右按枚举顺序；34px，间距2，右边距10
     int x = winW - 10 - 34 * TB_COUNT - 2 * (TB_COUNT - 1);
     for (int i = 0; i < TB_COUNT; ++i) {
         out[i] = SDL_Rect{ x, (TOPBAR_H - 34) / 2, 34, 34 };
@@ -424,8 +424,9 @@ int VideoRenderer::topBarClick(int mx, int my) {
     if (my < 0 || my >= TOPBAR_H) return -1;
     int w = 0, h = 0;
     SDL_GetWindowSize(window_, &w, &h);
+    int playerW = w - s_panelW_.load(std::memory_order_acquire);
     SDL_Rect rs[TB_COUNT];
-    topBarRects(w, rs);
+    topBarRects(playerW, rs);
     for (int i = 0; i < TB_COUNT; ++i)
         if (mx >= rs[i].x && mx < rs[i].x + rs[i].w) return i;
     return -1;
@@ -434,10 +435,12 @@ int VideoRenderer::topBarClick(int mx, int my) {
 void VideoRenderer::drawTopBar() {
     int w = 0, h = 0;
     SDL_GetWindowSize(window_, &w, &h);
+    // M32f.2: 顶栏只覆盖播放器区（列表在其右侧独立存在）
+    int playerW = w - s_panelW_.load(std::memory_order_acquire);
     SDL_Color cTop{ 0, 0, 0, 0 }, cBot{ 0, 0, 0, 140 };
     SDL_Vertex q[] = {
-        { {0,0}, cTop,{} }, { {(float)w,0}, cTop,{} }, { {(float)w,(float)TOPBAR_H}, cBot,{} },
-        { {0,0}, cTop,{} }, { {(float)w,(float)TOPBAR_H}, cBot,{} }, { {0,(float)TOPBAR_H}, cBot,{} },
+        { {0,0}, cTop,{} }, { {(float)playerW,0}, cTop,{} }, { {(float)playerW,(float)TOPBAR_H}, cBot,{} },
+        { {0,0}, cTop,{} }, { {(float)playerW,(float)TOPBAR_H}, cBot,{} }, { {0,(float)TOPBAR_H}, cBot,{} },
     };
     SDL_RenderGeometry(renderer_, nullptr, q, 6, nullptr, 0);
 
@@ -445,7 +448,7 @@ void VideoRenderer::drawTopBar() {
     if (title && *title) gdi_.drawText(16, (TOPBAR_H - 18) / 2 + 2, title, 14, 255, 255, 255);
 
     SDL_Rect rs[TB_COUNT];
-    topBarRects(w, rs);
+    topBarRects(playerW, rs);
     // 视觉左→右顺序 = 枚举顺序；图标与动作一一对应
     const char* ids[TB_COUNT] = { "camera", "pip", "list", "minimize",
                                   (SDL_GetWindowFlags(window_) & SDL_WINDOW_MAXIMIZED) ? "exitfull" : "maximize",
