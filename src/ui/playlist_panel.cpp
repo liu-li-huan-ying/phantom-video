@@ -127,19 +127,12 @@ SDL_Texture* PlaylistPanel::iconForFile(const std::string& path) const {
 }
 
 void PlaylistPanel::draw(int currentIndex, int winW, int winH) {
-    const int titleH = 0;   // M32f: 全高面板
-    const int barH = 64;
-    const int progH = 9;  // 进度条区域高度
-    int barY = winH - progH - 4 - barH;  // 控件栏顶部
-
-    // 动画更新
+    // M32f.6: 全高面板（无底部空白）；动画更新
     if (open_ && openAnim_ < 1.0f)
         openAnim_ = std::min(1.0f, openAnim_ + 0.10f);
     else if (!open_ && openAnim_ > 0.0f)
         openAnim_ = std::max(0.0f, openAnim_ - 0.10f);
 
-    // 面板关闭按钮（面板打开时绘制在左边界）
-    // M32f: 旧左上角关闭钮已移除（新关闭钮在头部右侧，见 Header 绘制段）
     closeHover_ = false;
 
     // 切换按钮：面板关闭时绘制在窗口右边缘
@@ -152,7 +145,7 @@ void PlaylistPanel::draw(int currentIndex, int winW, int winH) {
         SDL_RenderFillRect(renderer_, &toggleBtn);
 
         int cx = winW - kEdgeW / 2;
-        int cy = (titleH + barY) / 2;
+        int cy = winH / 2;
         SDL_SetRenderDrawColor(renderer_, 200, 200, 200, toggleHover_ ? 220 : 140);
         for (int i = -3; i <= 3; ++i) {
             SDL_RenderDrawPoint(renderer_, cx + abs(i), cy + i);
@@ -161,19 +154,18 @@ void PlaylistPanel::draw(int currentIndex, int winW, int winH) {
 
     if (openAnim_ < 0.01f) return;
 
-    // 面板区域（仅在标题栏下方和控件上方之间）
     int pw = (int)(baseWidth_ * openAnim_);
     int panelX = winW - pw;
-    int panelTop = titleH;
-    int panelH = barY - titleH;  // 高度 = 控件栏顶部 - 标题栏底部
-    int itemsY = panelTop + kHeaderH;  // 头部下方开始显示列表项
-    int visibleH = panelH - kHeaderH;  // 可滚动区域
+    int panelTop = 0;
+    int panelH = winH;
+    int itemsY = panelTop + kHeaderH;
+    int visibleH = panelH - kHeaderH;
     int totalItems = playlist_ ? (int)playlist_->size() : 0;
     int contentH = totalItems * kItemH;
     int maxScroll = std::max(0, contentH - visibleH);
     scrollOffset_ = std::min(scrollOffset_, maxScroll);
 
-    // 面板背景（仅覆盖 panelTop 到 barY）
+    // 面板背景
     SDL_Rect panelBg{ panelX, panelTop, pw, panelH };
     SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
     SDL_SetRenderDrawColor(renderer_, kBgColor.r, kBgColor.g, kBgColor.b, kBgColor.a);
@@ -181,7 +173,7 @@ void PlaylistPanel::draw(int currentIndex, int winW, int winH) {
 
     // 左边缘分隔线
     SDL_SetRenderDrawColor(renderer_, 55, 55, 55, 255);
-    SDL_RenderDrawLine(renderer_, panelX, panelTop, panelX, barY);
+    SDL_RenderDrawLine(renderer_, panelX, panelTop, panelX, winH);
 
     // Header 背景
     SDL_Rect headerBg{ panelX, panelTop, pw, kHeaderH };
@@ -201,6 +193,7 @@ void PlaylistPanel::draw(int currentIndex, int winW, int winH) {
     // M32f: 关闭钮移至头部右侧（.pl-close 28px r7）
     {
         int bx = panelX + pw - 14 - 28, by = panelTop + 8;
+        closeRect_ = SDL_Rect{ bx, by, 28, 28 };   // M32f.6: 实测矩形供命中
         if (closeHover_)
             fillRR(renderer_, bx, by, 28, 28, 7, 255, 255, 255, 20);
         svgicon::draw(renderer_, "close", bx + 14, by + 14, 16,
@@ -254,13 +247,14 @@ void PlaylistPanel::drawItem(int baseX, int y, int index, const std::string& fil
     else if (isHover)
         fillRR(renderer_, baseX + 2, y, panelW - 4, kItemH - 2, 9, 255, 255, 255, 15);
 
-    // 缩略图占位（100×56 r7 渐变底 + 播放符号）
+    // 缩略图（100×56 r7）：M32f.6 提亮渐变 + 描边 + 播放符号
     const int thW = 100, thH = 56;
     int tx = baseX + pad, ty = y + (kItemH - 2 - thH) / 2;
-    fillRR(renderer_, tx, ty, thW, thH, 7, 0x26, 0x26, 0x2c, 255);
-    fillRR(renderer_, tx, ty + thH / 2, thW, thH / 2, 5, 0x15, 0x15, 0x1a, 200);
-    svgicon::draw(renderer_, "play", tx + thW / 2 + 1, ty + thH / 2, 20,
-                  255, 255, 255, isActive ? 120 : 64);
+    fillRR(renderer_, tx - 1, ty - 1, thW + 2, thH + 2, 8, 255, 255, 255, 30);
+    fillRR(renderer_, tx, ty, thW, thH / 2, 5, 0x3c, 0x3c, 0x48, 255);
+    fillRR(renderer_, tx, ty + thH / 2, thW, thH / 2, 5, 0x2a, 0x2a, 0x34, 255);
+    svgicon::draw(renderer_, "play", tx + thW / 2 + 1, ty + thH / 2, 22,
+                  255, 255, 255, isActive ? 170 : 110);
 
     // 元数据区
     int mx = tx + thW + 10;
@@ -280,12 +274,8 @@ void PlaylistPanel::drawItem(int baseX, int y, int index, const std::string& fil
 
 bool PlaylistPanel::handleMouseMove(int mx, int my, int winW, int winH) {
     mx_ = mx; my_ = my;
-    const int titleH = 0;   // M32f: 全高面板
-    const int barH = 64;
-    const int progH = 9;
-    int barY = winH - progH - 4 - barH;
-    int panelTop = titleH;
-    int panelBot = barY;
+    const int panelTop = 0;   // M32f.6: 全高面板，无底部空白
+    const int panelBot = winH;
 
     // 面板关闭时：右边缘切换按钮 hover
     if (!open_) {
@@ -301,9 +291,9 @@ bool PlaylistPanel::handleMouseMove(int mx, int my, int winW, int winH) {
     if (w == 0) return false;
     int panelX = winW - w;
 
-    // 面板关闭按钮 hover（M32f: 头部右侧）
-    if (open_ && mx >= panelX + w - 14 - 28 && mx < panelX + w - 14 &&
-        my >= panelTop + 8 && my < panelTop + 36) {
+    // 面板关闭按钮 hover（M32f.6: 以实绘矩形为准）
+    if (open_ && mx >= closeRect_.x - 4 && mx < closeRect_.x + closeRect_.w + 4 &&
+        my >= closeRect_.y - 4 && my < closeRect_.y + closeRect_.h + 4) {
         closeHover_ = true;
         SDL_SetCursor(SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_HAND));
         return true;
@@ -339,21 +329,18 @@ bool PlaylistPanel::handleMouseMove(int mx, int my, int winW, int winH) {
 }
 
 bool PlaylistPanel::handleMouseDown(int mx, int my, int winW, int winH) {
-    const int titleH = 0;   // M32f: 全高面板
-    const int barH = 64;
-    const int progH = 9;
-    int barY = winH - progH - 4 - barH;
-    int panelTop = titleH;
-    int panelBot = barY;
+    const int panelTop = 0;   // M32f.6: 全高面板，无底部空白
+    const int panelBot = winH;
 
     int w = width();
 
     // 面板打开时的拖拽/点击在面板区域内处理
     if (w > 0) {
         int panelX = winW - w;
-        // M32f: 关闭钮点击（头部右侧）—— 只发请求，窗口扩缩由主循环处理
-        if (open_ && mx >= panelX + w - 14 - 28 && mx < panelX + w - 14 &&
-            my >= panelTop + 8 && my < panelTop + 36) {
+        // M32f.6: 关闭钮命中 —— 以实绘矩形为准（外扩 6px 容差）
+        if (open_ &&
+            mx >= closeRect_.x - 6 && mx < closeRect_.x + closeRect_.w + 6 &&
+            my >= closeRect_.y - 6 && my < closeRect_.y + closeRect_.h + 6) {
             toggleRequested_ = true;
             return true;
         }
@@ -398,12 +385,8 @@ bool PlaylistPanel::handleMouseWheel(int dy, int winW, int winH) {
     if (w == 0) return false;
     if (!playlist_) return false;
 
-    const int titleH = 0;   // M32f: 全高面板
-    const int barH = 64;
-    const int progH = 9;
-    int barY = winH - progH - 4 - barH;
-    int panelTop = titleH;
-    int panelBot = barY;
+    const int panelTop = 0;   // M32f.6: 全高面板，无底部空白
+    const int panelBot = winH;
     int visibleH = panelBot - panelTop - kHeaderH;
     int totalItems = (int)playlist_->size();
     int contentH = totalItems * kItemH;

@@ -55,7 +55,8 @@ private:
     int mx_ = 0, my_ = 0;  // 鼠标位置（供 draw 关闭按钮 hover 检测）
     int clickedIdx_ = -1;
     bool dragStarted_ = false;
-    bool toggleRequested_ = false;  // M32f.2: 内部开合请求（主循环消费）
+    bool toggleRequested_ = false;
+    SDL_Rect closeRect_{ 0,0,0,0 };   // M32f.6: 实绘矩形（命中以此为准）  // M32f.2: 内部开合请求（主循环消费）
 
     const Playlist* playlist_ = nullptr;
 
