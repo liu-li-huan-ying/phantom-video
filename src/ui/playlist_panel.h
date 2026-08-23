@@ -42,9 +42,9 @@ private:
     SDL_Renderer* renderer_ = nullptr;
     bool open_ = false;
     float openAnim_ = 0.0f;
-    int baseWidth_ = 200;
-    int minWidth_ = 160;
-    int maxWidth_ = 280;
+    int baseWidth_ = 640;  // M32f.3: 加长一倍
+    int minWidth_ = 640;
+    int maxWidth_ = 640;
     bool resizing_ = false;
     int resizeStartX_ = 0;
     int resizeStartW_ = 0;

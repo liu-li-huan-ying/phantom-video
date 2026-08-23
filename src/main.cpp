@@ -281,9 +281,8 @@ auto args = utf8Args();
     auto nextTrack = [&]() {
         if (playlist.next()) openCurrent();
     };
-    // M32f.2: 播放列表开合 —— 窗口整体向右膨出 320px（播放器本体尺寸不变）
+    // M32f.2: 播放列表开合 —— 窗口整体向右膨出面板宽（播放器本体尺寸不变）
     auto applyPlaylistToggle = [&]() {
-        constexpr int PW = 320;
         bool opening = !panel.isOpen();
         if (opening && (fullscreen || (SDL_GetWindowFlags(win) & SDL_WINDOW_MAXIMIZED))) {
             vrender.showToast("退出全屏后再打开播放列表");
@@ -291,8 +290,11 @@ auto args = utf8Args();
         }
         int w = 0, h = 0;
         SDL_GetWindowSize(win, &w, &h);
-        int newW = opening ? w + PW : std::max(640, w - PW);
+        int pw;
         if (opening) {
+            panel.toggle();               // 先翻转，width() 即为目标宽
+            pw = panel.width();
+            int newW = w + pw;
             // 超出屏幕右缘则整体左移钳制
             int di = SDL_GetWindowDisplayIndex(win);
             SDL_Rect b{};
@@ -301,9 +303,12 @@ auto args = utf8Args();
             SDL_GetWindowPosition(win, &px, &py);
             if (px + newW > b.x + b.w)
                 SDL_SetWindowPosition(win, std::max(b.x, b.x + b.w - newW), py);
+            SDL_SetWindowSize(win, newW, h);
+        } else {
+            pw = panel.width();
+            panel.toggle();
+            SDL_SetWindowSize(win, std::max(640, w - pw), h);
         }
-        SDL_SetWindowSize(win, newW, h);
-        panel.toggle();
     };
     auto prevTrack = [&]() {
         if (playlist.prev()) openCurrent();
