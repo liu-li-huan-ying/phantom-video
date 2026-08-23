@@ -972,3 +972,25 @@
   - 日志确认：4 styles parsed, rendered subtitle: 273x32 align=2 segs=1
   - 编译通过，运行无崩溃
 - **状态**：代码完成，待用户实际观看带 ASS 字幕的视频验证效果
+
+### 阶段 M31e：音频 seek/speed 静音根因定位与修复 ✅ 完成
+
+- **任务**：定位并修复 M31d 发现的音频 seek/speed 变更后永久静音问题
+- **根因分析**：
+  - 日志分析发现：seek 到 1278.884s 后，REANCHOR SKIP 永久循环（323,669 次），chunk.pts=2609.784 vs writeHead_=1279.564，diff=1330
+  - ALOOP push 日志显示 `framePts(f)=1278.794`（正确），但 REANCHOR SKIP 显示 `chunk.pts=2609.784`（错误）
+  - **根因**：`AudioOutput::convert()` 中 `chunk.pts = frame->pts * ptsScale_`，而 `ptsScale_` 取自 `av_q2d(audioStream->time_base) = 1/44100`
+  - 同一帧的 `framePts(f) = frame->best_effort_timestamp * videoPtsScale_`（video time_base = 1/90000）
+  - MPEG-TS 容器中，所有流的 raw PTS 使用共同的 1/90000 time_base，但 `AudioOutput` 错误地用音频流自己的 time_base（1/44100）缩放
+  - 结果：`chunk.pts` 比正确值大了 90000/44100 ≈ 2.041 倍 → 与 writeHead_ 差 1330s → reanchor 永远失败 → 所有音频 chunk 被丢弃 → 永久静音
+- **修复**：
+  - `src/core/player.cpp:54`：`ptsScale` 从 `av_q2d(ademux->audioStream()->time_base)` 改为 `av_q2d(vdemux->videoStream()->time_base)`
+  - 使 `AudioOutput::ptsScale_` 与 `Player::framePts()` 使用相同的 video time_base，`chunk.pts` 正确反映秒数
+- **附带修复**：
+  - `src/main.cpp:192`：过滤 `--debug` 参数，避免被当作文件路径加入 playlist
+- **测试**：
+  - 构建成功，`--debug` 模式运行 4.mp4 12 秒
+  - 日志确认：`REANCHOR: writeHead_ -1.000 -> chunk.pts 0.000`（首次 reanchor 成功）
+  - `writeHead_` 正常递增（4.621 → 9.265），无 REANCHOR SKIP 或 SILENCE 警告
+  - 音频正常播放
+- **状态**：修复完成，待提交

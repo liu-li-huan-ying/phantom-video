@@ -189,7 +189,7 @@ auto args = utf8Args();
     if (multiArgs) {
         std::vector<std::string> files;
         for (std::size_t i = 1; i < args.size(); ++i)
-            if (!args[i].empty()) files.push_back(args[i]);
+            if (!args[i].empty() && args[i] != "--debug") files.push_back(args[i]);
         playlist.set(files);
     } else if (cfg.resume && !cfg.lastFile.empty()) {
         // resume=1: reopen last file with its directory playlist

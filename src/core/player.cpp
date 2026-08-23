@@ -51,7 +51,7 @@ bool Player::openFile(const std::string& path) {
         adec = std::make_unique<Decoder>();
         if (adec->open(ademux->audioCodecpar())) {
             audio = std::make_unique<AudioOutput>();
-            double aScale = av_q2d(ademux->audioStream()->time_base);
+            double aScale = av_q2d(vdemux->videoStream()->time_base);
             if (!audio->open(ademux->audioCodecpar(), aScale)) {
                 audio.reset();
                 hasAudio = false;
