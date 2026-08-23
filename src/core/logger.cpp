@@ -151,5 +151,13 @@ void Logger::log(LogLevel level, const char* module, const char* fmt, ...) {
     va_end(ap);
 
     fputc('\n', file_);
-    fflush(file_);
+
+    // M32g.2: 每行都 fflush 在 --debug 海量日志下会让音频/解码线程
+    // 周期性卡在磁盘刷写上(表现为播放每1~2秒冻结一两秒)。
+    // 改为: WARN 及以上立即刷新; 其余攒 64 条批量刷新。
+    static int s_sinceFlush = 0;
+    if (level >= LogLevel::Warn || ++s_sinceFlush >= 64) {
+        fflush(file_);
+        s_sinceFlush = 0;
+    }
 }

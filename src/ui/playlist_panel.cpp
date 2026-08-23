@@ -145,22 +145,7 @@ void PlaylistPanel::draw(int currentIndex, int winW, int winH) {
 
     closeHover_ = false;
 
-    // 切换按钮：面板关闭时绘制在窗口右边缘
-    if (!open_) {
-        SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
-        SDL_SetRenderDrawColor(renderer_,
-            toggleHover_ ? 100 : 50, toggleHover_ ? 100 : 50,
-            toggleHover_ ? 100 : 50, toggleHover_ ? 180 : 100);
-        SDL_Rect toggleBtn{ winW - kEdgeW, 0, kEdgeW, winH };
-        SDL_RenderFillRect(renderer_, &toggleBtn);
-
-        int cx = winW - kEdgeW / 2;
-        int cy = winH / 2;
-        SDL_SetRenderDrawColor(renderer_, 200, 200, 200, toggleHover_ ? 220 : 140);
-        for (int i = -3; i <= 3; ++i) {
-            SDL_RenderDrawPoint(renderer_, cx + abs(i), cy + i);
-        }
-    }
+    // M32g: 右缘条开关已移除（顶栏 ☰ 即列表开关）
 
     if (openAnim_ < 0.01f) return;
 
@@ -289,13 +274,9 @@ bool PlaylistPanel::handleMouseMove(int mx, int my, int winW, int winH) {
     const int panelTop = 0;   // M32f.6: 全高面板，无底部空白
     const int panelBot = winH;
 
-    // 面板关闭时：右边缘切换按钮 hover
+    // M32g: 右缘条已移除；面板关闭时不拦截任何鼠标事件
     if (!open_) {
-        toggleHover_ = (mx >= winW - kEdgeW && mx < winW && my >= 0 && my < winH);
-        if (toggleHover_) {
-            SDL_SetCursor(SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_HAND));
-            return true;
-        }
+        toggleHover_ = false;
         return false;
     }
 
@@ -375,12 +356,7 @@ bool PlaylistPanel::handleMouseDown(int mx, int my, int winW, int winH) {
         if (mx >= panelX && my >= panelTop && my < panelBot) return true;
     }
 
-    // 面板关闭时：右边缘切换按钮 —— 只发请求
-    if (!open_ && mx >= winW - kEdgeW && mx < winW && my >= 0 && my < winH) {
-        toggleRequested_ = true;
-        return true;
-    }
-
+    // M32g: 右缘条已移除
     return false;
 }
 
