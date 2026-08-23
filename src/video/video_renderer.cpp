@@ -607,7 +607,7 @@ void VideoRenderer::drawToast() {
     if (hbmp && bits) {
         HGDIOBJ oldBmp = SelectObject(mem, hbmp);
         RECT trc{ 0, 0, tw, th };
-        HBRUSH black = (HBRUSH)GetStockObject(BLACK_BRUSH);
+        HBRUSH black = CreateSolidBrush(RGB(20,20,22)); // M32g: 效果图 toast 底色
         FillRect(mem, &trc, black);
         SetBkMode(mem, TRANSPARENT);
         RECT drc{ 15, 9, tw - 15, th - 9 };
@@ -714,7 +714,7 @@ void VideoRenderer::drawSubtitle(const RenderStats& stats) {
         if (hbmp && bits) {
             HGDIOBJ oldBmp = SelectObject(mem, hbmp);
             RECT trc{ 0, 0, tw, th };
-            HBRUSH black = (HBRUSH)GetStockObject(BLACK_BRUSH);
+            HBRUSH black = CreateSolidBrush(RGB(20,20,22)); // M32g: 效果图 toast 底色
             FillRect(mem, &trc, black);
             SetBkMode(mem, TRANSPARENT);
             RECT drc{ 12, 12, tw - 12, th - 12 };
@@ -1203,6 +1203,15 @@ void VideoRenderer::render(const AVFrame* frame, const RenderStats& stats) {
     SDL_RenderClear(renderer_);
     drawBackground();
     SDL_RenderCopy(renderer_, texture_, nullptr, &dst);
+    // M32g: 扫描线质感（CSS repeating-linear-gradient 3px 周期 白1.2%）
+    {
+        SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(renderer_, 255, 255, 255, 3);
+        for (int y = dst.y; y < dst.y + dst.h; y += 3) {
+            SDL_Rect ln{ dst.x, y, dst.w, 1 };
+            SDL_RenderFillRect(renderer_, &ln);
+        }
+    }
     drawSubtitle(stats);
     drawToast();
     drawControls(stats);
@@ -1234,14 +1243,28 @@ void VideoRenderer::drawPauseOverlay(const RenderStats& stats) {
 
     SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
 
-    // 半透明暗色遮罩
+    // 半透明暗色遮罩（M32g: titleH 已归零）
     SDL_SetRenderDrawColor(renderer_, 0, 0, 0, (Uint8)(pauseOverlayAlpha_ * 0.35f));
-    SDL_Rect overlay{ 0, 32, winW - panelWidth_, winH - 32 };
+    SDL_Rect overlay{ 0, 0, winW - panelWidth_, winH };
     SDL_RenderFillRect(renderer_, &overlay);
 
     int cx = (winW - panelWidth_) / 2;
     int cy = winH / 2;
     Uint8 a = (Uint8)pauseOverlayAlpha_;
+
+    // M32g: 效果图中央播放钮 —— 72px 圆、黑.55底、白.75描边
+    {
+        const int D = 72;
+        fillRR(renderer_, cx - D/2 - 2, cy - D/2 - 2, D + 4, D + 4, D/2 + 2,
+               255, 255, 255, (Uint8)(a * 0.75f / 255));
+        fillRR(renderer_, cx - D/2, cy - D/2, D, D, D/2,
+               0, 0, 0, (Uint8)(a * 0.55f / 255));
+        svgicon::draw(renderer_,
+                      pauseOverlayIcon_ == PauseIcon::Play ? "play" : "pause",
+                      cx, cy, 30, 255, 255, 255, a);
+        return;
+    }
+
     SDL_SetRenderDrawColor(renderer_, 255, 255, 255, a);
 
     if (pauseOverlayIcon_ == PauseIcon::Play) {
