@@ -65,11 +65,15 @@ LRESULT CALLBACK CustomTitlebar::wndProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
     int CustomTitlebar::hitTest(int x, int y) {
         // M32c: 顶栏区域让位给 SDL 覆盖式顶栏 —— 按钮矩形内为客户区(HTCLIENT)，
         // 其余顶部区域仍作为拖拽 caption
+        RECT rc;
+        GetClientRect(hwnd_, &rc);
+        int cw = rc.right - rc.left;
+        // M32f.7 关键修复: 播放列表整列为客户区 —— 否则其头部被当作
+        // caption, 关闭钮点击被 Windows 吞成窗口拖拽, SDL 收不到事件
+        if (x >= cw - VideoRenderer::overlayPanelWidth()) return 1;
         if (y >= 0 && y < VideoRenderer::TOPBAR_H) {
-            RECT rc;
-            GetClientRect(hwnd_, &rc);
             SDL_Rect rs[6];
-            VideoRenderer::topBarRects(rc.right - rc.left - VideoRenderer::overlayPanelWidth(), rs);
+            VideoRenderer::topBarRects(cw - VideoRenderer::overlayPanelWidth(), rs);
             for (int i = 0; i < 6; ++i)
                 if (x >= rs[i].x && x < rs[i].x + rs[i].w && y >= rs[i].y && y < rs[i].y + rs[i].h)
                     return 1;

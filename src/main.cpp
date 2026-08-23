@@ -284,6 +284,7 @@ auto args = utf8Args();
     // M32f.2: 播放列表开合 —— 窗口整体向右膨出面板宽（播放器本体尺寸不变）
     auto applyPlaylistToggle = [&]() {
         bool opening = !panel.isOpen();
+        LOG_INFO("MAIN", "playlist toggle: %s", opening ? "OPEN(expand window)" : "CLOSE(shrink window)");
         if (opening && (fullscreen || (SDL_GetWindowFlags(win) & SDL_WINDOW_MAXIMIZED))) {
             vrender.showToast("退出全屏后再打开播放列表");
             return;

@@ -1,6 +1,7 @@
 ﻿#include "ui/playlist_panel.h"
 #include "core/playlist.h"
 #include "ui/svgicon.h"
+#include "core/logger.h"
 
 #include <algorithm>
 #include <cmath>
@@ -247,12 +248,19 @@ void PlaylistPanel::drawItem(int baseX, int y, int index, const std::string& fil
     else if (isHover)
         fillRR(renderer_, baseX + 2, y, panelW - 4, kItemH - 2, 9, 255, 255, 255, 15);
 
-    // 缩略图（100×56 r7）：M32f.6 提亮渐变 + 描边 + 播放符号
+    // 缩略图（100×56）：M32f.7 裁剪区方案 —— 无圆角毛刺、无描边
     const int thW = 100, thH = 56;
     int tx = baseX + pad, ty = y + (kItemH - 2 - thH) / 2;
-    fillRR(renderer_, tx - 1, ty - 1, thW + 2, thH + 2, 8, 255, 255, 255, 30);
-    fillRR(renderer_, tx, ty, thW, thH / 2, 5, 0x3c, 0x3c, 0x48, 255);
-    fillRR(renderer_, tx, ty + thH / 2, thW, thH / 2, 5, 0x2a, 0x2a, 0x34, 255);
+    SDL_Rect clip{ tx, ty, thW, thH };
+    SDL_RenderSetClipRect(renderer_, &clip);
+    SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(renderer_, 0x3c, 0x3c, 0x48, 255);
+    SDL_Rect topHalf{ tx, ty, thW, thH / 2 };
+    SDL_RenderFillRect(renderer_, &topHalf);
+    SDL_SetRenderDrawColor(renderer_, 0x2a, 0x2a, 0x34, 255);
+    SDL_Rect botHalf{ tx, ty + thH / 2, thW, thH - thH / 2 };
+    SDL_RenderFillRect(renderer_, &botHalf);
+    SDL_RenderSetClipRect(renderer_, nullptr);
     svgicon::draw(renderer_, "play", tx + thW / 2 + 1, ty + thH / 2, 22,
                   255, 255, 255, isActive ? 170 : 110);
 
@@ -342,6 +350,7 @@ bool PlaylistPanel::handleMouseDown(int mx, int my, int winW, int winH) {
             mx >= closeRect_.x - 6 && mx < closeRect_.x + closeRect_.w + 6 &&
             my >= closeRect_.y - 6 && my < closeRect_.y + closeRect_.h + 6) {
             toggleRequested_ = true;
+            LOG_INFO("UI", "playlist close button pressed -> toggle request");
             return true;
         }
         // 拖拽调整宽度
