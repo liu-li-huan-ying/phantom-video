@@ -909,24 +909,26 @@
 - **改动文件**：`main.cpp`、`audio_output.cpp`、`player.cpp`、`video_renderer.cpp`
 - **验证**：编译通过，正常模式日志 0 bytes，诊断模式日志正常输出
 
-### 阶段 M30：控件动画 + 缩略图优化 + OSD 增强 ✅
+### 阶段 M30：控件动画 + OSD 增强 ✅
 
-- 任务：三项 UI/性能增强
+- 任务：两项 UI 增强（缩略图优化已尝试后回退）
 - **M30a 控件动画**：
   - 新建 `src/ui/easing.h`：纯头文件缓动函数库（linear、ease-in/out/in-out quad/cubic、easeOutExpo/Back/Elastic、smoothstep、lerpf）
   - 控件 alpha 动画：hover 时 fade in 200ms，离开时 fade out 200ms（animControlsAlpha_）
   - 按钮 hover 缩放：1.0 → 1.15 ease-out；点击弹性回弹 0.9 → 1.0（animThumbScale_）
   - 进度条展开/收起：高度 4px ↔ 8px，thumb 12px ↔ 18px（animTrackH_）
-- **M30b 缩略图优化**：
-  - LRU 缓存：30 条纹理，`abs(entry.time - time) < 500ms` 命中
-  - 多线程 worker：独立线程提取，主线程 cache.get() 读取
-  - 切视频时 clear() 释放所有纹理
+- **M30b 缩略图优化（已回退 ❌）**：
+  - 尝试 LRU 缓存 + 多线程 worker 异步提取
+  - 结果：缓存未命中时显示黑屏，体验反而比同步方案差
+  - 根因：getFrame() 本身需要 100-500ms，异步方案引入显示间隙
+  - 教训：同步方案虽然有卡顿但功能正确，异步方案需要预计算才能真正解决问题
+  - 已回退为同步提取（原方案），2 小时以上视频测试无卡顿
 - **M30c OSD 增强**：
   - player 新增查询接口：videoBitrate/audioBitrate/videoWidth/Height/Fps/audioSampleRate/hwDecoding/videoCodecName/audioCodecName
   - OSD 字体扩展：原 14 字符（0-9:.%）→ 66 字符（+x+A-Z+a-z）
   - 按 I 键切换 OSD 显示（半透明背景，含码率/分辨率/帧率/采样率/硬解状态/时长）
   - drawInfoOverlay 渲染在所有 UI 层之上
 - **改动**：
-  - 新增文件：`src/ui/easing.h`、`src/core/thumbnail_worker.h`、`src/core/thumbnail_worker.cpp`
-  - 修改文件：`video_renderer.h/cpp`（动画状态+绘制）、`main.cpp`（worker/cache/OSD/I键）、`osd.h/cpp`（字体扩展+drawInfoOverlay）、`player.h/cpp`（媒体信息查询）
-- **效果**：控件平滑过渡、缩略图异步不卡顿、信息显示一键切换
+  - 新增文件：`src/ui/easing.h`
+  - 修改文件：`video_renderer.h/cpp`（动画状态+绘制）、`main.cpp`（OSD/I键）、`osd.h/cpp`（字体扩展+drawInfoOverlay）、`player.h/cpp`（媒体信息查询）
+- **效果**：控件平滑过渡、信息显示一键切换、缩略图同步提取可靠
