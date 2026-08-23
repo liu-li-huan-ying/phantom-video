@@ -19,6 +19,8 @@ ThumbnailCache::Entry* ThumbnailCache::get(double time, int toleranceMs) {
     return nullptr;
 }
 
+int ThumbnailCache::size() const { return (int)entries_.size(); }
+
 void ThumbnailCache::put(double time, SDL_Texture* tex, int w, int h) {
     Entry e;
     e.tex = tex;
@@ -71,6 +73,10 @@ void ThumbnailWorker::request(double time) {
     std::lock_guard<std::mutex> lock(mutex_);
     currentSeq_++;
     pending_.push_back({ time, currentSeq_ });
+    // 积压超过 3 个时丢弃旧请求，只保留最新的
+    while ((int)pending_.size() > 3) {
+        pending_.pop_front();
+    }
     cv_.notify_one();
 }
 
@@ -78,7 +84,8 @@ SDL_Texture* ThumbnailWorker::getLatest() {
     std::lock_guard<std::mutex> lock(resultMutex_);
     if (resultTime_ < 0) return nullptr;
     if (!cache_) return nullptr;
-    return cache_->get(resultTime_, 500) ? cache_->get(resultTime_, 500)->tex : nullptr;
+    auto* e = cache_->get(resultTime_, 2000);
+    return e ? e->tex : nullptr;
 }
 
 void ThumbnailWorker::workerLoop() {
@@ -88,23 +95,22 @@ void ThumbnailWorker::workerLoop() {
             std::unique_lock<std::mutex> lock(mutex_);
             cv_.wait(lock, [&] { return !pending_.empty() || !running_.load(); });
             if (!running_.load()) break;
-            req = pending_.front();
-            pending_.pop_front();
-            // 跳过过期请求（只处理最新的）
-            while (!pending_.empty() && pending_.front().seq > req.seq) {
-                req = pending_.front();
-                pending_.pop_front();
-            }
+            // 跳到最新请求，丢弃所有旧的
+            req = pending_.back();
+            pending_.clear();
         }
 
         if (!extractor_ || !cache_) continue;
 
+        Uint32 t0 = SDL_GetTicks();
         uint8_t* pixels = nullptr;
         int w = 0, h = 0;
         {
             std::lock_guard<std::mutex> lock(extractorMutex_);
-            if (!extractor_->getFrame(req.time, &pixels, w, h) || !pixels || w <= 0 || h <= 0)
+            if (!extractor_->getFrame(req.time, &pixels, w, h) || !pixels || w <= 0 || h <= 0) {
+                LOG_DBG("THUMB", "getFrame FAIL t=%.2f", req.time);
                 continue;
+            }
         }
         SDL_Texture* tex = SDL_CreateTexture(
             renderer_, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STREAMING, w, h);
@@ -122,6 +128,9 @@ void ThumbnailWorker::workerLoop() {
                     resultTime_ = req.time;
                     completedSeq_ = req.seq;
                 }
+                Uint32 elapsed = SDL_GetTicks() - t0;
+                LOG_DBG("THUMB", "OK t=%.2f %dx%d %ums cache=%d",
+                        req.time, w, h, elapsed, cache_->size());
             } else {
                 SDL_DestroyTexture(tex);
             }

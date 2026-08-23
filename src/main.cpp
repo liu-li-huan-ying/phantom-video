@@ -340,14 +340,16 @@ auto args = utf8Args();
                             float pct = (float)(mx - lay.progX) / lay.progW;
                             if (pct < 0) pct = 0; if (pct > 1) pct = 1;
                             double targetTime = pct * player.duration();
-                            // 先查 LRU 缓存
-                            auto* cached = thumbCache.get(targetTime, 500);
+                            // 先查 LRU 缓存（2s 容差）
+                            auto* cached = thumbCache.get(targetTime, 2000);
                             if (cached) {
                                 vrender.setThumbnail(cached->tex, cached->w, cached->h, targetTime);
                             } else {
-                                // 缓存未命中，提交异步请求（不设 1.0s 门槛）
-                                if (thumbnail.isOpen())
+                                // 缓存未命中，提交异步请求
+                                if (thumbnail.isOpen()) {
                                     thumbWorker.request(targetTime);
+                                    LOG_DBG("THUMB", "REQ t=%.2f pct=%.3f", targetTime, pct);
+                                }
                                 // 保留上一帧缩略图，不强制清空
                             }
                         } else {

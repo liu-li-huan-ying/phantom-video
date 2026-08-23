@@ -27,6 +27,7 @@ public:
 
     // 查找缓存：toleranceMs 内的时间点视为命中
     Entry* get(double time, int toleranceMs = 500);
+    int size() const;
     // 存入缓存（接管 tex 所有权）
     void put(double time, SDL_Texture* tex, int w, int h);
     // 超过 maxEntries_ 时淘汰最旧
