@@ -543,6 +543,28 @@ auto args = utf8Args();
                 case SDLK_i:
                     osd.toggleInfo();
                     break;
+                case SDLK_MINUS:
+                case SDLK_KP_MINUS: {
+                    double d = player.subtitleDelay() - 0.5;
+                    if (d < -10.0) d = -10.0;
+                    player.setSubtitleDelay(d);
+                    char buf[32];
+                    std::snprintf(buf, sizeof(buf), "SubDelay %.1fs", d);
+                    vrender.showToast(buf);
+                    volHideAt = SDL_GetTicks() + 2000;
+                    break;
+                }
+                case SDLK_EQUALS:
+                case SDLK_KP_PLUS: {
+                    double d = player.subtitleDelay() + 0.5;
+                    if (d > 10.0) d = 10.0;
+                    player.setSubtitleDelay(d);
+                    char buf[32];
+                    std::snprintf(buf, sizeof(buf), "SubDelay %+.1fs", d);
+                    vrender.showToast(buf);
+                    volHideAt = SDL_GetTicks() + 2000;
+                    break;
+                }
                 case SDLK_ESCAPE:
                 case SDLK_q:
                     running = false;

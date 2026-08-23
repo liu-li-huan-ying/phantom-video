@@ -52,6 +52,10 @@ public:
     bool hasSubtitle() const { return subtitleLoaded_ || subtitleIndex_ >= 0; }
     AudioOutput& audio() { return *audio_; }
 
+    // M31a: 字幕延迟调整
+    void setSubtitleDelay(double d) { subtitleDelay_.store(d); }
+    double subtitleDelay() const { return subtitleDelay_.load(); }
+
     // M30c: 媒体信息查询
     int videoWidth() const { return videoWidth_; }
     int videoHeight() const { return videoHeight_; }
@@ -118,6 +122,7 @@ private:
     std::atomic<bool> subtitleLoaded_{ false };
     int subtitleIndex_ = -1;
     std::unique_ptr<SubtitleDecoder> subtitleDecoder_;
+    std::atomic<double> subtitleDelay_{ 0.0 };  // M31a: 字幕延迟（秒）
 
     double duration_ = 0.0;
     std::string path_;

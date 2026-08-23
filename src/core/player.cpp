@@ -289,7 +289,9 @@ bool Player::loadExternalSubtitle(const std::string& path) {
 
 std::string Player::subtitleText(double t) const {
     if (!subtitleLoaded_.load() && !subtitleDecoder_) return {};
-    return subtitles_.textAt(t);
+    // M31a: 应用字幕延迟偏移
+    double delay = subtitleDelay_.load();
+    return subtitles_.textAt(t + delay);
 }
 
 void Player::toggleMute() {
