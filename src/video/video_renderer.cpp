@@ -462,6 +462,113 @@ void VideoRenderer::drawTopBar() {
     }
 }
 
+// ---- M32e: 设置模态 ----
+void VideoRenderer::drawSettings(const RenderStats& stats) {
+    if (!settingsOpen_) return;
+    int w = 0, h = 0;
+    SDL_GetWindowSize(window_, &w, &h);
+    // 遮罩
+    SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 140);
+    SDL_Rect full{ 0, 0, w, h };
+    SDL_RenderFillRect(renderer_, &full);
+
+    const int BW = 420;
+    constexpr int PAD = 18;
+    // 行高：开关行40 *5 + 分段行46*2 + 标题30 + 内距
+    const int H = 30 + 40 * 5 + 46 * 2 + PAD + 14;
+    SDL_Rect box{ (w - BW) / 2, (h - H) / 2 - 10, BW, H };
+    fillRoundedRect(renderer_, box.x - 4, box.y - 2, BW + 8, H + 6, 16,
+                    0, 0, 0, (Uint8)(110));
+    fillRoundedRect(renderer_, box.x, box.y, BW, H, 14,
+                    0x14, 0x14, 0x16, 255);
+
+    auto switchDraw = [&](int x, int y, bool on) {
+        fillRoundedRect(renderer_, x, y, 38, 22, 11,
+                        on ? 0x25 : 255, on ? 0x63 : 255, on ? 0xeb : 255,
+                        on ? 255 : (Uint8)(41));
+        fillRoundedRect(renderer_, x + (on ? 18 : 2), y + 2, 18, 18, 9,
+                        255, 255, 255, 255);
+    };
+
+    int cy = box.y + PAD;
+    gdi_.drawText(box.x + PAD, cy, "设置", 14, 255, 255, 255);
+    setClose_ = SDL_Rect{ box.x + BW - PAD - 26, cy - 4, 26, 26 };
+    svgicon::draw(renderer_, "close", setClose_.x + 13, setClose_.y + 13, 14,
+                  0xd4, 0xd4, 0xd8, 212);
+    cy += 34;
+
+    const char* labels[5] = { "硬件解码（D3D11VA / DXVA2）", "音量标准化（EBU R128）",
+                              "记忆播放位置", "自动播放下一个", "字幕自动加载" };
+    bool vals[5] = { stats.swHw, stats.swNorm, stats.swResume, stats.swAutoNext, stats.swSub };
+    for (int i = 0; i < 5; ++i) {
+        setRows_[i] = SDL_Rect{ box.x + PAD, cy, BW - PAD * 2, 40 };
+        gdi_.drawText(box.x + PAD, cy + 11, labels[i], 12, 230, 230, 231);
+        switchDraw(box.x + BW - PAD - 38, cy + 7, vals[i]);
+        // 行分隔线
+        if (i < 4) {
+            SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+            SDL_SetRenderDrawColor(renderer_, 255, 255, 255, 26);
+            SDL_Rect sep{ box.x + PAD, cy + 39, BW - PAD * 2, 1 };
+            SDL_RenderFillRect(renderer_, &sep);
+        }
+        cy += 40;
+    }
+
+    // 界面语言 seg
+    setLang_[0] = { box.x + PAD, cy, BW - PAD * 2, 38 };
+    gdi_.drawText(box.x + PAD, cy + 11, "界面语言", 12, 230, 230, 231);
+    {
+        const char* langs[3] = { "中文", "English", "日本語" };
+        int sx = box.x + BW - PAD - (58 + 66 + 56);
+        for (int i = 0; i < 3; ++i) {
+            setLang_[i] = SDL_Rect{ sx, cy + 4, i == 0 ? 58 : (i == 1 ? 66 : 56), 24 };
+            if (stats.langIdx == i)
+                fillRoundedRect(renderer_, sx + 2, cy + 6, setLang_[i].w - 4, 20, 6,
+                                255, 255, 255, 36);
+            gdi_.drawText(sx + 10, cy + 9, langs[i], 11,
+                          stats.langIdx == i ? 255 : 161, stats.langIdx == i ? 255 : 161,
+                          stats.langIdx == i ? 255 : 166);
+            sx += setLang_[i].w;
+        }
+    }
+    cy += 46;
+
+    // 主题 seg
+    setTheme_[0] = { box.x + PAD, cy, BW - PAD * 2, 38 };
+    gdi_.drawText(box.x + PAD, cy + 11, "主题", 12, 230, 230, 231);
+    {
+        const char* ths[2] = { "深色", "浅色" };
+        int sx = box.x + BW - PAD - 108;
+        for (int i = 0; i < 2; ++i) {
+            setTheme_[i] = SDL_Rect{ sx, cy + 4, 54, 24 };
+            if (stats.themeIdx == i)
+                fillRoundedRect(renderer_, sx + 2, cy + 6, 50, 20, 6,
+                                255, 255, 255, 36);
+            gdi_.drawText(sx + 12, cy + 9, ths[i], 11,
+                          stats.themeIdx == i ? 255 : 161, stats.themeIdx == i ? 255 : 161,
+                          stats.themeIdx == i ? 255 : 166);
+            sx += 54;
+        }
+    }
+}
+
+int VideoRenderer::settingsClick(int mx, int my) {
+    if (!settingsOpen_) return -1;
+    for (int i = 0; i < 5; ++i)
+        if (mx >= setRows_[i].x && mx < setRows_[i].x + setRows_[i].w &&
+            my >= setRows_[i].y && my < setRows_[i].y + setRows_[i].h) return i;
+    for (int i = 0; i < 3; ++i)
+        if (setLang_[i].w && mx >= setLang_[i].x && mx < setLang_[i].x + setLang_[i].w &&
+            my >= setLang_[i].y && my < setLang_[i].y + setLang_[i].h) return 10 + i;
+    for (int i = 0; i < 2; ++i)
+        if (setTheme_[i].w && mx >= setTheme_[i].x && mx < setTheme_[i].x + setTheme_[i].w &&
+            my >= setTheme_[i].y && my < setTheme_[i].y + setTheme_[i].h) return 20 + i;
+    if (mx >= setClose_.x && mx < setClose_.x + setClose_.w &&
+        my >= setClose_.y && my < setClose_.y + setClose_.h) return -2;
+    return -1;
+}
+
 void VideoRenderer::drawToast() {
     Uint32 now = SDL_GetTicks();
     if (now >= toastUntil_ || toastText_.empty()) return;
@@ -1099,6 +1206,7 @@ void VideoRenderer::render(const AVFrame* frame, const RenderStats& stats) {
     drawTopBar();
     drawPauseOverlay(stats);
     drawSeekingOverlay(stats);
+    drawSettings(stats);
 }
 
 void VideoRenderer::showPauseOverlay(PauseIcon icon) {

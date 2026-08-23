@@ -218,6 +218,10 @@ auto args = utf8Args();
         }
     }
 
+    // M32e: 设置面板业务状态（openCurrent 捕获用）
+    bool subAutoLoad = true;
+    int langIdx = 0, themeIdx = 0;
+
     auto openCurrent = [&]() {
         if (playlist.empty()) {
             SDL_SetWindowTitle(win, "VPlayer");
@@ -427,6 +431,35 @@ auto args = utf8Args();
                         hitControlTop = true;
                     }
                     if (hitControlTop) break;
+                    // ---- M32e: 设置模态点击路由（模态打开时独占）----
+                    if (vrender.settingsVisible()) {
+                        int sa = vrender.settingsClick(mx, my);
+                        if (sa == -2 || sa == -1) vrender.setSettingsVisible(false);
+                        else if (sa == 1) {  // 音量标准化
+                            bool on = !player.audio().normalization();
+                            player.audio().setNormalization(on);
+                            vrender.showToast(on ? "音量标准化: 开" : "音量标准化: 关");
+                        } else if (sa == 2) {  // 记忆播放位置
+                            cfg.resume = cfg.resume ? 0 : 1;
+                            vrender.showToast(cfg.resume ? "记忆播放位置: 开" : "记忆播放位置: 关");
+                        } else if (sa == 3) {  // 自动播放下一个 = 单曲/循环
+                            playlist.setMode(playlist.mode() == PlayMode::Single
+                                                 ? PlayMode::Loop : PlayMode::Single);
+                            vrender.showToast(playlist.mode() != PlayMode::Single
+                                                  ? "自动播放下一个: 开" : "自动播放下一个: 关");
+                        } else if (sa == 4) {
+                            subAutoLoad = !subAutoLoad;
+                            vrender.showToast(subAutoLoad ? "字幕自动加载: 开" : "字幕自动加载: 关");
+                        } else if (sa == 0) {
+                            vrender.showToast(player.usingHardware()
+                                                  ? "硬件解码已启用（重启应用后可切换）"
+                                                  : "当前为软解（切换需重启应用）");
+                        } else if (sa >= 10 && sa < 13) { langIdx = sa - 10;
+                            vrender.showToast("界面语言切换开发中"); }
+                        else if (sa >= 20 && sa < 22) { themeIdx = sa - 20;
+                            vrender.showToast("主题切换开发中"); }
+                        break;
+                    }
                     // M16: 播放列表面板事件优先处理
                     if (panel.handleMouseDown(mx, my, winW, winH)) {
                         vrender.setPanelWidth(panel.width());
@@ -510,7 +543,7 @@ auto args = utf8Args();
                         hitControl = true;
                     }
                     else if (inR(lay.setX, lay.row1Y + 4, 44, 34)) {
-                        vrender.showToast("设置面板开发中");
+                        vrender.setSettingsVisible(true);
                         hitControl = true;
                     }
                     else if (inR(lay.fs2X, lay.row1Y + 4, 34, 34)) {
@@ -688,6 +721,14 @@ auto args = utf8Args();
                 stats.speed = player.speed();
                 stats.playMode = (int)playlist.mode();
                 stats.draggingVolume = draggingVolume;
+                // M32e: 设置面板状态镜像
+                stats.swHw = player.usingHardware();
+                stats.swNorm = player.audio().normalization();
+                stats.swResume = cfg.resume != 0;
+                stats.swAutoNext = (playlist.mode() != PlayMode::Single);
+                stats.swSub = subAutoLoad;
+                stats.langIdx = langIdx;
+                stats.themeIdx = themeIdx;
                 static std::string subtitleBuf;
                 static std::string rawSubBuf;
                 if (player.hasSubtitle()) {

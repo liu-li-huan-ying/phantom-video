@@ -18,6 +18,14 @@ struct RenderStats {
     float speed = 1.0f;
     int playMode = 1;  // PlayMode: 0=Single 1=Loop 2=Shuffle
     bool draggingVolume = false;
+    // M32e: 设置面板状态镜像
+    bool swHw = false;       // 硬件解码（只读反映）
+    bool swNorm = false;     // 音量标准化
+    bool swResume = true;    // 记忆播放位置
+    bool swAutoNext = true;  // 自动播放下一个
+    bool swSub = true;       // 字幕自动加载
+    int langIdx = 0;
+    int themeIdx = 0;
     const char* subtitle = nullptr;
     const char* rawSubtitle = nullptr;  // 原始 ASS Dialogue 行（含 override tags）
     std::function<void()> onPlayPause;
@@ -69,6 +77,12 @@ public:
     void showControls();
     void showToast(const char* text);
     void toggleSpeedMenu();
+    // ---- M32e: 设置模态 ----
+    void setSettingsVisible(bool b) { settingsOpen_ = b; }
+    bool settingsVisible() const { return settingsOpen_; }
+    void drawSettings(const RenderStats& stats);
+    // 返回: -1=无 -2=关闭 0..4=开关行 10+i=语言段 20+i=主题段
+    int settingsClick(int mx, int my);
     bool speedMenuOpen() const { return speedMenuOpen_; }
     void setSpeedMenuOpen(bool b) { speedMenuOpen_ = b; }
     void setPanelWidth(int w) { panelWidth_ = w; }
@@ -131,6 +145,10 @@ private:
     std::string subtitleCache_;
     std::string toastText_;
     std::string pendingShotPath_;  // M32c: 待保存截图路径
+    // M32e: 设置模态
+    bool settingsOpen_ = false;
+    SDL_Rect setRows_[5] = {};     // 五个开关行命中区
+    SDL_Rect setClose_ = {}, setLang_[3] = {}, setTheme_[2] = {};
     Uint32 toastUntil_ = 0;
     bool speedMenuOpen_ = false;
     SDL_Texture* iconTex_[12] = {};
