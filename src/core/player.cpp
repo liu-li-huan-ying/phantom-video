@@ -607,9 +607,19 @@ void Player::audioLoop() {
                     LOG_DBG("ALOOP", "dropping frame during seek: pts=%.3f", framePts(f));
                     continue;
                 }
-                if (framePts(f) < dropUntil_.load()) continue;
+                double fp = framePts(f);
+                if (fp < dropUntil_.load()) continue;
                 double seekTarget = audioSeekTarget_.load();
-                if (seekTarget > 0.0 && framePts(f) < seekTarget - 0.1) continue;
+                if (seekTarget > 0.0 && fp < seekTarget - 0.1) {
+                    // M31h: seek 后快进丢弃。正常应仅几帧；若大量出现说明 seek 落点偏差
+                    static int skipRun = 0;
+                    skipRun++;
+                    if (skipRun == 1 || skipRun % 500 == 0) {
+                        LOG_WARN("ALOOP", "post-seek discard x%d: pts=%.3f target=%.3f (gap=%.3fs)",
+                                 skipRun, fp, seekTarget, seekTarget - fp);
+                    }
+                    continue;
+                }
                 while (!audio_ || !audio_->tryPush(f)) {
                     if (seekRequested() || audioSeekPending_.load() || stop_.load()) break;
                     std::this_thread::sleep_for(std::chrono::milliseconds(1));

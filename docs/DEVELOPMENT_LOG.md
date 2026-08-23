@@ -1023,3 +1023,23 @@
   - applyVolume totalGain=0 警告节流（首条 + 每200条）
 - **测试**：构建通过；--debug 冒烟 12 秒无任何 SILENCE/SKIP/MUTED 警告
 - **状态**：待用户变速+跳转组合实测
+
+### 阶段 M31h：seek 距离比例型静音卡顿根因修复（seekAudio 尺度错误）✅ 完成
+
+- **用户诊断日志分析**（vplayer_2026-08-23_171515.log, 53K 行）：
+  - REANCHOR SKIP 已清零、reanchor 全部成功（M31g 生效）
+  - 但 seek 后仍有静音空窗，且**与跳转距离成正比**：
+    t=11→5ms / t=662→270ms / t=1971→810ms / t=3107→1240ms
+  - 空窗内视频正常恢复，仅 ALOOP 零 push；demuxer 落点显示"正确"（首推 pts=target-0.09）
+  - 空窗前大量 "queue full, dropped frame"（解码器领先时钟4s，属预读缓冲，非本 bug 主因）
+- **根因**：与 M31e 同源——该容器族所有流实际时间戳均为 video time_base(1/90000) 单位。
+  seekAudio 用音频流自身 time_base(1/44100) 换算目标 → ts 仅真实值 49% →
+  av_seek_frame 落在半个时间轴之前 → ALOOP 静默丢弃守卫逐帧快进数十秒音频
+  （每帧约20us）→ 距离比例型静音。小位置跳转延迟太小从未暴露。
+  五个采样点预测值与实测全部吻合（误差<10%），根因确证。
+- **修复**：
+  - Demuxer::seekAudio()：换算尺度改用 videoStream time_base（无视频流时回退音频流）
+  - ALOOP seek 后丢弃守卫增加连续丢弃计数 WARN 日志（skipRun，每500条报一次），
+    若未来出现尺度异常可立即从日志定位
+- **测试**：构建通过。待用户实测长距离跳转+变速组合。
+- **状态**：待提交
