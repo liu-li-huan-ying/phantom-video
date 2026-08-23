@@ -460,6 +460,7 @@ auto args = utf8Args();
                         }
                         hitControlTop = true;
                     }
+                    }
                     // M32f.5: 面板头部区域让位（关闭钮在此），放行给面板层处理
                     if (panel.isOpen() && my < VideoRenderer::TOPBAR_H &&
                         mx >= winW - panel.width())
