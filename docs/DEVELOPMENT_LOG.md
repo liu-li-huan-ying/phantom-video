@@ -1149,3 +1149,10 @@
 
 - **M32d ✅（commit 798c1a3）**：倍速弹出菜单精修完成——面板 rgba(24,24,26,.98)/r10/阴影近似、选中项 accent2 蓝字、hover 白.08 行背景、右对齐灰提示(慢/正常/快)、GDI 文本、menuW130/itemH30。点击命中几何同步(speedMenuItemRect)。
 - 待做：M32e 设置模态 / M32f 播放列表卡片化 / M32g Toast+中央钮+扫描线
+
+- **M32e ✅（commit e717dbf）**：设置模态完成——420px 居中盒(r14+遮罩)、标题/关闭、
+  五开关行(38x22, on=accent蓝, 行分隔线)、语言/主题分段器。真实接线：
+  音量标准化(setNormalization)/记忆播放(cfg.resume持久化)/自动下一个(单曲↔循环)/
+  字幕自动加载(门控 loadExternalSubtitle)/硬件解码只读反映。
+  RenderStats 扩展状态镜像字段; settingsClick 路由; 模态打开时独占点击链。
+- 待做：M32f 播放列表卡片化 / M32g Toast+中央钮+扫描线
