@@ -59,7 +59,8 @@ private:
     bool dragStarted_ = false;
     bool toggleRequested_ = false;
     bool shrinkPending_ = false;   // M32f.9: 关闭动画期间保持宽度
-    SDL_Rect closeRect_{ 0,0,0,0 };   // M32f.6: 实绘矩形（命中以此为准）  // M32f.2: 内部开合请求（主循环消费）
+    SDL_Rect closeRect_{ 0,0,0,0 };   // M32f.6: 实绘矩形（命中以此为准）
+    SDL_Rect listClip_{ 0,0,0,0 };    // M32f.9: 列表区裁剪（drawItem 内恢复用）
 
     const Playlist* playlist_ = nullptr;
 
