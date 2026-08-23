@@ -78,4 +78,7 @@ add_custom_command(TARGET vplayer POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_directory
     "${CMAKE_SOURCE_DIR}/assets"
     "$<TARGET_FILE_DIR:vplayer>/assets"
+  COMMAND ${CMAKE_COMMAND} -E copy_directory
+    "${CMAKE_SOURCE_DIR}/ico"
+    "$<TARGET_FILE_DIR:vplayer>/ico"
   COMMENT "拷贝 assets 资源")
