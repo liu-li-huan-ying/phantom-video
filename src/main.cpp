@@ -401,7 +401,7 @@ auto args = utf8Args();
                     if (my < VideoRenderer::TOPBAR_H) {
                         int act = vrender.topBarClick(mx, my);
                         switch (act) {
-                        case 0: {  // 截图
+                        case VideoRenderer::TB_CAMERA: {
                             auto dir = exeDir() + "shots";
                             std::filesystem::create_directories(dir);
                             char ts[40];
@@ -412,16 +412,16 @@ auto args = utf8Args();
                             vrender.showToast("已截图");
                             break;
                         }
-                        case 1: vrender.showToast("画中画开发中"); break;      // pip
-                        case 2: panel.toggle(); break;                          // 播放列表
-                        case 3: SDL_MinimizeWindow(win); break;                 // 最小化
-                        case 4:                                                  // 最大化/还原
+                        case VideoRenderer::TB_PIP: vrender.showToast("画中画开发中"); break;      // pip
+                        case VideoRenderer::TB_LIST: panel.toggle(); break;
+                        case VideoRenderer::TB_MIN: SDL_MinimizeWindow(win); break;
+                        case VideoRenderer::TB_MAX:                                                  // 最大化/还原
                             if (SDL_GetWindowFlags(win) & SDL_WINDOW_MAXIMIZED)
                                 SDL_RestoreWindow(win);
                             else
                                 SDL_MaximizeWindow(win);
                             break;
-                        case 5: running = false; break;                         // 关闭
+                        case VideoRenderer::TB_CLOSE: running = false; break;
                         default: break;  // 空白区=拖拽（由 WndProc HTCAPTION 处理）
                         }
                         hitControlTop = true;

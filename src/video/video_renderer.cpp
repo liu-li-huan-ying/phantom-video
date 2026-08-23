@@ -411,12 +411,12 @@ SDL_Rect VideoRenderer::speedMenuItemRect(const ControlLayout& lay, int index) {
 }
 
 // ---- M32c: 顶部栏 ----
-void VideoRenderer::topBarRects(int winW, SDL_Rect out[6]) {
-    // 右→左：camera, pip, list, minimize, maximize, close；34px，间距2，右边距10
-    int x = winW - 10 - 34;
-    for (int i = 0; i < 6; ++i) {
+void VideoRenderer::topBarRects(int winW, SDL_Rect out[TB_COUNT]) {
+    // 左→右按枚举顺序排布；34px，间距2，右边距10
+    int x = winW - 10 - 34 * TB_COUNT - 2 * (TB_COUNT - 1);
+    for (int i = 0; i < TB_COUNT; ++i) {
         out[i] = SDL_Rect{ x, (TOPBAR_H - 34) / 2, 34, 34 };
-        x -= 34 + 2;
+        x += 34 + 2;
     }
 }
 
@@ -424,9 +424,9 @@ int VideoRenderer::topBarClick(int mx, int my) {
     if (my < 0 || my >= TOPBAR_H) return -1;
     int w = 0, h = 0;
     SDL_GetWindowSize(window_, &w, &h);
-    SDL_Rect rs[6];
+    SDL_Rect rs[TB_COUNT];
     topBarRects(w, rs);
-    for (int i = 0; i < 6; ++i)
+    for (int i = 0; i < TB_COUNT; ++i)
         if (mx >= rs[i].x && mx < rs[i].x + rs[i].w) return i;
     return -1;
 }
@@ -444,13 +444,13 @@ void VideoRenderer::drawTopBar() {
     const char* title = SDL_GetWindowTitle(window_);
     if (title && *title) gdi_.drawText(16, (TOPBAR_H - 18) / 2 + 2, title, 14, 255, 255, 255);
 
-    SDL_Rect rs[6];
+    SDL_Rect rs[TB_COUNT];
     topBarRects(w, rs);
-    // M32c.1: 用户要求镜像顺序 —— 视觉左→右：截图,画中画,列表,最小化,最大化,关闭
-    const char* ids[6] = { "close",
-                           (SDL_GetWindowFlags(window_) & SDL_WINDOW_MAXIMIZED) ? "exitfull" : "maximize",
-                           "minimize", "list", "pip", "camera" };
-    for (int i = 0; i < 6; ++i) {
+    // 视觉左→右顺序 = 枚举顺序；图标与动作一一对应
+    const char* ids[TB_COUNT] = { "camera", "pip", "list", "minimize",
+                                  (SDL_GetWindowFlags(window_) & SDL_WINDOW_MAXIMIZED) ? "exitfull" : "maximize",
+                                  "close" };
+    for (int i = 0; i < TB_COUNT; ++i) {
         bool hov = mouseX_ >= rs[i].x && mouseX_ < rs[i].x + rs[i].w &&
                    mouseY_ >= rs[i].y && mouseY_ < rs[i].y + rs[i].h;
         if (hov)

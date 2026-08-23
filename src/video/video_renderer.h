@@ -86,10 +86,12 @@ public:
 
     // ---- M32c: 顶部栏 ----
     static const int TOPBAR_H = 52;
-    // 六个按钮矩形（右→左）：camera,pip,list,min,max,close
-    static void topBarRects(int winW, SDL_Rect out[6]);
+    // 动作枚举 = 视觉左→右顺序（单一事实来源，绘制/命中共用）
+    enum TopBarAction { TB_CAMERA = 0, TB_PIP, TB_LIST, TB_MIN, TB_MAX, TB_CLOSE, TB_COUNT };
+    // 六个按钮矩形（按下标 = TopBarAction）
+    static void topBarRects(int winW, SDL_Rect out[TB_COUNT]);
     void drawTopBar();
-    int topBarClick(int mx, int my);          // -1=无, 0..5 对应上述顺序
+    int topBarClick(int mx, int my);          // -1=无, 否则 TopBarAction
     void setShotPath(const std::string& p) { pendingShotPath_ = p; }
 
     // M16: 暂停叠加图标
