@@ -340,11 +340,9 @@ auto args = utf8Args();
                         vrender.setThumbnail(nullptr, 0, 0, -1);
                     } else if (draggingVolume) {
                         ControlLayout lay = ControlLayout::compute(winW, winH, panel.width());
-                        const int ph = 90, py = lay.barY - ph - 12;
-                        float v = 1.0f - (float)(my - py - 6) / (ph - 12);
+                        float v = (float)(mx - lay.volSlX) / lay.volSlW;
                         if (v < 0) v = 0; if (v > 1) v = 1;
-                        player.setVolume(v);
-                        if (v == 0) { player.setVolume(0.0001f); }
+                        player.setVolume(v == 0 ? 0.0001f : v);
                     } else if (player.hasMedia()) {
                         // 进度条 hover 缩略图（同步提取，可靠显示）
                         int winW = 0, winH = 0;
@@ -411,31 +409,40 @@ auto args = utf8Args();
                         break;
                     }
                     ControlLayout lay = ControlLayout::compute(winW, winH, panel.width());
-                    const int btnY = lay.btnY, bs = lay.btnSize;
                     bool hitControl = false;
-                    // Prev
-                    if (mx >= lay.prevX && mx < lay.prevX + bs && my >= btnY && my < btnY + bs) {
+                    auto inR = [&](int x, int y, int w, int h) {
+                        return mx >= x && mx < x + w && my >= y && my < y + h;
+                    };
+                    // ---- 行1：传输钮（prev34 / play42 / next34）----
+                    if (inR(lay.prevX, lay.row1Y, 34, 34)) {
                         prevTrack(); hitControl = true;
-                    }
-                    // Play/Pause
-                    else if (mx >= lay.playX && mx < lay.playX + bs && my >= btnY && my < btnY + bs) {
+                    } else if (inR(lay.playX, lay.row1Y, 42, 42)) {
                         player.togglePause(); hitControl = true;
-                    }
-                    // Next
-                    else if (mx >= lay.nextX && mx < lay.nextX + bs && my >= btnY && my < btnY + bs) {
+                    } else if (inR(lay.nextX, lay.row1Y, 34, 34)) {
                         nextTrack(); hitControl = true;
                     }
-                    // Play mode
-                    else if (mx >= lay.modeX && mx < lay.modeX + bs && my >= btnY && my < btnY + bs) {
-                        cyclePlayMode(); hitControl = true;
+                    // ---- 行2：字幕 / 倍速 / 画质 / 音量 / 设置 / 全屏 ----
+                    else if (inR(lay.subX, lay.row2Y, 44, 28)) {
+                        // 字幕：内封字幕轨循环切换（-1=关闭）
+                        int cnt = player.subtitleStreamCount();
+                        if (cnt <= 0) {
+                            vrender.showToast("无内封字幕");
+                        } else {
+                            static int subIdx = -1;
+                            subIdx = (subIdx + 1) % (cnt + 1);
+                            player.switchSubtitleTrack(subIdx < cnt ? subIdx : -1);
+                            char msg[64];
+                            std::snprintf(msg, sizeof(msg), "字幕轨: %s",
+                                          subIdx < cnt ? "开启" : "关闭");
+                            vrender.showToast(msg);
+                        }
+                        hitControl = true;
                     }
-                    // Speed button toggles popup menu
-                    else if (mx >= lay.speedX && mx < lay.speedX + bs && my >= btnY && my < btnY + bs) {
+                    else if (inR(lay.spdX - 9, lay.row2Y, 80, 28)) {
                         vrender.toggleSpeedMenu();
                         volHideAt = SDL_GetTicks() + 2000;
                         hitControl = true;
                     }
-                    // Speed menu item selection
                     else if (vrender.speedMenuOpen()) {
                         bool inMenu = false;
                         for (int i = 0; i < 8; ++i) {
@@ -453,30 +460,35 @@ auto args = utf8Args();
                         }
                         if (!inMenu) vrender.setSpeedMenuOpen(false);
                     }
-                    // Volume button (click toggles mute; drag handled via popup)
-                    else if (mx >= lay.volX && mx < lay.volX + bs && my >= btnY && my < btnY + bs) {
-                        if (!draggingVolume) player.toggleMute();
+                    else if (inR(lay.qualX, lay.row2Y, 48, 28)) {
+                        vrender.showToast("本地播放，已是最佳画质");
+                        hitControl = true;
+                    }
+                    else if (inR(lay.volBxX, lay.row2Y, 34, 34)) {
+                        player.toggleMute();
                         volHideAt = SDL_GetTicks() + 2000;
                         hitControl = true;
                     }
-                    // Fullscreen button
-                    else if (mx >= lay.fsX && mx < lay.fsX + bs && my >= btnY && my < btnY + bs) {
+                    else if (inR(lay.volSlX, lay.row2Y + 8, lay.volSlW, 18)) {
+                        draggingVolume = true;
+                        float v = (float)(mx - lay.volSlX) / lay.volSlW;
+                        if (v < 0) v = 0; if (v > 1) v = 1;
+                        player.setVolume(v == 0 ? 0.0001f : v);
+                        hitControl = true;
+                    }
+                    else if (inR(lay.setX, lay.row2Y, 44, 28)) {
+                        vrender.showToast("设置面板开发中");
+                        hitControl = true;
+                    }
+                    else if (inR(lay.fs2X, lay.row2Y, 34, 34)) {
                         fullscreen = !fullscreen;
                         SDL_SetWindowFullscreen(win,
                             fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
                         hitControl = true;
                     }
-                    // Volume popup drag (above vol button)
-                    const int ph = 90, py = lay.barY - ph - 12, vx = lay.volX + bs / 2 - 3;
-                    if (mx >= vx && mx < vx + 6 && my >= py && my < py + ph) {
-                        draggingVolume = true;
-                        float v = 1.0f - (float)(my - py - 6) / (ph - 12);
-                        if (v < 0) v = 0; if (v > 1) v = 1;
-                        player.setVolume(v == 0 ? 0.0001f : v);
-                        hitControl = true;
-                    }
-                    // Progress bar click-to-seek (full-width bottom bar)
-                    if (mx >= lay.progX && mx < lay.progX + lay.progW &&
+                    // 进度条点击跳转（seek 带命中）
+                    if (!hitControl &&
+                        mx >= lay.progX && mx < lay.progX + lay.progW &&
                         my >= lay.progY - 10 && my < lay.progY + 12) {
                         float pct = (float)(mx - lay.progX) / lay.progW;
                         if (pct < 0) pct = 0; if (pct > 1) pct = 1;

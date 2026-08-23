@@ -3,6 +3,7 @@
 #include <functional>
 #include <string>
 #include "core/types.h"
+#include "ui/gdi_text.h"
 #include "subtitle/ass_renderer.h"
 
 struct RenderStats {
@@ -33,14 +34,21 @@ struct RenderStats {
 enum class Icon { Play, Pause, Prev, Next, Volume, Mute, Fullscreen, ExitFullscreen,
                   Single, Loop, Shuffle };
 
-// 统一控件布局：进度条贴底独立全宽，按钮行在其上方
+// 统一控件布局：M32b 两行结构（进度条 / 传输行 / 功能行）
 struct ControlLayout {
-    int barY = 0;      // 按钮行上边缘
-    int btnY = 0;      // 按钮上边缘
-    int btnSize = 40;
-    int gap = 12;
-    int prevX = 0, playX = 0, nextX = 0, modeX = 0, speedX = 0, volX = 0, fsX = 0;
-    int progX = 0, progY = 0, progW = 0;  // 进度条（贴底全宽）
+    int top = 0;       // 控制栏渐变起始 Y
+    // 行1：传输钮（prev/next 34，play 42）
+    int row1Y = 0;
+    int prevX = 0, playX = 0, nextX = 0, timeX = 0, timeY = 0;
+    // 行2：文本/图标钮
+    int row2Y = 0;
+    int subX = 0, spdX = 0, qualX = 0, volBxX = 0, volSlX = 0, volSlW = 70;
+    int setX = 0, fs2X = 0;
+    // 进度条命中带（兼容旧字段名）
+    int progX = 0, progY = 0, progW = 0;
+    // legacy 兼容别名（旧代码引用）
+    int barY = 0, btnY = 0, btnSize = 42, gap = 8;
+    int modeX = 0, speedX = 0, volX = 0, fsX = 0;
     static ControlLayout compute(int winW, int winH, int panelWidth = 0);
 };
 
@@ -73,6 +81,8 @@ public:
     // M31: 轻量 ASS 渲染
     void setAssContent(const std::string& assContent);
     void clearStyledSubtitle();
+    SDL_Renderer* renderer() { return renderer_; }
+    GdiTextCache gdi_;
 
     // M16: 暂停叠加图标
     enum class PauseIcon { None, Play, Pause };

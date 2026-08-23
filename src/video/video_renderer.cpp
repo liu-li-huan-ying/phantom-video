@@ -339,12 +339,14 @@ bool VideoRenderer::init(SDL_Window* window) {
         if (!renderer_) return false;
     }
     assRenderer_.init(renderer_);
+    gdi_.init(renderer_);
     assRendererInit_ = true;
     return true;
 }
 
 void VideoRenderer::shutdown() {
     clearStyledSubtitle();
+    gdi_.shutdown();
     svgicon::shutdown();
     assRenderer_.shutdown();
     assRendererInit_ = false;
@@ -402,8 +404,8 @@ SDL_Rect VideoRenderer::speedMenuItemRect(const ControlLayout& lay, int index) {
     int itemH = 28;
     int menuW = 92;
     int count = 8;
-    int menuX = lay.speedX + lay.btnSize / 2 - menuW / 2;
-    int menuBottom = lay.barY - 8;
+    int menuX = lay.spdX - 10;
+    int menuBottom = lay.row2Y + 34;
     int menuY = menuBottom - count * itemH;
     return SDL_Rect{ menuX, menuY + index * itemH, menuW, itemH };
 }
@@ -606,25 +608,32 @@ void VideoRenderer::clearStyledSubtitle() {
 
 ControlLayout ControlLayout::compute(int winW, int winH, int panelWidth) {
     ControlLayout l;
-    l.btnSize = 40;
-    l.gap = 12;
-    const int titleH = 32;  // 标题栏高度
-    int areaW = winW - panelWidth;  // 减去播放列表面板宽度
-    // 进度条贴底全宽（独立一行），控制按钮行在进度条上方
-    l.progX = 8;
-    l.progY = winH - 5;
-    l.progW = areaW - 16;
-    l.barY = winH - 5 - 4 - 64;  // 控制栏 64px 高，位于进度条上方
-    l.btnY = l.barY + (64 - l.btnSize) / 2;
-    // 左侧播放控制组
-    l.prevX = 16;
-    l.playX = l.prevX + l.btnSize + l.gap;
-    l.nextX = l.playX + l.btnSize + l.gap;
-    // 右侧功能组（右对齐到 areaW）
-    l.fsX = areaW - 16 - l.btnSize;
-    l.volX = l.fsX - l.btnSize - l.gap;
-    l.speedX = l.volX - l.btnSize - l.gap;
-    l.modeX = l.speedX - l.btnSize - l.gap;
+    const int mL = 16, mR = 16;
+    int areaW = winW - panelWidth;
+    // 总高：seek带18 + 4 + 行1(42) + 6 + 行2(28) + 底距10 ≈ 108
+    l.top = winH - 110;
+    l.progX = mL + 2;
+    l.progW = areaW - mL - mR - 4;
+    l.progY = l.top + 9;          // track 中心线
+    l.row1Y = l.top + 22;
+    constexpr int S = 34, P = 42, G = 8;
+    l.prevX = mL;
+    l.playX = l.prevX + S + G;
+    l.nextX = l.playX + P + G;
+    l.timeX = l.nextX + S + 14;
+    l.timeY = l.row1Y + 12;
+    l.row2Y = l.row1Y + P + 6;    // 行高28 → 距底 110-22-48-28=12 ✓
+    l.subX  = mL;
+    l.spdX  = l.subX + 48;
+    l.qualX = l.spdX + 76;
+    l.volBxX= l.qualX + 88;
+    l.volSlX= l.volBxX + 36;
+    l.volSlW= 70;
+    l.setX  = l.volSlX + l.volSlW + 6;
+    l.fs2X  = l.setX + 48;
+    // legacy 别名
+    l.barY = l.top; l.btnY = l.row1Y; l.btnSize = P;
+    l.modeX = l.subX; l.speedX = l.spdX; l.volX = l.volBxX; l.fsX = l.fs2X;
     return l;
 }
 
@@ -657,53 +666,46 @@ void VideoRenderer::drawControls(const RenderStats& stats) {
     int a = (int)(animControlsAlpha_ * 255);
     if (a <= 0) return;
 
-    // ---- background: vertical gradient ----
-    std::vector<SDL_Vertex> gv;
-    SDL_Color cTop{ 0, 0, 0, (Uint8)(64 * a / 255) };
-    SDL_Color cBot{ 0, 0, 0, (Uint8)(217 * a / 255) };
-    SDL_Vertex vt1{ { 0, (float)barY }, cTop, { 0, 0 } };
-    SDL_Vertex vt2{ { (float)winW, (float)barY }, cTop, { 0, 0 } };
-    SDL_Vertex vt3{ { (float)winW, (float)winH }, cBot, { 0, 0 } };
-    SDL_Vertex vt4{ { 0, (float)winH }, cBot, { 0, 0 } };
-    gv.push_back(vt1);
-    gv.push_back(vt2);
-    gv.push_back(vt3);
-    gv.push_back(vt1);
-    gv.push_back(vt3);
-    gv.push_back(vt4);
-    SDL_RenderGeometry(renderer_, nullptr, gv.data(), (int)gv.size(), nullptr, 0);
+    // ---- background: M32b 底栏渐变（CSS: .62 底 → .25@75% → 0 顶）----
+    {
+        const float yTop = (float)lay.top, yBot = (float)winH;
+        float y75 = yTop + (yBot - yTop) * 0.75f;
+        SDL_Color c0{ 0,0,0, 0 }, c25{ 0,0,0,(Uint8)(64*a/255) }, c62{ 0,0,0,(Uint8)(158*a/255) };
+        SDL_Vertex q[] = {
+            { {0,yTop}, c0,{} }, { {(float)winW,yTop}, c0,{} }, { {(float)winW,y75}, c25,{} },
+            { {0,yTop}, c0,{} }, { {(float)winW,y75}, c25,{} }, { {0,y75}, c25,{} },
+            { {0,y75}, c25,{} }, { {(float)winW,y75}, c25,{} }, { {(float)winW,yBot}, c62,{} },
+            { {0,y75}, c25,{} }, { {(float)winW,yBot}, c62,{} }, { {0,yBot}, c62,{} },
+        };
+        SDL_RenderGeometry(renderer_, nullptr, q, 12, nullptr, 0);
+    }
 
     // ---- layout ----
-    const int btnSize = lay.btnSize;
-    const int btnY = lay.btnY;
-    const int gap = lay.gap;
-
     struct Btn { int x, y, w, h; };
-    Btn prevBtn{ lay.prevX, btnY, btnSize, btnSize };
-    Btn playBtn{ lay.playX, btnY, btnSize, btnSize };
-    Btn nextBtn{ lay.nextX, btnY, btnSize, btnSize };
-    Btn modeBtn{ lay.modeX, btnY, btnSize, btnSize };
-    Btn speedBtn{ lay.speedX, btnY, btnSize, btnSize };
-    Btn volBtn{ lay.volX, btnY, btnSize, btnSize };
-    Btn fsBtn{ lay.fsX, btnY, btnSize, btnSize };
+    Btn prevBtn{ lay.prevX, lay.row1Y, 34, 34 };
+    Btn playBtn{ lay.playX, lay.row1Y, 42, 42 };
+    Btn nextBtn{ lay.nextX, lay.row1Y, 34, 34 };
 
     auto hit = [&](const Btn& b) {
         return mouseX_ >= b.x && mouseX_ < b.x + b.w && mouseY_ >= b.y && mouseY_ < b.y + b.h;
     };
 
     auto drawBtn = [&](const Btn& b, Icon icon, bool hover, bool active) {
-        // 圆角背景：hover 时白色渐变，active 时蓝色高亮
         if (hover || active) {
-            Uint8 bgA = active ? (Uint8)(70 * a / 255) : (Uint8)(45 * a / 255);
-            Uint8 r = active ? 77 : 255, g = active ? 144 : 255, b2 = active ? 255 : 255;
-            fillRoundedRect(renderer_, b.x, b.y, b.w, b.h, 8, r, g, b2, bgA);
+            Uint8 bgA = (Uint8)(20 * a / 255);
+            fillRoundedRect(renderer_, b.x, b.y, b.w, b.h, 8, 255, 255, 255, bgA);
         }
-        // 图标：hover 时 ease-out 缩放 24→26，active 时图标缩放 1.1x
-        float iconScale = hover ? 1.08f : 1.0f;
-        int iconSize = (int)(24 * iconScale);
-        int iconAlpha = (int)((hover ? 255 : 200) * a / 255);
+        int iconSize = (int)(18 * (hover ? 1.08f : 1.0f));
+        int iconAlpha = (int)(228 * a / 255);
         drawIconOrTexture(renderer_, iconTexture(icon), icon,
                           b.x + b.w / 2, b.y + b.h / 2, iconSize, iconAlpha);
+    };
+    // M32b: 播放大钮 —— 白底 .92 + 深色图标（CSS: rgba(255,255,255,.92)/#0b0b0b）
+    auto drawPlayBtn = [&](const Btn& b, Icon icon, bool hover) {
+        Uint8 bgA = (Uint8)((hover ? 255 : 235) * a / 255);
+        fillRoundedRect(renderer_, b.x, b.y, b.w, b.h, 8, 255, 255, 255, bgA);
+        svgicon::draw(renderer_, stats.playing && !stats.paused ? "pause" : "play",
+                      b.x + b.w / 2, b.y + b.h / 2, 20, 0x0b, 0x0b, 0x0b, (Uint8)a);
     };
 
     // ---- progress bar: full-width slim bar at the very bottom ----
@@ -718,7 +720,7 @@ void VideoRenderer::drawControls(const RenderStats& stats) {
                      mouseY_ >= progY - 10 && mouseY_ < progY + 12;
 
     // M30a: 进度条展开/收起缓动动画
-    float targetTrackH = (progHover || stats.draggingVolume) ? 10.0f : 4.0f;
+    float targetTrackH = (progHover || stats.draggingVolume) ? 6.0f : 4.0f;
     if (targetTrackH != animTrackTo_) {
         animTrackFrom_ = animTrackH_;
         animTrackTo_ = targetTrackH;
@@ -733,14 +735,18 @@ void VideoRenderer::drawControls(const RenderStats& stats) {
     int trackH = (int)animTrackH_;
     int trackY = progY - trackH / 2;
 
-    // track 背景（深灰 + 圆角）
+    // track 背景（CSS rgba(255,255,255,.18)）+ buffered(.30) + fill(accent)
     fillRoundedRect(renderer_, progX, trackY, progressW, trackH, 3,
-                    50, 50, 50, (Uint8)(200 * a / 255));
-    // fill（蓝色渐变）
+                    255, 255, 255, (Uint8)(46 * a / 255));
+    int bufW = (int)(progressW * 0.42f);
+    if (bufW > 0) {
+        fillRoundedRect(renderer_, progX, trackY, bufW, trackH, 3,
+                        255, 255, 255, (Uint8)(77 * a / 255));
+    }
     int fillW = (int)(pct * progressW);
     if (fillW > 0) {
         fillRoundedRect(renderer_, progX, trackY, fillW, trackH, 3,
-                        77, 144, 255, (Uint8)(255 * a / 255));
+                        0x25, 0x63, 0xeb, (Uint8)(255 * a / 255));
     }
     // hover/drag 时发光 thumb + 阴影
     if (progHover || stats.draggingVolume) {
@@ -758,19 +764,14 @@ void VideoRenderer::drawControls(const RenderStats& stats) {
             animThumbScale_ = lerpf(animThumbFrom_, animThumbTo_, eased);
         }
 
-        int thumbBaseW = 16, thumbBaseH = trackH + 8;
-        int thumbW2 = (int)(thumbBaseW * animThumbScale_);
-        int thumbH2 = (int)(thumbBaseH * animThumbScale_);
-        int thumbX = progX + fillW - thumbW2 / 2;
+        int thumbD = (int)(13 * animThumbScale_);
         int thumbCX = progX + fillW;
         int thumbCY = trackY + trackH / 2;
-        int thumbXDraw = thumbCX - thumbW2 / 2;
-        int thumbYDraw = thumbCY - thumbH2 / 2;
-        // 发光阴影
-        fillRoundedRect(renderer_, thumbXDraw - 6, thumbYDraw - 6, thumbW2 + 12, thumbH2 + 12, 8,
-                        77, 144, 255, (Uint8)(60 * a / 255));
-        // 圆形 thumb
-        fillRoundedRect(renderer_, thumbXDraw, thumbYDraw, thumbW2, thumbH2, 8,
+        int thumbXDraw = thumbCX - thumbD / 2;
+        int thumbYDraw = thumbCY - thumbD / 2;
+        fillRoundedRect(renderer_, thumbXDraw - 3, thumbYDraw - 3, thumbD + 6, thumbD + 6, 8,
+                        0, 0, 0, (Uint8)(70 * a / 255));
+        fillRoundedRect(renderer_, thumbXDraw, thumbYDraw, thumbD, thumbD, 6,
                         255, 255, 255, (Uint8)(255 * a / 255));
 
         // M15: 缩略图预览（在进度条上方，居中于鼠标位置）
@@ -812,72 +813,88 @@ void VideoRenderer::drawControls(const RenderStats& stats) {
         }
     }
 
-    // time text centered in the control row
-    char curText[16], durText[16];
-    formatTimeText(curText, sizeof(curText), stats.clock);
-    formatTimeText(durText, sizeof(durText), stats.duration);
-    char timeText[40];
-    std::snprintf(timeText, sizeof(timeText), "%s / %s", curText, durText);
-    int tw = 0;
-    for (const char* p = timeText; *p; ++p) tw += 6 * 2;
-    int timeX = (winW - tw) / 2;
-    SDL_SetRenderDrawColor(renderer_, 255, 255, 255, (Uint8)(220 * a / 255));
-    drawFontText(renderer_, timeX, barY + 22, 2, timeText);
+    // M32b: 时间文本（行1，跟在 next 后，灰 #a1a1a6，tabular）
+    {
+        char curText[16], durText[16];
+        formatTimeText(curText, sizeof(curText), stats.clock);
+        formatTimeText(durText, sizeof(durText), stats.duration);
+        char timeText[40];
+        std::snprintf(timeText, sizeof(timeText), "%s / %s", curText, durText);
+        gdi_.drawText(lay.timeX, lay.timeY, timeText, 12,
+                      0xa1, 0xa1, 0xa6);
+    }
 
-    // ---- volume popup (above vol button) ----
-    bool volHover = hit(volBtn);
-    if (volHover || stats.draggingVolume) {
-        int pw = 8, ph = 90;
-        int px = volBtn.x + volBtn.w / 2 - pw / 2;
-        int py = barY - ph - 12;
-        // 背景
-        fillRoundedRect(renderer_, px - 2, py - 2, pw + 4, ph + 4, 4,
-                        30, 30, 30, (Uint8)(230 * a / 255));
-        // 轨道
-        fillRoundedRect(renderer_, px, py, pw, ph, 3, 60, 60, 60, (Uint8)(200 * a / 255));
-        // 音量填充
-        int vh = (int)((stats.muted ? 0.0f : stats.volume) * (ph - 8));
-        if (vh > 0) {
-            fillRoundedRect(renderer_, px, py + ph - 4 - vh, pw, vh, 3,
-                            77, 144, 255, (Uint8)(255 * a / 255));
-        }
-        // thumb
-        if (stats.draggingVolume) {
-            int thumbY = py + ph - 4 - vh - 4;
-            fillRoundedRect(renderer_, px - 3, thumbY, pw + 6, 8, 4,
+    // ---- M32b 行2：字幕 / 倍速 / 画质 / 音量 / 设置 / 全屏（左对齐文本钮）----
+    auto rowText = [&](int x, const char* txt, bool hover,
+                       Uint8 r, Uint8 g, Uint8 b) {
+        if (hover)
+            fillRoundedRect(renderer_, x - 9, lay.row2Y, (int)std::strlen(txt) * 13 + 18, 28, 8,
+                            255, 255, 255, (Uint8)(20 * a / 255));
+        gdi_.drawText(x, lay.row2Y + 6, txt, 12, r, g, b);
+    };
+    // 字幕
+    rowText(lay.subX, "字幕", hit(prevBtn) && false ||
+            (mouseX_ >= lay.subX && mouseX_ < lay.subX + 44 &&
+             mouseY_ >= lay.row2Y && mouseY_ < lay.row2Y + 28),
+            0xe4, 0xe4, 0xe7);
+    // 倍速 + 蓝色数值标签（accent2 #3b82f6）
+    {
+        char spdTxt[16];
+        std::snprintf(spdTxt, sizeof(spdTxt), "%.2gx", stats.speed);
+        std::string label = std::string("倍速 ") + spdTxt;
+        bool hov = mouseX_ >= lay.spdX && mouseX_ < lay.spdX + 76 &&
+                   mouseY_ >= lay.row2Y && mouseY_ < lay.row2Y + 28;
+        rowText(lay.spdX, label.c_str(), hov, 0xe4, 0xe4, 0xe7);
+        gdi_.drawText(lay.spdX + 40, lay.row2Y + 6, spdTxt, 12, 0x3b, 0x82, 0xf6);
+    }
+    // 画质 / 设置（本地播放占位）
+    rowText(lay.qualX, "画质",
+            mouseX_ >= lay.qualX && mouseX_ < lay.qualX + 44 &&
+            mouseY_ >= lay.row2Y && mouseY_ < lay.row2Y + 28,
+            0xa1, 0xa1, 0xa6);
+    drawBtn(Btn{ lay.volBxX, lay.row2Y, 34, 34 },
+            stats.muted ? Icon::Mute : Icon::Volume,
+            mouseX_ >= lay.volBxX && mouseX_ < lay.volBxX + 34 &&
+            mouseY_ >= lay.row2Y && mouseY_ < lay.row2Y + 34, false);
+    rowText(lay.setX, "设置",
+            mouseX_ >= lay.setX && mouseX_ < lay.setX + 44 &&
+            mouseY_ >= lay.row2Y && mouseY_ < lay.row2Y + 28,
+            0xe4, 0xe4, 0xe7);
+    drawBtn(Btn{ lay.fs2X, lay.row2Y, 34, 34 },
+            stats.fullscreen ? Icon::ExitFullscreen : Icon::Fullscreen,
+            mouseX_ >= lay.fs2X && mouseX_ < lay.fs2X + 34 &&
+            mouseY_ >= lay.row2Y && mouseY_ < lay.row2Y + 34, false);
+
+    // 行1 传输钮（最后绘制保证在上层）
+    drawBtn(prevBtn, Icon::Prev, hit(prevBtn), false);
+    drawPlayBtn(playBtn, Icon::Pause, hit(playBtn));
+    drawBtn(nextBtn, Icon::Next, hit(nextBtn), false);
+
+    // M32b: 音量横条（volwrap hover 或拖动时显示在音量钮右侧）
+    {
+        Btn volWrap{ lay.volBxX, lay.row2Y, 34 + 6 + lay.volSlW, 34 };
+        bool volHover = hit(volWrap);
+        if (volHover || stats.draggingVolume) {
+            int slx = lay.volSlX, sly = lay.row2Y + 15;
+            fillRoundedRect(renderer_, slx, sly - 2, lay.volSlW, 4, 2,
+                            255, 255, 255, (Uint8)(51 * a / 255));
+            float v = stats.muted ? 0.f : stats.volume;
+            int fw = (int)(lay.volSlW * v);
+            if (fw > 0)
+                fillRoundedRect(renderer_, slx, sly - 2, fw, 4, 2,
+                                255, 255, 255, (Uint8)(255 * a / 255));
+            fillRoundedRect(renderer_, slx + fw - 5, sly - 5, 10, 10, 5,
                             255, 255, 255, (Uint8)(255 * a / 255));
         }
     }
 
-    drawBtn(prevBtn, Icon::Prev, hit(prevBtn), false);
-    drawBtn(playBtn, stats.playing && !stats.paused ? Icon::Pause : Icon::Play,
-            hit(playBtn), false);
-    drawBtn(nextBtn, Icon::Next, hit(nextBtn), false);
-    drawBtn(volBtn, stats.muted ? Icon::Mute : Icon::Volume, volHover, false);
-    drawBtn(fsBtn, stats.fullscreen ? Icon::ExitFullscreen : Icon::Fullscreen,
-            hit(fsBtn), false);
-
-    // play mode button (single/loop/shuffle)
-    Icon modeIcon = stats.playMode == 0 ? Icon::Single
-                   : stats.playMode == 1 ? Icon::Loop : Icon::Shuffle;
-    drawBtn(modeBtn, modeIcon, hit(modeBtn), stats.playMode != 1);
-    // speed button: text label showing current multiplier
-    char spdText[16];
-    std::snprintf(spdText, sizeof(spdText), "x%.2g", stats.speed);
-    if (hit(speedBtn)) {
-        fillRoundedRect(renderer_, speedBtn.x, speedBtn.y, speedBtn.w, speedBtn.h, 8,
-                        255, 255, 255, (Uint8)(40 * a / 255));
-    }
-    SDL_SetRenderDrawColor(renderer_, 255, 255, 255, (Uint8)(220 * a / 255));
-    drawFontText(renderer_, speedBtn.x + 7, speedBtn.y + 16, 2, spdText);
-
-    // ---- speed menu (popup above speed button) ----
+    // ---- speed menu (popup above 倍速 button) ----
     if (speedMenuOpen_) {
         const int count = 8;
         float speeds[8] = { 0.25f, 0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f, 3.0f };
         int itemH = 28, menuW = 92;
-        int menuX = speedBtn.x + speedBtn.w / 2 - menuW / 2;
-        int menuBottom = lay.barY - 8;
+        int menuX = lay.spdX - 10;
+        int menuBottom = lay.row2Y + 34;
         int menuY = menuBottom - count * itemH;
         fillRoundedRect(renderer_, menuX - 4, menuY - 4, menuW + 8, count * itemH + 8, 10,
                         20, 20, 20, (Uint8)(235 * a / 255));
