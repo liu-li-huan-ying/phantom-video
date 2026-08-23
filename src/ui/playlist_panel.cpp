@@ -87,7 +87,7 @@ void PlaylistPanel::toggle() {
 }
 
 bool PlaylistPanel::shrinkReady() const {
-    return shrinkPending_ && !open_ && openAnim_ <= 0.01f;
+    return shrinkPending_ && !open_;
 }
 
 void PlaylistPanel::consumeShrink() {
@@ -140,10 +140,8 @@ SDL_Texture* PlaylistPanel::iconForFile(const std::string& path) const {
 
 void PlaylistPanel::draw(int currentIndex, int winW, int winH) {
     // M32f.6: 全高面板（无底部空白）；动画更新
-    if (open_ && openAnim_ < 1.0f)
-        openAnim_ = std::min(1.0f, openAnim_ + 0.10f);
-    else if (!open_ && openAnim_ > 0.0f)
-        openAnim_ = std::max(0.0f, openAnim_ - 0.10f);
+    // M32g: 无动画 —— 立即出现/消失
+    openAnim_ = open_ ? 1.0f : 0.0f;
 
     closeHover_ = false;
 
@@ -168,8 +166,7 @@ void PlaylistPanel::draw(int currentIndex, int winW, int winH) {
 
     int pw = (int)(baseWidth_ * openAnim_);
     // M32f.9: 收起动画时整体向右滑出（窗口尚未缩回，超出部分被窗口裁剪）
-    int slideOut = (!open_ && shrinkPending_) ? (int)((1.0f - openAnim_) * 90) : 0;
-    int panelX = winW - pw + slideOut;
+    int panelX = winW - pw;
     int panelTop = 0;
     int panelH = winH;
     int itemsY = panelTop + kHeaderH;
@@ -189,47 +186,19 @@ void PlaylistPanel::draw(int currentIndex, int winW, int winH) {
     SDL_SetRenderDrawColor(renderer_, 55, 55, 55, 255);
     SDL_RenderDrawLine(renderer_, panelX, panelTop, panelX, winH);
 
-    // Header 背景
-    SDL_Rect headerBg{ panelX, panelTop, pw, kHeaderH };
-    SDL_SetRenderDrawColor(renderer_, kHeaderBg.r, kHeaderBg.g, kHeaderBg.b, kHeaderBg.a);
-    SDL_RenderFillRect(renderer_, &headerBg);
-
-    // Header 下分隔线
-    SDL_SetRenderDrawColor(renderer_, kSeparator.r, kSeparator.g, kSeparator.b, kSeparator.a);
-    SDL_RenderDrawLine(renderer_, panelX, panelTop + kHeaderH - 1, panelX + pw, panelTop + kHeaderH - 1);
-
-    // Header 文字
-    std::string headerText = "播放列表";
-    if (playlist_ && playlist_->size() > 0) {
-        headerText += " (" + std::to_string(playlist_->size()) + ")";
-    }
-    textCache_.drawText(panelX + 14, panelTop + 13, headerText, 13, 255, 255, 255);
-    // M32f: 关闭钮移至头部右侧（.pl-close 28px r7）
-    {
-        int bx = panelX + pw - 14 - 28, by = panelTop + 8;
-        closeRect_ = SDL_Rect{ bx, by, 28, 28 };   // M32f.6: 实测矩形供命中
-        if (closeHover_)
-            fillRR(renderer_, bx, by, 28, 28, 7, 255, 255, 255, 20);
-        svgicon::draw(renderer_, "close", bx + 14, by + 14, 16,
-                      closeHover_ ? 255 : 212, closeHover_ ? 255 : 212,
-                      closeHover_ ? 255 : 216, 220);
-    }
-
+    // ---- 列表区（先画条目，最后画头部保证头部在最上层）----
     // Clip to items area
     listClip_ = SDL_Rect{ panelX, itemsY, pw, visibleH };
     SDL_RenderSetClipRect(renderer_, &listClip_);
 
-    // 绘制列表项
     for (int i = 0; i < totalItems; ++i) {
         int y = itemsY + i * kItemH - scrollOffset_;
         if (y + kItemH < itemsY - kItemH || y > itemsY + visibleH + kItemH) continue;
-
         bool isActive = (i == currentIndex);
         bool isHover = (i == hoverIndex_);
         std::string filename = std::filesystem::path(playlist_->fileAt(i)).filename().string();
         drawItem(panelX, y, i, filename, isActive, isHover, pw);
     }
-
     SDL_RenderSetClipRect(renderer_, nullptr);
 
     // 滚动条
@@ -242,7 +211,29 @@ void PlaylistPanel::draw(int currentIndex, int winW, int winH) {
         SDL_RenderFillRect(renderer_, &sb);
     }
 
-    // 拖拽调整宽度手柄（面板左边缘）
+    // ---- Header（最后绘制，永远盖在条目之上）----
+    SDL_Rect headerBg{ panelX, panelTop, pw, kHeaderH };
+    SDL_SetRenderDrawColor(renderer_, kHeaderBg.r, kHeaderBg.g, kHeaderBg.b, kHeaderBg.a);
+    SDL_RenderFillRect(renderer_, &headerBg);
+    SDL_SetRenderDrawColor(renderer_, kSeparator.r, kSeparator.g, kSeparator.b, kSeparator.a);
+    SDL_RenderDrawLine(renderer_, panelX, panelTop + kHeaderH - 1, panelX + pw, panelTop + kHeaderH - 1);
+
+    std::string headerText = "播放列表";
+    if (playlist_ && playlist_->size() > 0)
+        headerText += " (" + std::to_string(playlist_->size()) + ")";
+    textCache_.drawText(panelX + 14, panelTop + 13, headerText, 13, 255, 255, 255);
+    {
+        int bx = panelX + pw - 14 - 28, by = panelTop + 8;
+        closeRect_ = SDL_Rect{ bx, by, 28, 28 };
+        bool closeHover = (mx_ >= bx && mx_ < bx + 28 && my_ >= by && my_ < by + 28);
+        if (closeHover)
+            fillRR(renderer_, bx, by, 28, 28, 7, 255, 255, 255, 20);
+        svgicon::draw(renderer_, "close", bx + 14, by + 14, 16,
+                      closeHover ? 255 : 212, closeHover ? 255 : 212,
+                      closeHover ? 255 : 216, 220);
+    }
+
+    // 拖拽调整宽度手柄（面板左边缘）—— kResizeW=0 时不可见
     if (open_) {
         SDL_Rect resizeHandle{ panelX, panelTop, kResizeW, panelH };
         SDL_SetRenderDrawColor(renderer_, 70, 70, 70, 180);

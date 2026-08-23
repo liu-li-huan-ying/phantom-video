@@ -1,4 +1,4 @@
-#include "audio/audio_output.h"
+﻿#include "audio/audio_output.h"
 #include "core/logger.h"
 
 #include <algorithm>
@@ -301,11 +301,6 @@ void AudioOutput::fill(Uint8* stream, int len) {
         LOG_DBG("FILL","tick=%u count=%d speed=%.2f reanchor=%d writeHead_=%.3f vol=%.2f",
             SDL_GetTicks(), g_fillCount, speed_.load(), reanchor_, writeHead_,
             volume_.load());
-    }
-    // M31j: 音画同步诊断 —— UI 时钟 vs 正在播放的音频内容标签
-    if (g_fillCount % 90 == 0 && !current_.data.empty()) {
-        LOG_DBG("FILL","AVCHK: ui_clock=%.3f audio_pts=%.3f drift=%.3f speed=%.2f",
-                writeHead_, current_.pts, current_.pts - writeHead_, speed_.load());
     }
 
     // 原子处理待处理的速度变更（在 SDL 回调线程内，零竞态）
