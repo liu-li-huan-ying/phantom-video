@@ -243,13 +243,18 @@ auto args = utf8Args();
           if (player.openFile(p)) {
             loadExternalSubtitle(player, p, &vrender);
             thumbnail.open(p);  // M15: 打开缩略图提取器
+            bool resumed = false;
             if (cfg.resume) {
                 auto it = cfg.history.find(p);
                 if (it != cfg.history.end() && it->second > 2.0) {
                     player.seek(it->second);
+                    resumed = true;
                     vrender.showToast("已从上次位置续播 (按 R 关闭)");
                 }
             }
+            // M32g.3: 无续播时复用 seek 同步门控启动 —— 音画在时钟起点
+            // 一起放行，避免音频先跑导致开头视频被成片丢弃（起播假死）
+            if (!resumed) player.seek(0.0);
         } else {
             SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "打开失败",
                                      player.error().c_str(), win);
@@ -343,6 +348,7 @@ auto args = utf8Args();
                     loadExternalSubtitle(player, e.drop.file, &vrender);
                     thumbnail.open(e.drop.file);
                     playlist.scanDirectory(e.drop.file);
+                    player.seek(0.0);  // M32g.3: 拖放打开同样走同步启动
                     std::string base = e.drop.file;
                     std::size_t slash = base.find_last_of("\\/");
                     if (slash != std::string::npos) base = base.substr(slash + 1);

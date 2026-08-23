@@ -642,6 +642,11 @@ void VideoRenderer::drawToast() {
     int alpha = (remain < 500) ? (int)(remain * 255 / 500) : 255;
     SDL_SetTextureAlphaMod(tex, (Uint8)alpha);
     SDL_Rect dst{ (winW - tw) / 2, 60, tw, th };
+    // M32g.2: 柔和阴影 + 浅色描边（效果图 .toast 边框白.10）
+    fillRoundedRect(renderer_, dst.x - 2, dst.y + 2, dst.w + 4, dst.h + 4, 11,
+                    0, 0, 0, (Uint8)(60 * alpha / 255));
+    fillRoundedRect(renderer_, dst.x - 1, dst.y - 1, dst.w + 2, dst.h + 2, 10,
+                    255, 255, 255, (Uint8)(26 * alpha / 255));
     SDL_RenderCopy(renderer_, tex, nullptr, &dst);
     SDL_DestroyTexture(tex);
 }
@@ -1206,7 +1211,7 @@ void VideoRenderer::render(const AVFrame* frame, const RenderStats& stats) {
     // M32g: 扫描线质感（CSS repeating-linear-gradient 3px 周期 白1.2%）
     {
         SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
-        SDL_SetRenderDrawColor(renderer_, 255, 255, 255, 3);
+        SDL_SetRenderDrawColor(renderer_, 255, 255, 255, 8);
         for (int y = dst.y; y < dst.y + dst.h; y += 3) {
             SDL_Rect ln{ dst.x, y, dst.w, 1 };
             SDL_RenderFillRect(renderer_, &ln);
@@ -1230,11 +1235,11 @@ void VideoRenderer::showPauseOverlay(PauseIcon icon) {
 void VideoRenderer::drawPauseOverlay(const RenderStats& stats) {
     if (!renderer_) return;
 
-    Uint32 now = SDL_GetTicks();
-    if (now > pauseOverlayUntil_ && pauseOverlayAlpha_ > 0) {
-        pauseOverlayAlpha_ = std::max(0, pauseOverlayAlpha_ - 12);
-    } else if (pauseOverlayAlpha_ > 0 && pauseOverlayAlpha_ < 200) {
+    // M32g.2: 中央按钮由暂停状态直接驱动（此前无任何触发源，从未显示）
+    if (stats.paused) {
         pauseOverlayAlpha_ = std::min(200, pauseOverlayAlpha_ + 25);
+    } else {
+        pauseOverlayAlpha_ = std::max(0, pauseOverlayAlpha_ - 12);
     }
     if (pauseOverlayAlpha_ <= 0) return;
 
