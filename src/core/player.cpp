@@ -207,6 +207,7 @@ void Player::togglePause() {
 void Player::setPaused(bool p) {
     paused_.store(p);
     playing_ = !p;
+    LOG_DBG("MAIN", "setPaused: %s audioEnabled=%d", p ? "PAUSE" : "RESUME", audioEnabled_.load());
     if (audioEnabled_.load()) {
         if (p)
             audio_->pauseDevice();
@@ -566,6 +567,7 @@ void Player::decodeLoop() {
 }
 
 void Player::audioLoop() {
+    LOG_INFO("ALOOP", "audioLoop started");
     while (!stop_.load()) {
         if (!audioDemuxer_ || !audioEnabled_.load()) break;
         if (audioSeekPending_.exchange(false)) {
@@ -577,12 +579,18 @@ void Player::audioLoop() {
             LOG_DBG("ALOOP", "seek done: clock=%.3f", audio_->clock());
         }
         PacketPtr pkt = audioDemuxer_->readPacket();
-        if (!pkt) break;
+        if (!pkt) {
+            LOG_DBG("ALOOP", "readPacket returned null (EOF?)");
+            break;
+        }
         if (pkt->stream_index != audioDemuxer_->audioIndex()) continue;
         if (!audioDecoder_ || !audioDecoder_->send(pkt.get())) continue;
             while (FramePtr f = audioDecoder_->receive()) {
                 if (seekRequested() || stop_.load()) break;
-                if (audioSeeking_.load()) continue;
+                if (audioSeeking_.load()) {
+                    LOG_DBG("ALOOP", "dropping frame during seek: pts=%.3f", framePts(f));
+                    continue;
+                }
                 if (framePts(f) < dropUntil_.load()) continue;
                 double seekTarget = audioSeekTarget_.load();
                 if (seekTarget > 0.0 && framePts(f) < seekTarget - 0.1) continue;
@@ -603,4 +611,5 @@ void Player::audioLoop() {
         }
     }
     if (audio_) audio_->closeQueue();
+    LOG_INFO("ALOOP", "audioLoop ended");
 }

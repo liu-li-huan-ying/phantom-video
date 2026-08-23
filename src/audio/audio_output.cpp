@@ -39,7 +39,12 @@ bool AudioOutput::open(const AVCodecParameters* par, double ptsScale) {
     want.callback = &AudioOutput::sdlCallback;
     want.userdata = this;
     dev_ = SDL_OpenAudioDevice(nullptr, 0, &want, &spec_, 0);
-    if (!dev_) return false;
+    if (!dev_) {
+        LOG_ERROR("AUDIO", "SDL_OpenAudioDevice FAILED: %s", SDL_GetError());
+        return false;
+    }
+    LOG_INFO("AUDIO", "open: dev=%u freq=%d ch=%d samples=%d",
+             dev_, spec_.freq, spec_.channels, spec_.samples);
 
     {
         std::lock_guard<std::mutex> lock(swrMutex_);
@@ -49,7 +54,10 @@ bool AudioOutput::open(const AVCodecParameters* par, double ptsScale) {
         AVChannelLayout outLayout;
         av_channel_layout_default(&outLayout, spec_.channels);
         swr_ = swr_alloc();
-        if (!swr_) return false;
+        if (!swr_) {
+            LOG_ERROR("AUDIO", "swr_alloc FAILED");
+            return false;
+        }
         av_opt_set_chlayout(swr_, "in_chlayout", &par->ch_layout, 0);
         av_opt_set_int(swr_, "in_sample_rate", par->sample_rate, 0);
         av_opt_set_sample_fmt(swr_, "in_sample_fmt", (AVSampleFormat)par->format, 0);
@@ -58,11 +66,19 @@ bool AudioOutput::open(const AVCodecParameters* par, double ptsScale) {
         av_opt_set_sample_fmt(swr_, "out_sample_fmt", AV_SAMPLE_FMT_S16, 0);
         int ret = swr_init(swr_);
         av_channel_layout_uninit(&outLayout);
-        if (ret < 0) return false;
+        if (ret < 0) {
+            LOG_ERROR("AUDIO", "swr_init FAILED: %d", ret);
+            return false;
+        }
+        LOG_INFO("AUDIO", "swr: in_rate=%d out_rate=%d in_fmt=%d -> out_fmt=S16",
+                 par->sample_rate, spec_.freq, par->format);
     }
 
     sonic_ = sonicCreateStream(spec_.freq, spec_.channels);
-    if (!sonic_) return false;
+    if (!sonic_) {
+        LOG_ERROR("AUDIO", "sonicCreateStream FAILED");
+        return false;
+    }
     sonicSetSampleRate(sonic_, spec_.freq);
     sonicSetNumChannels(sonic_, spec_.channels);
     sonicSetSpeed(sonic_, 1.0f);
@@ -72,15 +88,18 @@ bool AudioOutput::open(const AVCodecParameters* par, double ptsScale) {
 
     ok_ = true;
     SDL_PauseAudioDevice(dev_, 0);
+    LOG_INFO("AUDIO", "open OK: device started");
     return true;
 }
 
 void AudioOutput::clearQueue() {
     queue_.clear();
+    LOG_DBG("FILL", "clearQueue called");
 }
 
 void AudioOutput::setClock(double t) {
     std::lock_guard<std::mutex> lock(clockMutex_);
+    LOG_DBG("FILL", "setClock: writeHead_ %.3f -> %.3f", writeHead_, t);
     writeHead_ = t;
 }
 
@@ -102,11 +121,13 @@ void AudioOutput::rebuildSonic(float spd) {
     sonicSetQuality(sonic_, 1);
     lastSpeed_ = spd;
     speed_.store(spd, std::memory_order_relaxed);
+    LOG_DBG("SPEED", "rebuildSonic: speed=%.2f", spd);
 }
 
 void AudioOutput::setSpeed(float spd) {
     if (spd <= 0.01f) spd = 0.01f;
     speed_.store(spd, std::memory_order_relaxed);
+    LOG_DBG("SPEED", "setSpeed (atomic only): %.2f", spd);
 }
 
 void AudioOutput::requestSpeedChange(float spd, double anchor) {
@@ -115,6 +136,7 @@ void AudioOutput::requestSpeedChange(float spd, double anchor) {
         pendingSpeedAnchor_.store(anchor, std::memory_order_release);
     }
     pendingSpeed_.store(spd, std::memory_order_release);
+    LOG_DBG("SPEED", "requestSpeedChange: spd=%.2f anchor=%.3f", spd, anchor);
 }
 
 float AudioOutput::pendingSpeed() const {
@@ -127,6 +149,7 @@ bool AudioOutput::hasPendingSpeed() const {
 
 void AudioOutput::requestSeek(double t) {
     pendingSeek_.store(t, std::memory_order_release);
+    LOG_DBG("FILL", "requestSeek: t=%.3f", t);
 }
 
 bool AudioOutput::hasPendingSeek() const {
@@ -135,28 +158,42 @@ bool AudioOutput::hasPendingSeek() const {
 
 void AudioOutput::setSeeking(bool s) {
     seeking_.store(s, std::memory_order_release);
+    LOG_DBG("AUDIO", "setSeeking: %d", s);
 }
 
 bool AudioOutput::push(const FramePtr& frame) {
-    if (!ok_) return false;
-    if (seeking_.load(std::memory_order_acquire)) return false;  // seek 期间阻断
+    if (!ok_) {
+        LOG_WARN("AUDIO", "push: not ok, dropping frame");
+        return false;
+    }
+    if (seeking_.load(std::memory_order_acquire)) {
+        LOG_DBG("AUDIO", "push: BLOCKED by seeking_");
+        return false;
+    }
     AudioChunk chunk;
     if (!convert(frame, chunk)) return true;
-    return queue_.push(std::move(chunk));
+    bool ok = queue_.push(std::move(chunk));
+    if (!ok) LOG_WARN("AUDIO", "push: queue push FAILED (queue full?)");
+    return ok;
 }
 
 bool AudioOutput::tryPush(const FramePtr& frame) {
     if (!ok_) return false;
-    if (seeking_.load(std::memory_order_acquire)) return false;  // seek 期间阻断
+    if (seeking_.load(std::memory_order_acquire)) return false;
     AudioChunk chunk;
     if (!convert(frame, chunk)) return true;
-    return queue_.tryPush(std::move(chunk));
+    bool ok = queue_.tryPush(std::move(chunk));
+    if (!ok) LOG_DBG("AUDIO", "tryPush: queue full, dropped frame");
+    return ok;
 }
 
 bool AudioOutput::convert(const FramePtr& frame, AudioChunk& chunk) {
     std::lock_guard<std::mutex> swrLock(swrMutex_);
     std::lock_guard<std::mutex> sLock(sonicMutex_);
-    if (!swr_ || !sonic_) return false;
+    if (!swr_ || !sonic_) {
+        LOG_WARN("AUDIO", "convert: swr_=%p sonic_=%p, dropping frame", swr_, sonic_);
+        return false;
+    }
 
     int outSamples = (int)av_rescale_rnd(
         swr_get_delay(swr_, frame->sample_rate) + frame->nb_samples,
@@ -165,13 +202,20 @@ bool AudioOutput::convert(const FramePtr& frame, AudioChunk& chunk) {
     int channels = spec_.channels;
     int outBytes = outSamples * channels * (int)sizeof(int16_t);
     uint8_t* s16Buf = (uint8_t*)av_malloc(outBytes);
-    if (!s16Buf) return false;
+    if (!s16Buf) {
+        LOG_ERROR("AUDIO", "convert: av_malloc FAILED (%d bytes)", outBytes);
+        return false;
+    }
 
     uint8_t* outPlanes[1] = { s16Buf };
     int converted = swr_convert(swr_, outPlanes, outSamples,
                                 (const uint8_t**)frame->extended_data,
                                 frame->nb_samples);
-    if (converted <= 0) { av_free(s16Buf); return false; }
+    if (converted <= 0) {
+        LOG_WARN("AUDIO", "convert: swr_convert FAILED: %d (in_samples=%d)", converted, frame->nb_samples);
+        av_free(s16Buf);
+        return false;
+    }
 
     int validBytes = converted * channels * (int)sizeof(int16_t);
 
@@ -184,13 +228,20 @@ bool AudioOutput::convert(const FramePtr& frame, AudioChunk& chunk) {
         av_free(s16Buf);
 
         int available = sonicSamplesAvailable(sonic_);
-        if (available <= 0) return false;
+        if (available <= 0) {
+            LOG_DBG("AUDIO", "convert: sonicSamplesAvailable=0 (speed=%.2f)", spd);
+            return false;
+        }
 
         uint8_t* sonicOut = (uint8_t*)av_malloc(available * channels * (int)sizeof(int16_t));
         if (!sonicOut) return false;
 
         int readSamples = sonicReadShortFromStream(sonic_, (int16_t*)sonicOut, available);
-        if (readSamples <= 0) { av_free(sonicOut); return false; }
+        if (readSamples <= 0) {
+            LOG_DBG("AUDIO", "convert: sonicRead FAILED (available=%d)", available);
+            av_free(sonicOut);
+            return false;
+        }
 
         int readBytes = readSamples * channels * (int)sizeof(int16_t);
         chunk.data.assign(sonicOut, sonicOut + readBytes);
@@ -205,11 +256,20 @@ bool AudioOutput::convert(const FramePtr& frame, AudioChunk& chunk) {
     return !chunk.data.empty();
 }
 
-void AudioOutput::closeQueue() { queue_.close(); }
+void AudioOutput::closeQueue() {
+    queue_.close();
+    LOG_DBG("FILL", "closeQueue called");
+}
 
-void AudioOutput::pauseDevice() { SDL_PauseAudioDevice(dev_, 1); }
+void AudioOutput::pauseDevice() {
+    SDL_PauseAudioDevice(dev_, 1);
+    LOG_DBG("AUDIO", "pauseDevice: dev=%u", dev_);
+}
 
-void AudioOutput::resumeDevice() { SDL_PauseAudioDevice(dev_, 0); }
+void AudioOutput::resumeDevice() {
+    SDL_PauseAudioDevice(dev_, 0);
+    LOG_DBG("AUDIO", "resumeDevice: dev=%u", dev_);
+}
 
 void SDLCALL AudioOutput::sdlCallback(void* userdata, Uint8* stream, int len) {
     static_cast<AudioOutput*>(userdata)->fill(stream, len);
@@ -220,12 +280,13 @@ void AudioOutput::fill(Uint8* stream, int len) {
     static int g_fillCount = 0;
     g_fillCount++;
     if (g_fillCount == 1) {
-        LOG_DBG("FILL","FIRST CALL: len=%d spec_.freq=%d writeHead_=%.3f speed=%.2f reanchor=%d",
-            len, spec_.freq, writeHead_, speed_.load(), reanchor_);
+        LOG_DBG("FILL","FIRST CALL: len=%d spec_.freq=%d writeHead_=%.3f speed=%.2f reanchor=%d vol=%.2f",
+            len, spec_.freq, writeHead_, speed_.load(), reanchor_, volume_.load());
     }
     if (g_fillCount % 200 == 0) {
-        LOG_DBG("FILL","tick=%u count=%d speed=%.2f reanchor=%d writeHead_=%.3f",
-            SDL_GetTicks(), g_fillCount, speed_.load(), reanchor_, writeHead_);
+        LOG_DBG("FILL","tick=%u count=%d speed=%.2f reanchor=%d writeHead_=%.3f vol=%.2f",
+            SDL_GetTicks(), g_fillCount, speed_.load(), reanchor_, writeHead_,
+            volume_.load());
     }
 
     // 原子处理待处理的速度变更（在 SDL 回调线程内，零竞态）
@@ -290,26 +351,34 @@ void AudioOutput::fill(Uint8* stream, int len) {
                             before, writeHead_, speed_.load(std::memory_order_relaxed), space);
                     }
                 }
+                // 每 50 次空队列静音输出记录一次（避免刷屏）
+                static int silenceCount = 0;
+                silenceCount++;
+                if (silenceCount % 50 == 0) {
+                    LOG_WARN("FILL","SILENCE: queue empty x%d, writeHead_=%.3f vol=%.2f speed=%.2f reanchor=%d",
+                        silenceCount, writeHead_, volume_.load(), speed_.load(), reanchor_);
+                }
                 break;
             }
             current_ = std::move(chunk);
             offset_ = 0;
-            {
-                std::lock_guard<std::mutex> lock(clockMutex_);
-                if (writeHead_ < 0.0 || reanchor_) {
-                    double diff = current_.pts - writeHead_;
-                    if (reanchor_ && writeHead_ > 0.0 && (diff > 2.0 || diff < -2.0)) {
-                        LOG_WARN("FILL","REANCHOR SKIP: chunk.pts %.3f way off writeHead_ %.3f (diff=%.3f), discarding chunk",
-                            current_.pts, writeHead_, diff);
-                        current_.data.clear();
-                        offset_ = 0;
-                    } else {
-                        LOG_DBG("FILL","REANCHOR: writeHead_ %.3f -> chunk.pts %.3f", writeHead_, current_.pts);
-                        writeHead_ = current_.pts;
-                        reanchor_ = false;
-                    }
+        {
+            std::lock_guard<std::mutex> lock(clockMutex_);
+            if (writeHead_ < 0.0 || reanchor_) {
+                double diff = current_.pts - writeHead_;
+                if (reanchor_ && writeHead_ > 0.0 && (diff > 2.0 || diff < -2.0)) {
+                    LOG_WARN("FILL","REANCHOR SKIP: chunk.pts %.3f way off writeHead_ %.3f (diff=%.3f), discarding chunk",
+                        current_.pts, writeHead_, diff);
+                    current_.data.clear();
+                    offset_ = 0;
+                } else {
+                    LOG_DBG("FILL","REANCHOR: writeHead_ %.3f -> chunk.pts %.3f speed=%.2f",
+                        writeHead_, current_.pts, speed_.load());
+                    writeHead_ = current_.pts;
+                    reanchor_ = false;
                 }
             }
+        }
         }
         size_t n = std::min<size_t>(current_.data.size() - offset_, (size_t)space);
         SDL_memcpy(dst, current_.data.data() + offset_, n);
@@ -330,6 +399,17 @@ void AudioOutput::fill(Uint8* stream, int len) {
 void AudioOutput::applyVolume(Uint8* stream, int len) {
     float v = volume_.load(std::memory_order_relaxed);
     bool norm = normalization_.load(std::memory_order_relaxed);
+
+    // 静音检测：volume=0 时记录
+    static int zeroVolCount = 0;
+    if (v <= 0.001f) {
+        zeroVolCount++;
+        if (zeroVolCount % 200 == 1) {
+            LOG_WARN("AUDIO", "applyVolume: volume=%.3f (MUTED!) x%d", v, zeroVolCount);
+        }
+    } else {
+        zeroVolCount = 0;
+    }
 
     float normGain = 1.0f;
     if (norm) {
@@ -360,6 +440,8 @@ void AudioOutput::applyVolume(Uint8* stream, int len) {
     float totalGain = v * normGain;
     if (totalGain >= 1.0f && !norm) return;
     if (totalGain <= 0.0f) {
+        LOG_WARN("AUDIO", "applyVolume: totalGain=%.3f (zeroing stream!) vol=%.2f norm=%.2f",
+                 totalGain, v, normGain);
         SDL_memset(stream, 0, len);
         return;
     }
