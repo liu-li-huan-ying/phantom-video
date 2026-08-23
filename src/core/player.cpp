@@ -264,6 +264,21 @@ void Player::setSpeed(float s) {
         double anchor = audio_->clock();
         if (anchor < 0.0) anchor = 0.0;
         LOG_DBG("SPEED", "setSpeed: s=%.2f anchor=%.3f writeHead_=%.3f", s, anchor, audio_->clock());
+
+        // M31g: speed change must also re-position audioLoop at the anchor,
+        // otherwise decoder runs seconds ahead of writeHead_ and the first chunk
+        // after queue clear trips REANCHOR SKIP forever (permanent silence).
+        audioSeeking_.store(true);
+        audio_->setSeeking(true);
+        audioSeekTarget_.store(anchor);
+        audioSeekPending_.store(true);
+        int waitMs = 0;
+        for (int i = 0; i < 50; ++i) {
+            if (!audioSeeking_.load()) break;
+            SDL_Delay(1);
+            waitMs = i + 1;
+        }
+        LOG_DBG("SPEED", "audioLoop reseek done: anchor=%.3f wait=%dms", anchor, waitMs);
         // 原子请求速度变更 + 锚定时钟：fill() 在 SDL 回调线程内一次性处理
         audio_->requestSpeedChange(s, anchor);
         LOG_DBG("SPEED", "after requestSpeed: pending=%d anchor=%.3f", audio_->hasPendingSpeed(), anchor);
@@ -364,6 +379,7 @@ std::string Player::rawSubtitleText(double t) const {
 void Player::toggleMute() {
     muted_.store(!muted_.load());
     if (audio_) audio_->setVolume(muted_.load() ? 0.0f : volume_.load());
+    LOG_WARN("AUDIO", "toggleMute: muted=%d vol=%.2f", muted_.load() ? 1 : 0, volume_.load());
 }
 
 double Player::framePts(const FramePtr& f) const {
@@ -586,7 +602,7 @@ void Player::audioLoop() {
         if (pkt->stream_index != audioDemuxer_->audioIndex()) continue;
         if (!audioDecoder_ || !audioDecoder_->send(pkt.get())) continue;
             while (FramePtr f = audioDecoder_->receive()) {
-                if (seekRequested() || stop_.load()) break;
+                if (seekRequested() || audioSeekPending_.load() || stop_.load()) break;
                 if (audioSeeking_.load()) {
                     LOG_DBG("ALOOP", "dropping frame during seek: pts=%.3f", framePts(f));
                     continue;
@@ -595,7 +611,7 @@ void Player::audioLoop() {
                 double seekTarget = audioSeekTarget_.load();
                 if (seekTarget > 0.0 && framePts(f) < seekTarget - 0.1) continue;
                 while (!audio_ || !audio_->tryPush(f)) {
-                    if (seekRequested() || stop_.load()) break;
+                    if (seekRequested() || audioSeekPending_.load() || stop_.load()) break;
                     std::this_thread::sleep_for(std::chrono::milliseconds(1));
                 }
                 LOG_TRACE("ALOOP", "push: pts=%.3f clock=%.3f", framePts(f), audio_->clock());

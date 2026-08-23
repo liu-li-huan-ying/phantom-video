@@ -440,8 +440,12 @@ void AudioOutput::applyVolume(Uint8* stream, int len) {
     float totalGain = v * normGain;
     if (totalGain >= 1.0f && !norm) return;
     if (totalGain <= 0.0f) {
-        LOG_WARN("AUDIO", "applyVolume: totalGain=%.3f (zeroing stream!) vol=%.2f norm=%.2f",
-                 totalGain, v, normGain);
+        static int zeroGainCount = 0;
+        zeroGainCount++;
+        if (zeroGainCount == 1 || zeroGainCount % 200 == 0) {
+            LOG_WARN("AUDIO", "applyVolume: totalGain=%.3f (zeroing stream!) vol=%.2f norm=%.2f x%d",
+                     totalGain, v, normGain, zeroGainCount);
+        }
         SDL_memset(stream, 0, len);
         return;
     }

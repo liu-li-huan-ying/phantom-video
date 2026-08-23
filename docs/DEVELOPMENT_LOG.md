@@ -1007,3 +1007,19 @@
 - **教训与下一步方向**：
   - 简单放宽 reanchor 阈值治标不治本——根本矛盾是变速时 queue_.clear() 丢弃缓冲后，解码器内部位置（领先 anchor 数秒）与新写入数据不连续
   - 正确方案应从源头解决：变速时不丢队列/不清 current_（仅重建 Sonic 并 flush 其缓冲），或变速时让 audioLoop 同步 seek 到 writeHead_ 位置，保证 chunk 流与锚点连续
+
+### 阶段 M31g：变速静音正确修复（audioLoop 重定位到锚点）✅ 完成
+
+- **日志复盘**（回滚后用户实测）：
+  - 会话 163235：speed=0.25 时 reanchor=1 + 队列永久空 → 静音；切回 1.00x 仍静音 → 确认 REANCHOR SKIP 死循环为原始遗留 bug（M31e 状态即如此）
+  - 会话 163417：整场 vol=0.00（505 条 totalGain=0 警告）→ 静音操作无日志可追溯，且警告刷屏
+- **根因定论**：变速时 fill() 清队列 + 锚定 writeHead_，但 audioLoop 解码器位置领先锚点数秒（正常预读），首个新 chunk diff>2s → SKIP 死循环。放宽阈值方案已证伪（M31f 两次失败回滚）
+- **正确方案（本次实施）**：变速时让 audioLoop seek 到锚点，chunk 流从锚点连续开始，reanchor 自然成功：
+  - Player::setSpeed()：先 setSeeking(true) 阻断 push + audioSeekPending_=anchor，等待 ALOOP 完成 demuxer seek（≤50ms），再 requestSpeedChange(s, anchor)
+  - 复用 doSeek 成熟机制，seek 后解码器输出 ≈ anchor，diff<2s
+- **附带修复**：
+  - audioLoop 接收循环与 tryPush 自旋增加 audioSeekPending_.load() 逃逸条件（防 seek 挂起时自旋死锁）
+  - toggleMute 增加 LOG_WARN（静音事件可追溯）
+  - applyVolume totalGain=0 警告节流（首条 + 每200条）
+- **测试**：构建通过；--debug 冒烟 12 秒无任何 SILENCE/SKIP/MUTED 警告
+- **状态**：待用户变速+跳转组合实测
