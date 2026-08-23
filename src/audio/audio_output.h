@@ -84,7 +84,6 @@ private:
     // 延迟 seek：fill() 在 SDL 回调线程内原子处理
     std::atomic<double> pendingSeek_{ -1.0 };   // -1 = 无待处理 seek
     bool reanchor_ = false;                     // seek 后首块到达时重锚 writeHead_
-    bool reanchorSpeed_ = false;                // true = 变速重锚（无阈值）; false = seek 重锚（2s 阈值）
     std::atomic<bool> normalization_{ false };
     std::atomic<float> normGain_{ 1.0f };
     float peakTracker_ = 0.0f;

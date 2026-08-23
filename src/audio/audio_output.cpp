@@ -318,7 +318,6 @@ void AudioOutput::fill(Uint8* stream, int len) {
             LOG_DBG("FILL","pendingSpeed anchor: writeHead_=%.3f", writeHead_);
         }
         reanchor_ = true;
-        reanchorSpeed_ = true;
     }
 
     // 原子处理待处理的 seek（清 current_ + 清队列 + 设时钟）
@@ -330,7 +329,6 @@ void AudioOutput::fill(Uint8* stream, int len) {
         queue_.clear();
         setClock(seekTarget);
         reanchor_ = true;
-        reanchorSpeed_ = false;
         LOG_DBG("FILL","pendingSeek done: writeHead_after=%.3f reanchor=%d", writeHead_, reanchor_);
     }
 
@@ -368,22 +366,16 @@ void AudioOutput::fill(Uint8* stream, int len) {
             std::lock_guard<std::mutex> lock(clockMutex_);
             if (writeHead_ < 0.0 || reanchor_) {
                 double diff = current_.pts - writeHead_;
-                if (reanchor_ && !reanchorSpeed_ && writeHead_ > 0.0 && (diff > 2.0 || diff < -2.0)) {
+                if (reanchor_ && writeHead_ > 0.0 && (diff > 2.0 || diff < -2.0)) {
                     LOG_WARN("FILL","REANCHOR SKIP: chunk.pts %.3f way off writeHead_ %.3f (diff=%.3f), discarding chunk",
                         current_.pts, writeHead_, diff);
                     current_.data.clear();
                     offset_ = 0;
                 } else {
-                    if (reanchor_ && std::abs(diff) > 2.0) {
-                        LOG_DBG("FILL","REANCHOR: writeHead_ %.3f -> chunk.pts %.3f (JUMP %.3fs, speedChange=%d) speed=%.2f",
-                            writeHead_, current_.pts, diff, reanchorSpeed_, speed_.load());
-                    } else if (reanchor_) {
-                        LOG_DBG("FILL","REANCHOR: writeHead_ %.3f -> chunk.pts %.3f speed=%.2f",
-                            writeHead_, current_.pts, speed_.load());
-                    }
+                    LOG_DBG("FILL","REANCHOR: writeHead_ %.3f -> chunk.pts %.3f speed=%.2f",
+                        writeHead_, current_.pts, speed_.load());
                     writeHead_ = current_.pts;
                     reanchor_ = false;
-                    reanchorSpeed_ = false;
                 }
             }
         }
