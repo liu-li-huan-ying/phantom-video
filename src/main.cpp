@@ -308,7 +308,8 @@ auto args = utf8Args();
         } else {
             pw = panel.width();
             panel.toggle();
-            SDL_SetWindowSize(win, std::max(640, w - pw), h);
+            // M32f.9: 关闭时窗口暂不缩回——等面板向右滑出动画结束后
+            // 由主循环 shrinkReady() 分支执行缩窗，视频区全程纹丝不动
         }
     };
     auto prevTrack = [&]() {
@@ -792,6 +793,15 @@ auto args = utf8Args();
                 stats.onCycleMode = [&]() { cyclePlayMode(); };
                 stats.onCycleSpeed = [&]() { cycleSpeed(1); };
                 vrender.setPanelWidth(panel.width());  // M32f.2: 每帧同步面板宽
+                // M32f.9: 收起动画结束 → 现在才缩回窗口宽度
+                if (panel.shrinkReady()) {
+                    int cw = 0, ch = 0;
+                    SDL_GetWindowSize(win, &cw, &ch);
+                    int pw2 = panel.width();
+                    panel.consumeShrink();
+                    SDL_SetWindowSize(win, std::max(640, cw - pw2), ch);
+                    LOG_INFO("MAIN", "playlist shrink done: -%d", pw2);
+                }
                 vrender.render(f.get(), stats);
             }
             else if (player.state() == Player::State::Ended) {

@@ -77,10 +77,21 @@ void PlaylistPanel::shutdown() {
 }
 
 void PlaylistPanel::toggle() {
+    bool wasOpen = open_;
     open_ = !open_;
     if (!open_) {
         resizing_ = false;
+        shrinkPending_ = true;   // M32f.9: 收起动画结束后由主循环缩窗
     }
+    if (wasOpen) LOG_INFO("UI", "playlist closing anim -> window shrink pending");
+}
+
+bool PlaylistPanel::shrinkReady() const {
+    return shrinkPending_ && !open_ && openAnim_ <= 0.01f;
+}
+
+void PlaylistPanel::consumeShrink() {
+    shrinkPending_ = false;
 }
 
 bool PlaylistPanel::consumeToggleRequest() {
@@ -90,7 +101,7 @@ bool PlaylistPanel::consumeToggleRequest() {
 }
 
 int PlaylistPanel::width() const {
-    return open_ ? baseWidth_ : 0;
+    return (open_ || shrinkPending_) ? baseWidth_ : 0;
 }
 
 void PlaylistPanel::loadFormatIcons() {
@@ -156,7 +167,9 @@ void PlaylistPanel::draw(int currentIndex, int winW, int winH) {
     if (openAnim_ < 0.01f) return;
 
     int pw = (int)(baseWidth_ * openAnim_);
-    int panelX = winW - pw;
+    // M32f.9: 收起动画时整体向右滑出（窗口尚未缩回，超出部分被窗口裁剪）
+    int slideOut = (!open_ && shrinkPending_) ? (int)((1.0f - openAnim_) * 90) : 0;
+    int panelX = winW - pw + slideOut;
     int panelTop = 0;
     int panelH = winH;
     int itemsY = panelTop + kHeaderH;
@@ -203,8 +216,8 @@ void PlaylistPanel::draw(int currentIndex, int winW, int winH) {
     }
 
     // Clip to items area
-    SDL_Rect clipRect{ panelX, itemsY, pw, visibleH };
-    SDL_RenderSetClipRect(renderer_, &clipRect);
+    listClip_ = SDL_Rect{ panelX, itemsY, pw, visibleH };
+    SDL_RenderSetClipRect(renderer_, &listClip_);
 
     // 绘制列表项
     for (int i = 0; i < totalItems; ++i) {
@@ -260,7 +273,7 @@ void PlaylistPanel::drawItem(int baseX, int y, int index, const std::string& fil
     SDL_SetRenderDrawColor(renderer_, 0x2a, 0x2a, 0x34, 255);
     SDL_Rect botHalf{ tx, ty + thH / 2, thW, thH - thH / 2 };
     SDL_RenderFillRect(renderer_, &botHalf);
-    SDL_RenderSetClipRect(renderer_, nullptr);
+    SDL_RenderSetClipRect(renderer_, &listClip_);  // M32f.9: 恢复列表区裁剪（防滚动条目叠到头部）
     svgicon::draw(renderer_, "play", tx + thW / 2 + 1, ty + thH / 2, 22,
                   255, 255, 255, isActive ? 170 : 110);
 

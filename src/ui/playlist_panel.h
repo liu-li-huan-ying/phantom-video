@@ -19,6 +19,8 @@ public:
     bool isOpen() const { return open_; }
     // M32f.2: 面板内部不再自行开合，仅发出请求；窗口尺寸变化由主循环统一处理
     bool consumeToggleRequest();
+    bool shrinkReady() const;      // M32f.9: 收起动画结束后通知主循环缩窗
+    void consumeShrink();
     int width() const;
     void setPlaylist(const Playlist* pl) { playlist_ = pl; }
 
@@ -56,6 +58,7 @@ private:
     int clickedIdx_ = -1;
     bool dragStarted_ = false;
     bool toggleRequested_ = false;
+    bool shrinkPending_ = false;   // M32f.9: 关闭动画期间保持宽度
     SDL_Rect closeRect_{ 0,0,0,0 };   // M32f.6: 实绘矩形（命中以此为准）  // M32f.2: 内部开合请求（主循环消费）
 
     const Playlist* playlist_ = nullptr;
