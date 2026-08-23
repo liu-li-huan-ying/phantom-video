@@ -345,15 +345,10 @@ auto args = utf8Args();
                             if (cached) {
                                 vrender.setThumbnail(cached->tex, cached->w, cached->h, targetTime);
                             } else {
-                                // 缓存未命中，提交异步请求
-                                static double lastThumbTime = -1;
-                                if (std::abs(targetTime - lastThumbTime) > 1.0) {
-                                    lastThumbTime = targetTime;
-                                    if (thumbnail.isOpen())
-                                        thumbWorker.request(targetTime);
-                                }
-                                // 显示上一帧缩略图（如果有）
-                                vrender.setThumbnail(nullptr, 0, 0, -1);
+                                // 缓存未命中，提交异步请求（不设 1.0s 门槛）
+                                if (thumbnail.isOpen())
+                                    thumbWorker.request(targetTime);
+                                // 保留上一帧缩略图，不强制清空
                             }
                         } else {
                             vrender.setThumbnail(nullptr, 0, 0, -1);

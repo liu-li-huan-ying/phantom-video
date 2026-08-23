@@ -68,6 +68,7 @@ private:
     ThumbnailExtractor* extractor_ = nullptr;
     ThumbnailCache* cache_ = nullptr;
     SDL_Renderer* renderer_ = nullptr;
+    std::mutex extractorMutex_;  // 保护 extractor_ 并发访问
 
     std::thread thread_;
     std::mutex mutex_;

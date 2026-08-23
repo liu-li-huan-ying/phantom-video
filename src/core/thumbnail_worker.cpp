@@ -101,28 +101,31 @@ void ThumbnailWorker::workerLoop() {
 
         uint8_t* pixels = nullptr;
         int w = 0, h = 0;
-        if (extractor_->getFrame(req.time, &pixels, w, h) && pixels && w > 0 && h > 0) {
-            SDL_Texture* tex = SDL_CreateTexture(
-                renderer_, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STREAMING, w, h);
-            if (tex) {
-                void* tbits = nullptr;
-                int pitch = 0;
-                if (SDL_LockTexture(tex, nullptr, &tbits, &pitch) == 0) {
-                    for (int row = 0; row < h; ++row)
-                        memcpy((Uint8*)tbits + row * pitch, pixels + row * w * 3, w * 3);
-                    SDL_UnlockTexture(tex);
-                    SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
-                    cache_->put(req.time, tex, w, h);
-                    {
-                        std::lock_guard<std::mutex> lock(resultMutex_);
-                        resultTime_ = req.time;
-                        completedSeq_ = req.seq;
-                    }
-                } else {
-                    SDL_DestroyTexture(tex);
-                }
-            }
-            av_free(pixels);
+        {
+            std::lock_guard<std::mutex> lock(extractorMutex_);
+            if (!extractor_->getFrame(req.time, &pixels, w, h) || !pixels || w <= 0 || h <= 0)
+                continue;
         }
+        SDL_Texture* tex = SDL_CreateTexture(
+            renderer_, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STREAMING, w, h);
+        if (tex) {
+            void* tbits = nullptr;
+            int pitch = 0;
+            if (SDL_LockTexture(tex, nullptr, &tbits, &pitch) == 0) {
+                for (int row = 0; row < h; ++row)
+                    memcpy((Uint8*)tbits + row * pitch, pixels + row * w * 3, w * 3);
+                SDL_UnlockTexture(tex);
+                SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
+                cache_->put(req.time, tex, w, h);
+                {
+                    std::lock_guard<std::mutex> lock(resultMutex_);
+                    resultTime_ = req.time;
+                    completedSeq_ = req.seq;
+                }
+            } else {
+                SDL_DestroyTexture(tex);
+            }
+        }
+        av_free(pixels);
     }
 }
