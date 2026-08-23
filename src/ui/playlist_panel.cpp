@@ -1,15 +1,50 @@
-#include "ui/playlist_panel.h"
+﻿#include "ui/playlist_panel.h"
 #include "core/playlist.h"
+#include "ui/svgicon.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <windows.h>
 
-static const int kItemH = 36;
-static const int kHeaderH = 32;
+// M32f: 卡片化尺寸（对照效果图 .pl-*）
+static const int kItemH = 70;      // 缩略图56 + 上下留白
+static const int kHeaderH = 44;
 static const int kEdgeW = 8;
-static const int kResizeW = 4;
+static const int kResizeW = 0;     // 效果图无拖拽调宽，固定 320
+
+// 本地圆角矩形（顶点扇形，与 video_renderer 同思路）
+static void fillRR(SDL_Renderer* r, int x, int y, int w, int h, int rad,
+                   Uint8 cr, Uint8 cg, Uint8 cb, Uint8 ca) {
+    if (w <= 0 || h <= 0 || ca == 0) return;
+    rad = std::min(rad, std::min(w, h) / 2);
+    SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
+    SDL_Color c{ cr, cg, cb, ca };
+    std::vector<SDL_Vertex> v;
+    SDL_Rect body{ x + rad, y, w - rad * 2, h };
+    auto quad = [&](float ax, float ay, float bx, float by) {
+        v.push_back({ {ax,ay}, c,{} }); v.push_back({ {bx,ay}, c,{} });
+        v.push_back({ {bx,by}, c,{} }); v.push_back({ {ax,ay}, c,{} });
+        v.push_back({ {bx,by}, c,{} }); v.push_back({ {ax,by}, c,{} });
+    };
+    quad((float)body.x, (float)y, (float)(body.x + body.w), (float)(y + h));
+    const int STEPS = 6;
+    auto corner = [&](int cx, int cy, int sx, int sy, float a0) {
+        for (int i = 0; i < STEPS; ++i) {
+            float t0 = a0 + i * 1.5707963f / STEPS, t1 = a0 + (i + 1) * 1.5707963f / STEPS;
+            SDL_Vertex center{ { (float)cx,(float)cy }, c,{} };
+            SDL_Vertex p0{ { cx + sx * rad * std::cos(t0), cy + sy * rad * std::sin(t0) }, c,{} };
+            SDL_Vertex p1{ { cx + sx * rad * std::cos(t1), cy + sy * rad * std::sin(t1) }, c,{} };
+            v.push_back(center); v.push_back(p0); v.push_back(p1);
+        }
+    };
+    corner(x + rad, y + rad, -1, -1, 3.14159265f);
+    corner(x + w - rad, y + rad, 1, -1, 4.71238898f);
+    corner(x + w - rad, y + h - rad, 1, 1, 0.f);
+    corner(x + rad, y + h - rad, -1, 1, 1.5707963f);
+    SDL_RenderGeometry(r, nullptr, v.data(), (int)v.size(), nullptr, 0);
+}
 static const SDL_Color kBgColor{ 25, 25, 25, 255 };
 static const SDL_Color kHeaderBg{ 30, 30, 30, 255 };
 static const SDL_Color kItemHover{ 50, 50, 50, 255 };
@@ -86,7 +121,7 @@ SDL_Texture* PlaylistPanel::iconForFile(const std::string& path) const {
 }
 
 void PlaylistPanel::draw(int currentIndex, int winW, int winH) {
-    const int titleH = 32;
+    const int titleH = 0;   // M32f: 全高面板
     const int barH = 64;
     const int progH = 9;  // 进度条区域高度
     int barY = winH - progH - 4 - barH;  // 控件栏顶部
@@ -98,29 +133,8 @@ void PlaylistPanel::draw(int currentIndex, int winW, int winH) {
         openAnim_ = std::max(0.0f, openAnim_ - 0.10f);
 
     // 面板关闭按钮（面板打开时绘制在左边界）
-    if (open_ && openAnim_ > 0.5f) {
-        int pw = (int)(baseWidth_ * openAnim_);
-        int panelX = winW - pw;
-        // 关闭按钮：面板左上角 X 图标
-        SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
-        bool closeHover = (mx_ >= panelX && mx_ < panelX + 28 && my_ >= titleH && my_ < titleH + kHeaderH);
-        if (closeHover) {
-            SDL_SetRenderDrawColor(renderer_, 80, 40, 40, 200);
-            SDL_Rect hoverBg{ panelX, titleH, 28, kHeaderH };
-            SDL_RenderFillRect(renderer_, &hoverBg);
-        }
-        // X 图标
-        SDL_SetRenderDrawColor(renderer_, closeHover ? 255 : 160, closeHover ? 80 : 80, closeHover ? 80 : 80, 220);
-        int cx = panelX + 14;
-        int cy = titleH + kHeaderH / 2;
-        for (int d = -5; d <= 5; ++d) {
-            SDL_RenderDrawLine(renderer_, cx + d, cy + d, cx + d + 1, cy + d + 1);
-            SDL_RenderDrawLine(renderer_, cx + d, cy - d, cx + d + 1, cy - d - 1);
-        }
-        closeHover_ = closeHover;
-    } else {
-        closeHover_ = false;
-    }
+    // M32f: 旧左上角关闭钮已移除（新关闭钮在头部右侧，见 Header 绘制段）
+    closeHover_ = false;
 
     // 切换按钮：面板关闭时绘制在窗口右边缘
     if (!open_) {
@@ -177,7 +191,16 @@ void PlaylistPanel::draw(int currentIndex, int winW, int winH) {
     if (playlist_ && playlist_->size() > 0) {
         headerText += " (" + std::to_string(playlist_->size()) + ")";
     }
-    textCache_.drawText(panelX + 12, panelTop + 8, headerText, 13, 200, 200, 200);
+    textCache_.drawText(panelX + 14, panelTop + 13, headerText, 13, 255, 255, 255);
+    // M32f: 关闭钮移至头部右侧（.pl-close 28px r7）
+    {
+        int bx = panelX + pw - 14 - 28, by = panelTop + 8;
+        if (closeHover_)
+            fillRR(renderer_, bx, by, 28, 28, 7, 255, 255, 255, 20);
+        svgicon::draw(renderer_, "close", bx + 14, by + 14, 16,
+                      closeHover_ ? 255 : 212, closeHover_ ? 255 : 212,
+                      closeHover_ ? 255 : 216, 220);
+    }
 
     // Clip to items area
     SDL_Rect clipRect{ panelX, itemsY, pw, visibleH };
@@ -217,54 +240,41 @@ void PlaylistPanel::draw(int currentIndex, int winW, int winH) {
 
 void PlaylistPanel::drawItem(int baseX, int y, int index, const std::string& filename,
                               bool isActive, bool isHover, int panelW) {
-    SDL_Rect itemBg{ baseX, y, panelW, kItemH };
+    SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+    // M32f: 卡片容器（.pl-item padding7 r9）
+    const int pad = 7;
+    if (isActive)
+        fillRR(renderer_, baseX + 2, y, panelW - 4, kItemH - 2, 9, 37, 99, 235, 46);
+    else if (isHover)
+        fillRR(renderer_, baseX + 2, y, panelW - 4, kItemH - 2, 9, 255, 255, 255, 15);
 
-    // Background
-    if (isActive) {
-        SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
-        SDL_SetRenderDrawColor(renderer_, kItemActive.r, kItemActive.g, kItemActive.b, kItemActive.a);
-        SDL_RenderFillRect(renderer_, &itemBg);
-    } else if (isHover) {
-        SDL_SetRenderDrawColor(renderer_, kItemHover.r, kItemHover.g, kItemHover.b, kItemHover.a);
-        SDL_RenderFillRect(renderer_, &itemBg);
-    }
+    // 缩略图占位（100×56 r7 渐变底 + 播放符号）
+    const int thW = 100, thH = 56;
+    int tx = baseX + pad, ty = y + (kItemH - 2 - thH) / 2;
+    fillRR(renderer_, tx, ty, thW, thH, 7, 0x26, 0x26, 0x2c, 255);
+    fillRR(renderer_, tx, ty + thH / 2, thW, thH / 2, 5, 0x15, 0x15, 0x1a, 200);
+    svgicon::draw(renderer_, "play", tx + thW / 2 + 1, ty + thH / 2, 20,
+                  255, 255, 255, isActive ? 120 : 64);
 
-    // Format icon
-    SDL_Texture* icon = iconForFile(filename);
-    int iconX = baseX + 8;
-    int iconY = y + (kItemH - 24) / 2;
-    if (icon) {
-        SDL_Rect dst{ iconX, iconY, 24, 24 };
-        SDL_RenderCopy(renderer_, icon, nullptr, &dst);
-    } else {
-        SDL_Rect fallback{ iconX, iconY, 24, 24 };
-        SDL_SetRenderDrawColor(renderer_, 80, 80, 80, 180);
-        SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
-        SDL_RenderFillRect(renderer_, &fallback);
-    }
+    // 元数据区
+    int mx = tx + thW + 10;
+    int mw = baseX + panelW - pad * 2 - (mx - baseX);
+    std::string ext;
+    size_t dot = filename.find_last_of('.');
+    if (dot != std::string::npos) ext = filename.substr(dot + 1);
+    for (auto& ch : ext) ch = (char)::toupper((unsigned char)ch);
 
-    // Index number
-    int textX = baseX + 36;
-    std::string numStr = std::to_string(index + 1) + ". ";
-    int cr = isActive ? 77 : 180;
-    int cg = isActive ? 144 : 180;
-    int cb = isActive ? 255 : 180;
-    textCache_.drawText(textX, y + 9, numStr, 11, cr, cg, cb);
-
-    // Filename
-    int nameX = textX + 30;
-    int nameW = panelW - (nameX - baseX) - 8;
-    if (nameW > 0) {
-        textCache_.drawText(nameX, y + 9, filename, 11,
-                           isActive ? 77 : 200,
-                           isActive ? 144 : 200,
-                           isActive ? 255 : 200);
-    }
+    textCache_.drawText(mx, y + 8, filename.substr(0, dot == std::string::npos ? filename.size() : dot), 12,
+                        isActive ? 0xbf : 255, isActive ? 0xd6 : 255, isActive ? 0xff : 255);
+    textCache_.drawText(mx, y + 28, std::string("视频 · ") + (ext.empty() ? "VIDEO" : ext), 11,
+                        0xa1, 0xa1, 0xa6);
+    if (isActive) textCache_.drawText(mx, y + 47, "正在播放", 10, 0x3b, 0x82, 0xf6);
+    else          textCache_.drawText(mx, y + 47, "未播放", 10, 0x3f, 0x3f, 0x46);
 }
 
 bool PlaylistPanel::handleMouseMove(int mx, int my, int winW, int winH) {
     mx_ = mx; my_ = my;
-    const int titleH = 32;
+    const int titleH = 0;   // M32f: 全高面板
     const int barH = 64;
     const int progH = 9;
     int barY = winH - progH - 4 - barH;
@@ -285,8 +295,9 @@ bool PlaylistPanel::handleMouseMove(int mx, int my, int winW, int winH) {
     if (w == 0) return false;
     int panelX = winW - w;
 
-    // 面板关闭按钮 hover
-    if (open_ && mx >= panelX && mx < panelX + 28 && my >= panelTop && my < panelTop + kHeaderH) {
+    // 面板关闭按钮 hover（M32f: 头部右侧）
+    if (open_ && mx >= panelX + w - 14 - 28 && mx < panelX + w - 14 &&
+        my >= panelTop + 8 && my < panelTop + 36) {
         closeHover_ = true;
         SDL_SetCursor(SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_HAND));
         return true;
@@ -322,7 +333,7 @@ bool PlaylistPanel::handleMouseMove(int mx, int my, int winW, int winH) {
 }
 
 bool PlaylistPanel::handleMouseDown(int mx, int my, int winW, int winH) {
-    const int titleH = 32;
+    const int titleH = 0;   // M32f: 全高面板
     const int barH = 64;
     const int progH = 9;
     int barY = winH - progH - 4 - barH;
@@ -343,6 +354,12 @@ bool PlaylistPanel::handleMouseDown(int mx, int my, int winW, int winH) {
     // 面板打开时的拖拽/点击在面板区域内处理
     if (w > 0) {
         int panelX = winW - w;
+        // M32f: 关闭钮点击（头部右侧）
+        if (open_ && mx >= panelX + w - 14 - 28 && mx < panelX + w - 14 &&
+            my >= panelTop + 8 && my < panelTop + 36) {
+            toggle();
+            return true;
+        }
         // 拖拽调整宽度
         if (open_ && mx >= panelX && mx < panelX + kResizeW && my >= panelTop && my < panelBot) {
             resizing_ = true;
@@ -384,7 +401,7 @@ bool PlaylistPanel::handleMouseWheel(int dy, int winW, int winH) {
     if (w == 0) return false;
     if (!playlist_) return false;
 
-    const int titleH = 32;
+    const int titleH = 0;   // M32f: 全高面板
     const int barH = 64;
     const int progH = 9;
     int barY = winH - progH - 4 - barH;
