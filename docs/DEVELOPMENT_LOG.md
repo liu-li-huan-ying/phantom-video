@@ -994,3 +994,16 @@
   - `writeHead_` 正常递增（4.621 → 9.265），无 REANCHOR SKIP 或 SILENCE 警告
   - 音频正常播放
 - **状态**：修复完成，待提交
+
+### 阶段 M31f（已回滚）：变速 reanchor 修复尝试失败记录 ⚠️
+
+- **尝试 1**（commit 2a453f1）：完全移除 reanchor 2秒阈值，始终接受第一个 chunk
+- **结果**：seek 后音频播放位置错误（时钟跳到解码器当前位置而非 seek 目标），用户确认更糟
+- **尝试 2**（commit 3557166）：增加 reanchorSpeed_ 标志区分变速/seek 模式
+- **结果**：用户反馈仍不行，普通跳转后音频位置不对、倍速失真
+- **回滚**（commit dbd4332）：git revert 两次修复，回到 M31e 状态
+- **保留的有效修复**：M31e 的 ptsScale_ video time_base 修正（该修复正确）
+- **遗留问题**：变速后 REANCHOR SKIP 永久静音仍未解决
+- **教训与下一步方向**：
+  - 简单放宽 reanchor 阈值治标不治本——根本矛盾是变速时 queue_.clear() 丢弃缓冲后，解码器内部位置（领先 anchor 数秒）与新写入数据不连续
+  - 正确方案应从源头解决：变速时不丢队列/不清 current_（仅重建 Sonic 并 flush 其缓冲），或变速时让 audioLoop 同步 seek 到 writeHead_ 位置，保证 chunk 流与锚点连续
