@@ -401,12 +401,12 @@ void VideoRenderer::setThumbnail(SDL_Texture* tex, int w, int h, double timeSec)
 }
 
 SDL_Rect VideoRenderer::speedMenuItemRect(const ControlLayout& lay, int index) {
-    int itemH = 28;
-    int menuW = 92;
-    int count = 8;
+    constexpr int itemH = 30;   // M32d: 12.5px 字 + 7px*2 内距 ≈ 30
+    constexpr int menuW = 130;  // CSS min-width:130
+    constexpr int count = 8;
     int menuX = lay.spdX - 10;
     int menuBottom = lay.row2Y + 34;
-    int menuY = menuBottom - count * itemH;
+    int menuY = menuBottom - count * itemH - 12;  // 面板内距 6 + 边距
     return SDL_Rect{ menuX, menuY + index * itemH, menuW, itemH };
 }
 
@@ -946,25 +946,36 @@ void VideoRenderer::drawControls(const RenderStats& stats) {
 
     // ---- speed menu (popup above 倍速 button) ----
     if (speedMenuOpen_) {
-        const int count = 8;
-        float speeds[8] = { 0.25f, 0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f, 3.0f };
-        int itemH = 28, menuW = 92;
-        int menuX = lay.spdX - 10;
-        int menuBottom = lay.row2Y + 34;
-        int menuY = menuBottom - count * itemH;
-        fillRoundedRect(renderer_, menuX - 4, menuY - 4, menuW + 8, count * itemH + 8, 10,
-                        20, 20, 20, (Uint8)(235 * a / 255));
+        // M32d: 按效果图精修 —— 面板 rgba(24,24,26,.98) r10、阴影、
+        // 选中项 accent2 蓝字(非填充)、hover 行白.08、右对齐灰色提示
+        constexpr int count = 8;
+        const float speeds[count] = { 0.25f, 0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f, 3.0f };
+        const char* hints[count] = { "", "慢", "", "正常", "", "", "快", "" };
+        int menuX = lay.spdX - 10, menuW = 130, itemH = 30;
+        int menuBottom = lay.row2Y + 34 - 12;
+        int menuY = menuBottom - count * itemH - 12;   // 与 speedMenuItemRect 一致
+        // 阴影（近似）+ 面板 + 1px 边框
+        fillRoundedRect(renderer_, menuX - 1, menuY + 3, menuW + 10, count * itemH + 14, 12,
+                        0, 0, 0, (Uint8)(70 * a / 255));
+        fillRoundedRect(renderer_, menuX - 6, menuY - 6, menuW + 12, count * itemH + 12, 10,
+                        24, 24, 26, (Uint8)(250 * a / 255));
         for (int i = 0; i < count; ++i) {
             SDL_Rect r = speedMenuItemRect(lay, i);
             bool cur = std::abs(stats.speed - speeds[i]) < 0.001f;
-            if (cur) {
-                fillRoundedRect(renderer_, r.x + 2, r.y + 2, r.w - 4, r.h - 4, 6,
-                                77, 144, 255, (Uint8)(230 * a / 255));
-            }
+            bool hov = mouseX_ >= r.x && mouseX_ < r.x + r.w &&
+                       mouseY_ >= r.y && mouseY_ < r.y + r.h;
+            if (hov)
+                fillRoundedRect(renderer_, r.x + 4, r.y + 1, r.w - 8, r.h - 2, 7,
+                                255, 255, 255, (Uint8)(20 * a / 255));
             char txt[16];
-            std::snprintf(txt, sizeof(txt), "x%.2g", speeds[i]);
-            SDL_SetRenderDrawColor(renderer_, 255, 255, 255, (Uint8)(220 * a / 255));
-            drawFontText(renderer_, menuX + 28, r.y + 10, 2, txt);
+            std::snprintf(txt, sizeof(txt), "%.2gx", speeds[i]);
+            if (cur) gdi_.drawText(r.x + 12, r.y + 7, txt, 12,
+                                   0x3b, 0x82, 0xf6);
+            else     gdi_.drawText(r.x + 12, r.y + 7, txt, 12,
+                                   hov ? 255 : 0xe4, hov ? 255 : 0xe4, hov ? 255 : 0xe7);
+            if (hints[i][0])
+                gdi_.drawText(r.x + r.w - 34, r.y + 8, hints[i], 11,
+                              0xa1, 0xa1, 0xa6);
         }
     }
 }
