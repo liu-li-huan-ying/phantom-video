@@ -1534,3 +1534,21 @@ SetCursorPos 用物理像素 → 全部错位；渲染同时被系统拉伸模�
    696 次；收集端须同时查 rgb+tex 两级
 3. 测试物理点击受 z 序影响（终端遮挡时穿透落到别的窗口），
    逻辑层验证改用 PostMessage 注入，稳定可靠
+
+---
+
+## M34a Phase 4a-4b：位置记忆 / 缩略图磁盘缓存（2026-08-24）
+
+### Phase 4a: 窗口位置记忆 (e043ea9)
+- AppConfig 增 pos 四字段（INVALID_POS 哨兵），ini 键 `pos=x,y,w,h`
+- **关键坑**：首版在主循环退出后 GetWindowRect 拿到垃圾值
+  （`pos=-1062566176,...`）——WM_CLOSE 默认流程**先 DestroyWindow**
+  再 PostQuitMessage，循环退出时窗口已销毁。修复：拦截 WM_CLOSE
+  先 saveWindowPos 再销毁；loadConfig 端尺寸/坐标合法性校验兜底
+- 全屏/迷你/最小化跳过保存
+
+### Phase 4b: 缩略图磁盘缓存 (0caac72)
+- 文件：`exe/cache/thumbs/<fnv1a64>.bin` = 魔数 VPT1 + w + h + RGB24
+- worker 三重校验读盘（魔数/尺寸范围/字节数），损坏即删
+- 解码失败仅内存标记不落盘，下次可重试；thumbcache=0 可整体关闭
+- 验证：首轮 decoded=7 写盘 7 → 二轮 disk-hit=7 decoded=0
