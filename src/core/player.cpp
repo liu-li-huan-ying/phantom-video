@@ -138,6 +138,7 @@ bool Player::openFile(const std::string& path) {
     videoBaseTicks_ = SDL_GetPerformanceCounter();
     state_.store(State::Playing);
     audioWait_.store(false);
+    startupSync_.store(true);   // M33g: 起播时复用 seek 同步路径
     audioSeeking_.store(false);
     seekFirstFrame_.store(false);
     uiSeeking_.store(false);
@@ -167,6 +168,7 @@ void Player::close() {
     videoDemuxer_.reset();
     lastFrame_.reset();
     videoPtsIdx_ = -1;
+    startupSync_.store(false);
     if (hwDeviceCtx_) {
         av_buffer_unref(&hwDeviceCtx_);
         hwDeviceCtx_ = nullptr;
@@ -474,7 +476,17 @@ FramePtr Player::pullFrame() {
     lastFrame_ = f;
     if (!videoClockStarted_) {
         videoClockStarted_ = true;
-        videoBasePts_ = pts;
+        // M33g: 赚播时锚定视频时钟到音频当前位置，避免前几秒画面冻结
+        if (startupSync_.exchange(false) && audioEnabled_.load()) {
+            double audioPos = audio_->clock();
+            if (audioPos > 0.0) {
+                videoBasePts_ = audioPos;
+                videoBaseTicks_ = SDL_GetPerformanceCounter();
+                LOG_DBG("PULL", "startupSync: anchoring video clock to audio=%.3f (framePts=%.3f)", audioPos, pts);
+                playing_ = !paused_.load();
+                return f;
+            }
+        }
     }
     videoBasePts_ = pts;
     videoBaseTicks_ = SDL_GetPerformanceCounter();
@@ -494,6 +506,7 @@ FramePtr Player::pullFrame() {
 void Player::doSeek(double t) {
     if (!videoDemuxer_) return;
     LOG_DBG("SEEK", "doSeek: t=%.3f clock=%.3f speed=%.2f", t, clock(), speed_.load());
+    startupSync_.store(false);  // M33g: seek 时清除起播同步
     audioSeeking_.store(true);
     if (audio_) audio_->setSeeking(true);
     if (onSeekingChanged) onSeekingChanged(true);

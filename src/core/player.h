@@ -110,6 +110,7 @@ private:
     std::atomic<bool> muted_{ false };
     std::atomic<float> speed_{ 1.0f };
     std::atomic<bool> audioWait_{ false };
+    std::atomic<bool> startupSync_{ false };    // M33g: 起播同步门控
     std::atomic<bool> audioSeeking_{ false };  // M18: seek 期间跳过旧帧
     double lastAudioPts_{ -1e9 };              // M18: 检测音频 PTS 跳变
     std::atomic<bool> seekFirstFrame_{ false };
