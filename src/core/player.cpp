@@ -238,6 +238,12 @@ void Player::seekRelative(double delta) {
     seek(clock() + delta);
 }
 
+void Player::setDragPreview(double t) {
+    t = std::clamp(t, 0.0, duration_ > 0.0 ? duration_ : t);
+    uiSeeking_.store(true, std::memory_order_relaxed);
+    uiTargetPts_.store(t, std::memory_order_relaxed);
+}
+
 void Player::requestSeek(double t) {
     std::lock_guard<std::mutex> lock(seekMutex_);
     seekPending_ = true;

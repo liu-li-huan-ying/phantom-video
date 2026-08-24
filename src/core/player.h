@@ -28,6 +28,7 @@ public:
     void togglePause();
     void seek(double seconds);
     void seekRelative(double delta);
+    void setDragPreview(double t);  // M33h: 拖动进度条时只更新UI位置，不触发seek
     void setVolume(float v);
     float volume() const { return volume_.load(std::memory_order_relaxed); }
     void toggleMute();

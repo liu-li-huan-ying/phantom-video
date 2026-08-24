@@ -381,7 +381,7 @@ auto args = utf8Args();
                         ControlLayout lay = ControlLayout::compute(winW, winH, panel.width());
                         float pct = (float)(mx - lay.progX) / lay.progW;
                         if (pct < 0) pct = 0; if (pct > 1) pct = 1;
-                        player.seek(pct * player.duration());
+                        player.setDragPreview(pct * player.duration());
                         vrender.setThumbnail(nullptr, 0, 0, -1);
                     } else if (draggingVolume) {
                         ControlLayout lay = ControlLayout::compute(winW, winH, panel.width());
@@ -626,6 +626,15 @@ auto args = utf8Args();
                 break;
             case SDL_MOUSEBUTTONUP:
                 panel.handleMouseUp(e.button.x, e.button.y);
+                if (draggingProgress) {
+                    // M33h: 松手时才真正 seek
+                    int ww = 0, wh = 0;
+                    SDL_GetWindowSize(win, &ww, &wh);
+                    ControlLayout lay2 = ControlLayout::compute(ww, wh, panel.width());
+                    float finalPct = (float)(e.button.x - lay2.progX) / lay2.progW;
+                    if (finalPct < 0) finalPct = 0; if (finalPct > 1) finalPct = 1;
+                    player.seek(finalPct * player.duration());
+                }
                 draggingProgress = false;
                 draggingVolume = false;
                 break;
