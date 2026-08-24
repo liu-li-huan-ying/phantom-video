@@ -4,6 +4,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <SDL.h>
@@ -37,6 +38,7 @@ public:
     void clearClick() { clickedIdx_ = -1; }
 
     void clearThumbnailCache();
+    void evictOldThumbnails();
 
 private:
     void loadFormatIcons();
@@ -80,17 +82,20 @@ private:
         std::thread thread;
         std::atomic<bool> running{ false };
         std::atomic<bool> cancelled{ false };
-        std::atomic<int> itemCount{ 0 };
         std::mutex mutex;
-        std::vector<std::string> paths;      // 可见项的文件路径快照
-        std::atomic<int> nextIdx{ 0 };       // 下一个要提取的 paths[] 下标
+        std::vector<std::string> paths;
+        std::vector<int> indices;
+        std::atomic<int> nextIdx{ 0 };
         uint8_t* pendingPixels = nullptr;
         int pendingW = 0, pendingH = 0;
-        int pendingTargetIdx = -1;           // 对应的播放列表索引
+        int pendingTargetIdx = -1;
         bool ready = false;
+        std::unordered_set<int> cachedIndices;  // 已提交过缩略图的索引（供 worker 跳过）
     };
     ThumbWorker worker_;
     std::unordered_map<int, SDL_Texture*> thumbTextures_;
+    std::unordered_map<int, uint32_t> thumbAccess_;  // LRU: index -> last access tick
+    static constexpr int kMaxThumbCache = 60;
 
     void startWorker();
     void stopWorker();

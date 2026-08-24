@@ -189,13 +189,25 @@ void PlaylistPanel::workerFunc() {
 
         int cur = worker_.nextIdx.load();
         std::vector<std::string> paths;
+        std::vector<int> indices;
+        std::unordered_set<int> cached;
         {
             std::lock_guard<std::mutex> lock(worker_.mutex);
             paths = worker_.paths;
+            indices = worker_.indices;
+            cached = worker_.cachedIndices;
         }
 
         if (cur < 0 || cur >= (int)paths.size()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            continue;
+        }
+
+        int listIdx = (cur < (int)indices.size()) ? indices[cur] : cur;
+
+        // 跳过已缓存项
+        if (cached.count(listIdx)) {
+            worker_.nextIdx.store(cur + 1);
             continue;
         }
 
@@ -229,7 +241,7 @@ void PlaylistPanel::workerFunc() {
             worker_.pendingPixels = pixels;
             worker_.pendingW = w;
             worker_.pendingH = h;
-            worker_.pendingTargetIdx = cur;
+            worker_.pendingTargetIdx = listIdx;
             worker_.ready = true;
         }
         worker_.nextIdx.store(cur + 1);
@@ -243,6 +255,7 @@ void PlaylistPanel::requestVisibleRange(const std::vector<std::string>& paths,
     {
         std::lock_guard<std::mutex> lock(worker_.mutex);
         worker_.paths = paths;
+        worker_.indices = indices;
     }
     worker_.nextIdx.store(0);
     worker_.cancelled.store(false);
@@ -269,6 +282,8 @@ void PlaylistPanel::consumeReadyTexture() {
                 SDL_UnlockTexture(tex);
                 SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
                 thumbTextures_[targetIdx] = tex;
+                worker_.cachedIndices.insert(targetIdx);
+                thumbAccess_[targetIdx] = SDL_GetTicks();
             } else {
                 SDL_DestroyTexture(tex);
             }
@@ -283,7 +298,36 @@ void PlaylistPanel::clearThumbnailCache() {
     for (auto& [k, v] : thumbTextures_)
         if (v) SDL_DestroyTexture(v);
     thumbTextures_.clear();
+    thumbAccess_.clear();
+    {
+        std::lock_guard<std::mutex> lock(worker_.mutex);
+        worker_.cachedIndices.clear();
+    }
     worker_.nextIdx.store(0);
+}
+
+void PlaylistPanel::evictOldThumbnails() {
+    uint32_t now = SDL_GetTicks();
+    std::vector<int> toEvict;
+    for (auto& [idx, tex] : thumbTextures_) {
+        auto it = thumbAccess_.find(idx);
+        uint32_t lastAccess = (it != thumbAccess_.end()) ? it->second : 0;
+        if (now - lastAccess > 30000) {  // 30 秒未访问
+            toEvict.push_back(idx);
+        }
+    }
+    for (int idx : toEvict) {
+        auto t = thumbTextures_.find(idx);
+        if (t != thumbTextures_.end()) {
+            if (t->second) SDL_DestroyTexture(t->second);
+            thumbTextures_.erase(t);
+        }
+        thumbAccess_.erase(idx);
+        {
+            std::lock_guard<std::mutex> lock(worker_.mutex);
+            worker_.cachedIndices.erase(idx);
+        }
+    }
 }
 
 void PlaylistPanel::draw(int currentIndex, int winW, int winH) {
@@ -298,6 +342,7 @@ void PlaylistPanel::draw(int currentIndex, int winW, int winH) {
     if (openAnim_ < 0.01f) return;
 
     consumeReadyTexture();
+    evictOldThumbnails();
 
     int pw = (int)(baseWidth_ * openAnim_);
     // M32f.9: 收起动画时整体向右滑出（窗口尚未缩回，超出部分被窗口裁剪）
@@ -417,6 +462,7 @@ void PlaylistPanel::drawItem(int baseX, int y, int index, const std::string& fil
     if (thumbIt != thumbTextures_.end() && thumbIt->second) {
         SDL_Rect dst{ tx, ty, thW, thH };
         SDL_RenderCopy(renderer_, thumbIt->second, nullptr, &dst);
+        thumbAccess_[index] = SDL_GetTicks();  // LRU: 更新访问时间
     } else {
         SDL_SetRenderDrawColor(renderer_, 0x3c, 0x3c, 0x48, 255);
         SDL_Rect topHalf{ tx, ty, thW, thH / 2 };
