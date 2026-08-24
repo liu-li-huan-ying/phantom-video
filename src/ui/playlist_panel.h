@@ -96,6 +96,8 @@ private:
     std::unordered_map<int, SDL_Texture*> thumbTextures_;
     std::unordered_map<int, uint32_t> thumbAccess_;  // LRU: index -> last access tick
     static constexpr int kMaxThumbCache = 60;
+    float scrollbarAlpha_ = 0.0f;
+    uint32_t lastScrollTick_ = 0;
 
     void startWorker();
     void stopWorker();
