@@ -242,7 +242,8 @@ auto args = utf8Args();
         titlebar.setTitle(title);
           if (player.openFile(p)) {
             loadExternalSubtitle(player, p, &vrender);
-            thumbnail.open(p);  // M15: 打开缩略图提取器
+            thumbnail.open(p);
+            panel.clearThumbnailCache();
             bool resumed = false;
             if (cfg.resume) {
                 auto it = cfg.history.find(p);
@@ -348,6 +349,7 @@ auto args = utf8Args();
                   if (player.openFile(e.drop.file)) {
                     loadExternalSubtitle(player, e.drop.file, &vrender);
                     thumbnail.open(e.drop.file);
+                    panel.clearThumbnailCache();
                     playlist.scanDirectory(e.drop.file);
                     // seek(0.0) 已移除——同 openCurrent，会导致 EOF 链式跳转
                     std::string base = e.drop.file;

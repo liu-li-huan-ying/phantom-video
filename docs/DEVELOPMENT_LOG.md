@@ -1212,3 +1212,14 @@ decodeLoop退出 -> videoQueue_.closed -> pullFrame返回State::Ended -> auto-ne
 问题: bufW硬编码0.42f(42%)，效果图要求实时显示已缓冲内容。
 修复: BlockingQueue加size()/capacity(); Player加bufferFill(); RenderStats加bufferPct;
 主循环每帧填充; drawControls用stats.bufferPct替换硬编码0.42f。
+
+### M33c: 播放列表缩略图后台提取
+**2026-08-24**
+实现：单后台线程逐个提取可见卡片缩略图，提取完替换占位图。
+- ThumbWorker: atomic cancelled/nextItem + mutex 保护的 pendingPixels 交接
+- workerFunc: 调用 ThumbnailExtractor::getFrame(seekTo10%), RGB 通过 mutex 传递
+- consumeReadyTexture: 主线程将 RGB 创建为 SDL_Texture，存入 thumbTextures_[idx]
+- drawItem: 有 texture 时 SDL_RenderCopy，否则渐变占位+播放图标
+- toggle/shutdown 时 stopWorker 停止线程省 CPU
+- openCurrent/DROPFILE 切文件时 clearThumbnailCache 清缓存
+编译通过，冒烟测试通过。

@@ -1,6 +1,8 @@
 ﻿#pragma once
 #include <atomic>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -33,6 +35,8 @@ public:
 
     int clickedIndex() const { return clickedIdx_; }
     void clearClick() { clickedIdx_ = -1; }
+
+    void clearThumbnailCache();
 
 private:
     void loadFormatIcons();
@@ -70,4 +74,28 @@ private:
     };
     std::unordered_map<std::string, IconEntry> iconCache_;
     GdiTextCache textCache_;
+
+    // M33: 后台缩略图提取
+    struct ThumbWorker {
+        std::thread thread;
+        std::atomic<bool> running{ false };
+        std::atomic<bool> cancelled{ false };
+        std::atomic<int> nextItem{ -1 };
+        std::atomic<int> itemCount{ 0 };
+        std::mutex mutex;
+        std::string filePath;
+        uint8_t* pendingPixels = nullptr;
+        int pendingW = 0, pendingH = 0;
+        int pendingIdx = -1;
+        bool ready = false;
+    };
+    ThumbWorker worker_;
+    std::unordered_map<int, SDL_Texture*> thumbTextures_;
+
+    void startWorker();
+    void stopWorker();
+    void workerFunc();
+    void requestVisibleRange(int start, int end, int total,
+                             const std::string& filePath);
+    void consumeReadyTexture();
 };

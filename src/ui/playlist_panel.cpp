@@ -1,7 +1,12 @@
 ﻿#include "ui/playlist_panel.h"
 #include "core/playlist.h"
+#include "core/thumbnail_extractor.h"
 #include "ui/svgicon.h"
 #include "core/logger.h"
+
+extern "C" {
+#include <libavformat/avformat.h>
+}
 
 #include <algorithm>
 #include <cmath>
@@ -69,6 +74,8 @@ void PlaylistPanel::init(SDL_Renderer* renderer) {
 }
 
 void PlaylistPanel::shutdown() {
+    stopWorker();
+    clearThumbnailCache();
     for (auto& [k, v] : iconCache_) {
         if (v.tex) SDL_DestroyTexture(v.tex);
     }
@@ -81,7 +88,8 @@ void PlaylistPanel::toggle() {
     open_ = !open_;
     if (!open_) {
         resizing_ = false;
-        shrinkPending_ = true;   // M32f.9: 收起动画结束后由主循环缩窗
+        shrinkPending_ = true;
+        stopWorker();
     }
     if (wasOpen) LOG_INFO("UI", "playlist closing anim -> window shrink pending");
 }
@@ -138,6 +146,140 @@ SDL_Texture* PlaylistPanel::iconForFile(const std::string& path) const {
     return nullptr;
 }
 
+// M33: 后台缩略图提取
+static double thumbSeekTime(const std::string& path) {
+    AVFormatContext* fmt = nullptr;
+    if (avformat_open_input(&fmt, path.c_str(), nullptr, nullptr) < 0)
+        return 2.0;
+    double dur = 0;
+    if (fmt->duration != AV_NOPTS_VALUE)
+        dur = (double)fmt->duration / AV_TIME_BASE;
+    avformat_close_input(&fmt);
+    if (dur <= 0) return 2.0;
+    return dur * 0.10;
+}
+
+void PlaylistPanel::startWorker() {
+    if (worker_.running.load()) return;
+    worker_.running.store(true);
+    worker_.cancelled.store(false);
+    worker_.nextItem.store(-1);
+    worker_.thread = std::thread(&PlaylistPanel::workerFunc, this);
+}
+
+void PlaylistPanel::stopWorker() {
+    if (!worker_.running.load()) return;
+    worker_.running.store(false);
+    worker_.cancelled.store(true);
+    if (worker_.thread.joinable()) worker_.thread.join();
+}
+
+void PlaylistPanel::workerFunc() {
+    ThumbnailExtractor extractor;
+    int currentItem = -1;
+
+    while (worker_.running.load()) {
+        if (worker_.cancelled.load()) {
+            extractor.close();
+            currentItem = -1;
+            worker_.cancelled.store(false);
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            continue;
+        }
+
+        int start = worker_.nextItem.load();
+        int total = worker_.itemCount.load();
+        if (start < 0 || start >= total) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            continue;
+        }
+
+        std::string path;
+        {
+            std::lock_guard<std::mutex> lock(worker_.mutex);
+            path = worker_.filePath;
+        }
+        if (path.empty()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            continue;
+        }
+
+        if (currentItem != start) {
+            extractor.close();
+            if (!extractor.open(path)) {
+                LOG_WARN("THUMB", "worker: open fail idx=%d", start);
+                worker_.nextItem.store(start + 1);
+                currentItem = start;
+                continue;
+            }
+            currentItem = start;
+        }
+
+        if (worker_.cancelled.load()) continue;
+
+        double seekSec = thumbSeekTime(path);
+        uint8_t* pixels = nullptr;
+        int w = 0, h = 0;
+        if (extractor.getFrame(seekSec, &pixels, w, h) && pixels) {
+            std::lock_guard<std::mutex> lock(worker_.mutex);
+            if (worker_.pendingPixels) av_free(worker_.pendingPixels);
+            worker_.pendingPixels = pixels;
+            worker_.pendingW = w;
+            worker_.pendingH = h;
+            worker_.pendingIdx = start;
+            worker_.ready = true;
+        }
+        worker_.nextItem.store(start + 1);
+    }
+    extractor.close();
+}
+
+void PlaylistPanel::requestVisibleRange(int start, int end, int total,
+                                        const std::string& filePath) {
+    worker_.itemCount.store(total);
+    worker_.filePath = filePath;
+    worker_.nextItem.store(start);
+    worker_.cancelled.store(false);
+}
+
+void PlaylistPanel::consumeReadyTexture() {
+    std::lock_guard<std::mutex> lock(worker_.mutex);
+    if (!worker_.ready || !worker_.pendingPixels) return;
+
+    int idx = worker_.pendingIdx;
+    if (idx >= 0 && thumbTextures_.count(idx) == 0) {
+        SDL_Texture* tex = SDL_CreateTexture(
+            renderer_, SDL_PIXELFORMAT_RGB24,
+            SDL_TEXTUREACCESS_STREAMING,
+            worker_.pendingW, worker_.pendingH);
+        if (tex) {
+            void* tbits = nullptr;
+            int pitch = 0;
+            if (SDL_LockTexture(tex, nullptr, &tbits, &pitch) == 0) {
+                for (int row = 0; row < worker_.pendingH; ++row)
+                    memcpy((Uint8*)tbits + row * pitch,
+                           worker_.pendingPixels + row * worker_.pendingW * 3,
+                           worker_.pendingW * 3);
+                SDL_UnlockTexture(tex);
+                SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
+                thumbTextures_[idx] = tex;
+            } else {
+                SDL_DestroyTexture(tex);
+            }
+        }
+    }
+    av_free(worker_.pendingPixels);
+    worker_.pendingPixels = nullptr;
+    worker_.ready = false;
+}
+
+void PlaylistPanel::clearThumbnailCache() {
+    for (auto& [k, v] : thumbTextures_)
+        if (v) SDL_DestroyTexture(v);
+    thumbTextures_.clear();
+    worker_.nextItem.store(-1);
+}
+
 void PlaylistPanel::draw(int currentIndex, int winW, int winH) {
     // M32f.6: 全高面板（无底部空白）；动画更新
     // M32g: 无动画 —— 立即出现/消失
@@ -148,6 +290,8 @@ void PlaylistPanel::draw(int currentIndex, int winW, int winH) {
     // M32g: 右缘条开关已移除（顶栏 ☰ 即列表开关）
 
     if (openAnim_ < 0.01f) return;
+
+    consumeReadyTexture();
 
     int pw = (int)(baseWidth_ * openAnim_);
     // M32f.9: 收起动画时整体向右滑出（窗口尚未缩回，超出部分被窗口裁剪）
@@ -183,6 +327,16 @@ void PlaylistPanel::draw(int currentIndex, int winW, int winH) {
         bool isHover = (i == hoverIndex_);
         std::string filename = std::filesystem::path(playlist_->fileAt(i)).filename().string();
         drawItem(panelX, y, i, filename, isActive, isHover, pw);
+    }
+    // M33: 请求可见区域缩略图
+    if (playlist_ && playlist_->size() > 0) {
+        int visStart = std::max(0, -scrollOffset_ / kItemH);
+        int visEnd = std::min(totalItems, (visibleH + scrollOffset_) / kItemH + 1);
+        if (visStart < visEnd) {
+            startWorker();
+            requestVisibleRange(visStart, visEnd, totalItems,
+                                playlist_->fileAt(currentIndex >= 0 ? currentIndex : 0));
+        }
     }
     SDL_RenderSetClipRect(renderer_, nullptr);
 
@@ -237,21 +391,28 @@ void PlaylistPanel::drawItem(int baseX, int y, int index, const std::string& fil
     else if (isHover)
         fillRR(renderer_, baseX + 2, y, panelW - 4, kItemH - 2, 9, 255, 255, 255, 15);
 
-    // 缩略图（100×56）：M32f.7 裁剪区方案 —— 无圆角毛刺、无描边
+    // 缩略图（100×56）：有缓存时显示真实帧，否则显示占位图
     const int thW = 100, thH = 56;
     int tx = baseX + pad, ty = y + (kItemH - 2 - thH) / 2;
     SDL_Rect clip{ tx, ty, thW, thH };
     SDL_RenderSetClipRect(renderer_, &clip);
     SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
-    SDL_SetRenderDrawColor(renderer_, 0x3c, 0x3c, 0x48, 255);
-    SDL_Rect topHalf{ tx, ty, thW, thH / 2 };
-    SDL_RenderFillRect(renderer_, &topHalf);
-    SDL_SetRenderDrawColor(renderer_, 0x2a, 0x2a, 0x34, 255);
-    SDL_Rect botHalf{ tx, ty + thH / 2, thW, thH - thH / 2 };
-    SDL_RenderFillRect(renderer_, &botHalf);
-    SDL_RenderSetClipRect(renderer_, &listClip_);  // M32f.9: 恢复列表区裁剪（防滚动条目叠到头部）
-    svgicon::draw(renderer_, "play", tx + thW / 2 + 1, ty + thH / 2, 22,
-                  255, 255, 255, isActive ? 170 : 110);
+
+    auto thumbIt = thumbTextures_.find(index);
+    if (thumbIt != thumbTextures_.end() && thumbIt->second) {
+        SDL_Rect dst{ tx, ty, thW, thH };
+        SDL_RenderCopy(renderer_, thumbIt->second, nullptr, &dst);
+    } else {
+        SDL_SetRenderDrawColor(renderer_, 0x3c, 0x3c, 0x48, 255);
+        SDL_Rect topHalf{ tx, ty, thW, thH / 2 };
+        SDL_RenderFillRect(renderer_, &topHalf);
+        SDL_SetRenderDrawColor(renderer_, 0x2a, 0x2a, 0x34, 255);
+        SDL_Rect botHalf{ tx, ty + thH / 2, thW, thH - thH / 2 };
+        SDL_RenderFillRect(renderer_, &botHalf);
+        svgicon::draw(renderer_, "play", tx + thW / 2 + 1, ty + thH / 2, 22,
+                      255, 255, 255, isActive ? 170 : 110);
+    }
+    SDL_RenderSetClipRect(renderer_, &listClip_);
 
     // 元数据区
     int mx = tx + thW + 10;
