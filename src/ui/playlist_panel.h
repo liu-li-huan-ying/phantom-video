@@ -109,4 +109,10 @@ private:
     void requestVisibleRange(const std::vector<std::string>& paths,
                              const std::vector<int>& indices, int center);
     void consumeReadyTexture();
+
+    // M33f: 磁盘缩略图缓存
+    std::string cacheDir_;  // {exe_dir}/cache/thumbs/
+    std::string cachePathForFile(const std::string& filePath) const;
+    void loadFromDiskCache(int listIdx, const std::string& cachePath);
+    void saveToDiskCache(const std::string& cachePath, int w, int h, const uint8_t* pixels);
 };

@@ -12,6 +12,7 @@ extern "C" {
 #include <cmath>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <windows.h>
 
 // M32f: 卡片化尺寸（对照效果图 .pl-*）
@@ -71,6 +72,13 @@ void PlaylistPanel::init(SDL_Renderer* renderer) {
     renderer_ = renderer;
     loadFormatIcons();
     textCache_.init(renderer);
+
+    // 磁盘缓存目录: {exe_dir}/cache/thumbs/
+    char exePath[MAX_PATH] = {};
+    GetModuleFileNameA(nullptr, exePath, MAX_PATH);
+    std::filesystem::path exeDir = std::filesystem::path(exePath).parent_path();
+    cacheDir_ = (exeDir / "cache" / "thumbs").string();
+    std::filesystem::create_directories(cacheDir_);
 }
 
 void PlaylistPanel::shutdown() {
@@ -220,6 +228,14 @@ void PlaylistPanel::workerFunc() {
             continue;
         }
 
+        // M33f: 先尝试磁盘缓存（极快，无 FFmpeg 开销）
+        std::string cachePath = cachePathForFile(path);
+        if (std::filesystem::exists(cachePath)) {
+            loadFromDiskCache(listIdx, cachePath);
+            worker_.nextIdx.store(cur + 1);
+            continue;
+        }
+
         if (worker_.cancelled.load()) continue;
 
         if (path != lastPath) {
@@ -240,6 +256,8 @@ void PlaylistPanel::workerFunc() {
         uint8_t* pixels = nullptr;
         int w = 0, h = 0;
         if (extractor.getFrame(seekSec, &pixels, w, h) && pixels) {
+            // M33f: 保存到磁盘缓存（下次直接加载）
+            saveToDiskCache(cachePath, w, h, pixels);
             std::lock_guard<std::mutex> lock(worker_.mutex);
             if (worker_.pendingPixels) av_free(worker_.pendingPixels);
             worker_.pendingPixels = pixels;
@@ -348,6 +366,52 @@ void PlaylistPanel::evictOldThumbnails() {
             std::lock_guard<std::mutex> lock(worker_.mutex);
             worker_.cachedIndices.erase(idx);
         }
+    }
+}
+
+std::string PlaylistPanel::cachePathForFile(const std::string& filePath) const {
+    // 用文件路径的简单哈希做缓存文件名
+    std::hash<std::string> hasher;
+    size_t h = hasher(filePath);
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%016zx.rgb", h);
+    return cacheDir_ + "\\" + buf;
+}
+
+void PlaylistPanel::saveToDiskCache(const std::string& cachePath, int w, int h, const uint8_t* pixels) {
+    std::ofstream f(cachePath, std::ios::binary);
+    if (!f) return;
+    f.write(reinterpret_cast<const char*>(&w), sizeof(int));
+    f.write(reinterpret_cast<const char*>(&h), sizeof(int));
+    f.write(reinterpret_cast<const char*>(pixels), w * h * 3);
+}
+
+void PlaylistPanel::loadFromDiskCache(int listIdx, const std::string& cachePath) {
+    std::ifstream f(cachePath, std::ios::binary);
+    if (!f) return;
+    int w = 0, h = 0;
+    f.read(reinterpret_cast<char*>(&w), sizeof(int));
+    f.read(reinterpret_cast<char*>(&h), sizeof(int));
+    if (w <= 0 || h <= 0 || w > 1024 || h > 1024) return;
+    std::vector<uint8_t> pixels(w * h * 3);
+    f.read(reinterpret_cast<char*>(pixels.data()), w * h * 3);
+    if (!f) return;
+
+    SDL_Texture* tex = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_RGB24,
+                                         SDL_TEXTUREACCESS_STREAMING, w, h);
+    if (!tex) return;
+    void* tbits = nullptr;
+    int pitch = 0;
+    if (SDL_LockTexture(tex, nullptr, &tbits, &pitch) == 0) {
+        for (int row = 0; row < h; ++row)
+            memcpy((Uint8*)tbits + row * pitch, pixels.data() + row * w * 3, w * 3);
+        SDL_UnlockTexture(tex);
+    }
+    thumbTextures_[listIdx] = tex;
+    thumbAccess_[listIdx] = SDL_GetTicks();
+    {
+        std::lock_guard<std::mutex> lock(worker_.mutex);
+        worker_.cachedIndices.insert(listIdx);
     }
 }
 
