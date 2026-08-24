@@ -80,6 +80,18 @@ struct UiState {
     bool   seekbarHover  = false;
     bool   seekingDrag   = false;
     double seekTarget    = 0.0;
+
+    // speed popup
+    bool   speedMenuOpen = false;
+
+    // volume slider
+    bool   volumeSliderOpen = false;
+    bool   volumeDragging   = false;
+
+    // toast
+    bool   toastActive = false;
+    Uint32 toastStart  = 0;
+    char   toastMsg[128] = {};
 };
 
 // ---- globals ----
@@ -94,12 +106,20 @@ static AppConfig     g_cfg;
 
 // ---- seekbar geometry ----
 static const int SB_MARGIN = 20;
+static const float SPEED_PRESETS[] = {0.25f, 0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f, 3.0f};
+static const int SPEED_PRESET_COUNT = 8;
 
 static int sbTopY()    { return g_ui.winH - CONTROL_BAR_H; }
 static int sbTrackY()  { return sbTopY() + 10; }
 static int sbLeftX()   { return SB_MARGIN; }
 static int sbRightX()  { return g_ui.winW - SB_MARGIN; }
 static int sbWidth()   { return sbRightX() - sbLeftX(); }
+
+static void showToast(const char* msg) {
+    std::snprintf(g_ui.toastMsg, sizeof(g_ui.toastMsg), "%s", msg);
+    g_ui.toastActive = true;
+    g_ui.toastStart = SDL_GetTicks();
+}
 
 // ---- topbar icon hit test ----
 static int hitTestTopbarIcon(int mx, int my, int winW) {
@@ -153,11 +173,31 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             case VK_RIGHT: g_mpv->seekRelative(5.0); break;
             case VK_UP:    g_mpv->setVolume(g_mpv->volume() + 0.05f); break;
             case VK_DOWN:  g_mpv->setVolume(g_mpv->volume() - 0.05f); break;
-            case 'M': g_mpv->toggleMute(); break;
+            case 'M': {
+                g_mpv->toggleMute();
+                showToast(g_mpv->muted() ? "Muted" : "Unmuted");
+                break;
+            }
             case 'N': g_mpv->seekRelative( 10.0); break;
             case 'P': g_mpv->seekRelative(-10.0); break;
-            case '[': g_mpv->setSpeed(g_mpv->speed() - 0.25f); break;
-            case ']': g_mpv->setSpeed(g_mpv->speed() + 0.25f); break;
+            case '[': {
+                g_mpv->setSpeed(g_mpv->speed() - 0.25f);
+                char msg[32];
+                std::snprintf(msg, sizeof(msg), "Speed: %.2fx", g_mpv->speed());
+                showToast(msg);
+                break;
+            }
+            case ']': {
+                g_mpv->setSpeed(g_mpv->speed() + 0.25f);
+                char msg[32];
+                std::snprintf(msg, sizeof(msg), "Speed: %.2fx", g_mpv->speed());
+                showToast(msg);
+                break;
+            }
+            case VK_ESCAPE:
+                if (g_ui.speedMenuOpen) g_ui.speedMenuOpen = false;
+                else if (g_ui.volumeSliderOpen) g_ui.volumeSliderOpen = false;
+                break;
             case 'F': {
                 DWORD sty = (DWORD)GetWindowLongPtrW(hwnd, GWL_STYLE);
                 if (sty & WS_OVERLAPPEDWINDOW) {
@@ -203,6 +243,15 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         bool onTopbar = (g_ui.mouseY >= 0 && g_ui.mouseY <= ui::TOPBAR_H);
         g_ui.visible = true;
         g_ui.hideAt = SDL_GetTicks() + (onTopbar ? 4000 : ui::CTRLBAR_HIDE_MS);
+
+        // volume slider drag
+        if (g_ui.volumeDragging && g_mpv) {
+            int sliderW = ui::VOLSIDER_W;
+            int sliderX = g_ui.winW - 54 - sliderW - 10;
+            float ratio = (float)(g_ui.mouseX - sliderX) / sliderW;
+            if (ratio < 0) ratio = 0; if (ratio > 1) ratio = 1;
+            g_mpv->setVolume(ratio);
+        }
 
         TRACKMOUSEEVENT tme = {sizeof(tme), TME_LEAVE, hwnd, 0};
         TrackMouseEvent(&tme);
@@ -269,7 +318,51 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             if (ratio < 0) ratio = 0; if (ratio > 1) ratio = 1;
             g_ui.seekTarget = g_mpv->duration() * ratio;
             SetCapture(hwnd);
-        } else {
+        }
+        // --- speed popup ---
+        else if (g_ui.speedMenuOpen) {
+            int menuW = 80, itemH = 30;
+            int menuX = g_ui.winW - 150;
+            int menuY = barTop - SPEED_PRESET_COUNT * itemH - 5;
+            if (mx >= menuX && mx <= menuX + menuW && my >= menuY && my <= menuY + SPEED_PRESET_COUNT * itemH) {
+                int idx = (my - menuY) / itemH;
+                if (idx >= 0 && idx < SPEED_PRESET_COUNT) {
+                    g_mpv->setSpeed(SPEED_PRESETS[idx]);
+                    char msg[32];
+                    std::snprintf(msg, sizeof(msg), "Speed: %.2fx", SPEED_PRESETS[idx]);
+                    showToast(msg);
+                }
+            }
+            g_ui.speedMenuOpen = false;
+        }
+        // --- speed label click (toggle speed popup) ---
+        else if (g_mpv && mx >= g_ui.winW - 110 && mx <= g_ui.winW - 70 &&
+                 my >= barTop + 36 && my <= barTop + 60) {
+            g_ui.speedMenuOpen = !g_ui.speedMenuOpen;
+        }
+        // --- volume icon click ---
+        else if (g_mpv && mx >= g_ui.winW - 64 && mx <= g_ui.winW - 44 &&
+                 my >= barTop + 40 && my <= barTop + 60) {
+            g_ui.volumeSliderOpen = !g_ui.volumeSliderOpen;
+        }
+        // --- volume slider drag ---
+        else if (g_ui.volumeSliderOpen && g_mpv) {
+            int sliderW = ui::VOLSIDER_W;
+            int sliderX = g_ui.winW - 54 - sliderW - 10;
+            int sliderY = barTop + 50 - 2;
+            if (mx >= sliderX && mx <= sliderX + sliderW && my >= sliderY - 8 && my <= sliderY + 12) {
+                g_ui.volumeDragging = true;
+                float ratio = (float)(mx - sliderX) / sliderW;
+                if (ratio < 0) ratio = 0; if (ratio > 1) ratio = 1;
+                g_mpv->setVolume(ratio);
+                SetCapture(hwnd);
+            } else {
+                g_ui.volumeSliderOpen = false;
+                if (g_mpv) g_mpv->togglePause();
+            }
+        }
+        // --- click on video area ---
+        else {
             if (g_mpv) g_mpv->togglePause();
         }
 
@@ -281,8 +374,11 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         if (g_ui.seekingDrag) {
             g_ui.seekingDrag = false;
             if (g_mpv) g_mpv->seek(g_ui.seekTarget);
-            ReleaseCapture();
         }
+        if (g_ui.volumeDragging) {
+            g_ui.volumeDragging = false;
+        }
+        ReleaseCapture();
         return 0;
 
     case WM_MOUSEWHEEL: {
@@ -528,6 +624,85 @@ static void renderOverlay() {
     // --- buffering indicator ---
     if (g_mpv->bufferFill() < 0.5) {
         g_text.drawText(w / 2 - 20, barTop + 75, "Buffering...", 12, 161, 161, 166);
+    }
+
+    // --- speed popup menu ---
+    if (g_ui.speedMenuOpen) {
+        int menuW = 80, itemH = 30;
+        int menuH = SPEED_PRESET_COUNT * itemH;
+        int menuX = w - 150;
+        int menuY = barTop - menuH - 5;
+
+        // background
+        SDL_Rect bgRc = {menuX, menuY, menuW, menuH};
+        SDL_SetRenderDrawColor(g_sdlRdr, 21, 21, 21, 245);
+        SDL_RenderFillRect(g_sdlRdr, &bgRc);
+        // border
+        SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 25);
+        SDL_RenderDrawRect(g_sdlRdr, &bgRc);
+
+        float curSpeed = g_mpv->speed();
+        for (int i = 0; i < SPEED_PRESET_COUNT; ++i) {
+            int iy = menuY + i * itemH;
+            bool highlight = (std::abs(curSpeed - SPEED_PRESETS[i]) < 0.01f);
+            if (highlight) {
+                SDL_Rect hlRc = {menuX + 1, iy + 1, menuW - 2, itemH - 1};
+                SDL_SetRenderDrawColor(g_sdlRdr, 37, 99, 235, 255);
+                SDL_RenderFillRect(g_sdlRdr, &hlRc);
+            }
+            char label[16];
+            float sp = SPEED_PRESETS[i];
+            if (sp == (int)sp) std::snprintf(label, sizeof(label), "%.0fx", sp);
+            else               std::snprintf(label, sizeof(label), "%.2fx", sp);
+            g_text.drawText(menuX + 20, iy + 7, label, 13, 255, 255, 255);
+        }
+    }
+
+    // --- volume slider (appears left of volume icon) ---
+    if (g_ui.volumeSliderOpen || g_ui.volumeDragging) {
+        int sliderW = ui::VOLSIDER_W;
+        int sliderH = 4;
+        int volIconX = w - 54;
+        int sliderX = volIconX - sliderW - 10;
+        int sliderY = barTop + 50 - sliderH / 2;
+
+        // track bg
+        SDL_Rect sBg = {sliderX, sliderY, sliderW, sliderH};
+        SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 25);
+        SDL_RenderFillRect(g_sdlRdr, &sBg);
+        // filled
+        float vol = g_mpv->volume();
+        int fillW = (int)(sliderW * vol);
+        if (fillW > 0) {
+            SDL_Rect sFill = {sliderX, sliderY, fillW, sliderH};
+            SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 200);
+            SDL_RenderFillRect(g_sdlRdr, &sFill);
+        }
+        // thumb
+        int thumbX = sliderX + fillW;
+        int thumbR = 5;
+        SDL_Rect tRc = {thumbX - thumbR, sliderY + sliderH/2 - thumbR, thumbR*2, thumbR*2};
+        SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 255);
+        SDL_RenderFillRect(g_sdlRdr, &tRc);
+
+        // volume percentage
+        char vStr[16];
+        std::snprintf(vStr, sizeof(vStr), "%d%%", (int)(vol * 100));
+        g_text.drawText(sliderX + sliderW/2 - 10, sliderY - 16, vStr, 11, 161, 161, 166);
+    }
+
+    // --- toast notification ---
+    if (g_ui.toastActive) {
+        Uint32 elapsed = SDL_GetTicks() - g_ui.toastStart;
+        if (elapsed > ui::TOAST_MS) {
+            g_ui.toastActive = false;
+        } else {
+            float alpha = 1.0f;
+            if (elapsed > ui::TOAST_MS - 300)
+                alpha = 1.0f - (float)(elapsed - (ui::TOAST_MS - 300)) / 300.0f;
+            Uint8 a = (Uint8)(alpha * 255);
+            g_text.drawText(w / 2 - 30, 70, g_ui.toastMsg, 13, 255, 255, 255);
+        }
     }
 
     SDL_RenderPresent(g_sdlRdr);
