@@ -1399,3 +1399,31 @@ decodeLoop退出 -> videoQueue_.closed -> pullFrame返回State::Ended -> auto-ne
 - 渲染器创建失败时回退软件渲染（分层窗口上 D3D 可能失败）
 - 教训：`Stop-Process -Force` 不执行析构 → Logger 不 flush → 日志空文件。
   测试时必须用 WM_CLOSE 优雅关闭才能看到日志。
+
+---
+
+## M34a Phase 2i: 播放流程闭环（2026-08-24）
+
+任务：补齐播放器核心数据流——进度记忆、续播、播放队列、自动连播。
+
+发现并修复的 bug：
+1. **进度覆盖丢失**：原代码 `g_cfg.history[initialFile] = 0.0` 在每次加载时
+   把上次观看位置清零，resume 功能形同虚设 → 改为 playPath() 统一入口，
+   仅 resume=1 且历史 >1s 时挂起 g_pendingResumePos
+2. **历史顺序假象**：std::map 按 path 字典序排列，"最近播放"实为字母序
+   → 渲染改用稳定播放队列 g_playlist（文件夹扫描生成，按文件名排序）
+
+实现：
+1. buildPlaylistAround()：打开/拖入文件时扫描同目录视频
+   （14 种扩展名 _stricmp，上限 2000，空目录回退单文件队列）
+2. 进度保存：主循环每 3 秒（Playing 时）+ 退出前；距结尾 <2s 视为看完清零
+3. onFileLoaded：pendingResumePos>1 时 seek + Toast "Resumed at mm:ss"
+4. onPlaybackEnded：history 清零 + 自动 playIndex(idx+1)
+5. prev/next 按钮、列表面板条目、欢迎页网格全部可点击导航
+6. 队列渲染带序号/当前高亮/@mm:ss 已看进度
+
+验证：
+- testdata 目录扫出 playlist=11 个文件 ✓
+- 播放 ~23s 后 ini 落盘 hist=21.28 ✓
+- resume=1 重启日志出现 "resume at 5.8s" ✓
+- 注意：resume 默认关闭（ini: resume=0），属设计行为
