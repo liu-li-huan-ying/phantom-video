@@ -1223,3 +1223,45 @@ decodeLoop退出 -> videoQueue_.closed -> pullFrame返回State::Ended -> auto-ne
 - toggle/shutdown 时 stopWorker 停止线程省 CPU
 - openCurrent/DROPFILE 切文件时 clearThumbnailCache 清缓存
 编译通过，冒烟测试通过。
+
+---
+
+## M34: 集成 libmpv 零拷贝硬解
+
+### M34a: Phase 1 基础框架 — libmpv 集成 + 基本播放
+**2026-08-24**
+
+目标：用 mpv 替代自研 FFmpeg 解码管线，实现 D3D11VA 零拷贝硬件解码。
+
+技术决策：
+- mpv `--wid` 方案（mpv 自建 D3D11 设备/SwapChain，直接渲染到子窗口）
+- GDI 叠加层（透明子窗口绘制控件/进度条/文件名/时间）
+- mpv 内置音频输出（wasapi）+ scaletempo2 变速（替代 Sonic）
+- 保留 FFmpeg/Sonic 仅用于缩略图提取
+
+已完成：
+1. 下载 libmpv dev 包到 `dev/mpv/`（shinchiro 20260814，libmpv-2.dll 114 MB 单体构建）
+2. CMakeLists.txt 链接 libmpv.dll.a，拷贝 libmpv-2.dll
+3. 新建 MpvBackend 类（`src/core/mpv_backend.h/cpp`）
+   - init(HWND) → mpv_create + mpv_initialize + 9 个 observe_property
+   - loadFile / close / togglePause / seek / seekRelative / setVolume / toggleMute / setSpeed
+   - eventLoop 线程处理 PROPERTY_CHANGE / END_FILE / START_FILE / FILE_LOADED / SHUTDOWN
+   - 属性缓存：clock / duration / volume / speed / hwDecode / videoWidth / videoHeight
+4. 重写 main.cpp：
+   - Win32 父窗口 + mpv 子窗口（`--wid` 嵌入）
+   - GDI overlay：半透明底部控件栏 + 进度条 + 时间 + 文件名 + HW 标记
+   - 键盘：Space=暂停, Left/Right=±5s, Up/Down=音量, M=静音, F=全屏, Ctrl+O=打开
+   - 鼠标滚轮=音量, 进度条点击跳转, 拖放文件, WM_PAINT+TIMER 30fps 重绘
+
+遇到的困难：
+1. mpv `--wid` 选项必须在 `mpv_initialize()` 之前设置，否则无效
+   - 解决：`init(HWND)` 方法接受 HWND 参数，在初始化前设置 wid
+2. HWND 类型不匹配：forward declaration `void*` vs 实际 `HWND__*`
+   - 解决：在 mpv_backend.h 中 `#include <windows.h>`
+3. `AlphaBlend` 链接失败：缺少 msimg32.lib
+   - 解决：CMakeLists.txt 添加 msimg32
+
+下一步：
+- Phase 2: 播放列表对接 + 命令行参数 + 历史记录
+- Phase 3: 完整 UI 叠加层（标题栏/设置面板/欢迎页/OSD）
+- Phase 4: 字幕处理（mpv 内置 + 自定义 ASS 渲染叠加）
