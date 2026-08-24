@@ -14,6 +14,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
+#include <algorithm>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -130,6 +131,65 @@ static void showToast(const char* msg) {
     g_ui.toastStart = SDL_GetTicks();
 }
 
+// ---- 播放队列（稳定顺序，文件夹扫描生成，不随播放重排） ----
+static std::vector<std::string> g_playlist;
+static const char* kVideoExts[] = {
+    ".mp4",".mkv",".avi",".mov",".flv",".wmv",".webm",".ts",".m2ts",
+    ".rmvb",".rm",".3gp",".mpg",".mpeg"
+};
+static const size_t PLAYLIST_MAX = 2000;
+
+// 以 file 所在目录扫描视频文件构建播放队列（按文件名排序）
+static void buildPlaylistAround(const std::string& file) {
+    namespace fs = std::filesystem;
+    g_playlist.clear();
+    fs::path p(file);
+    fs::path dir = p.parent_path();
+    std::error_code ec;
+    if (dir.empty() || !fs::is_directory(dir, ec)) { g_playlist.push_back(file); return; }
+    std::vector<fs::path> found;
+    for (auto& e : fs::directory_iterator(dir, ec)) {
+        if (g_playlist.size() >= PLAYLIST_MAX) break;
+        if (!e.is_regular_file(ec)) continue;
+        std::string ext = e.path().extension().string();
+        for (auto* ve : kVideoExts) {
+            if (_stricmp(ext.c_str(), ve) == 0) { found.push_back(e.path()); break; }
+        }
+    }
+    if (found.empty()) { g_playlist.push_back(file); return; }
+    std::sort(found.begin(), found.end());
+    for (auto& f : found) g_playlist.push_back(f.string());
+}
+
+static int playlistIndexOf(const std::string& path) {
+    for (size_t i = 0; i < g_playlist.size(); ++i)
+        if (g_playlist[i] == path) return (int)i;
+    return -1;
+}
+
+// 统一播放入口：记录待续播位置 + 更新 lastFile
+static double g_pendingResumePos = -1.0;   // >0 表示 FILE_LOADED 后 seek 到此
+static void playPath(const std::string& path) {
+    if (!g_mpv || path.empty()) return;
+    g_pendingResumePos = -1.0;
+    auto it = g_cfg.history.find(path);
+    if (g_cfg.resume && it != g_cfg.history.end() && it->second > 1.0)
+        g_pendingResumePos = it->second;
+    g_mpv->loadFile(path);
+    g_cfg.lastFile = path;
+}
+
+static void playIndex(int idx, bool relative = false) {
+    if (relative) {
+        int cur = playlistIndexOf(g_mpv ? g_mpv->path() : "");
+        if (cur < 0) cur = 0;
+        idx = cur + idx;
+    }
+    if (idx < 0 || idx >= (int)g_playlist.size()) return;
+    playPath(g_playlist[idx]);
+}
+
+
 // ---- topbar icon hit test ----
 static int hitTestTopbarIcon(int mx, int my, int winW) {
     if (my < 0 || my > ui::TOPBAR_H) return -1;
@@ -230,7 +290,7 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             case 'O':
                 if (GetKeyState(VK_CONTROL) & 0x8000) {
                     std::string f = openFileDialog(hwnd);
-                    if (!f.empty()) g_mpv->loadFile(f);
+                    if (!f.empty()) { buildPlaylistAround(f); playPath(f); }
                 }
                 break;
             }
@@ -381,6 +441,38 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 if (g_mpv) g_mpv->togglePause();
             }
         }
+        // --- prev / next 按钮（传输区两侧） ---
+        else if (g_mpv && my >= barTop + 36 && my <= barTop + 64) {
+            int cx0 = g_ui.winW / 2;
+            if (mx >= cx0 - 64 && mx <= cx0 - 36) {          // prev
+                int idx = playlistIndexOf(g_mpv->path());
+                if (idx > 0) { playIndex(idx - 1); showToast("Previous"); }
+            }
+            else if (mx >= cx0 + 36 && mx <= cx0 + 64) {     // next
+                int idx = playlistIndexOf(g_mpv->path());
+                if (idx >= 0 && idx + 1 < (int)g_playlist.size()) {
+                    playIndex(idx + 1); showToast("Next");
+                } else {
+                    showToast("No next track");
+                }
+            }
+            else if (mx >= cx0 - 21 && mx <= cx0 + 21) {     // play/pause
+                g_mpv->togglePause();
+            }
+            // 其余空隙不处理
+        }
+        // --- 播放列表面板区域 ---
+        else if (g_ui.playlistOpen && mx >= g_ui.winW - 320) {
+            int panelY = ui::TOPBAR_H;
+            int itemH = 52;
+            int rel = my - (panelY + 45);
+            if (rel >= 0) {
+                int itemIdx = rel / itemH;
+                int visibleMax = (g_ui.winH - panelY - 55) / itemH;
+                if (itemIdx < visibleMax && itemIdx < (int)g_playlist.size())
+                    playIndex(itemIdx);
+            }
+        }
         // --- click on video area ---
         else {
             if (g_mpv) g_mpv->togglePause();
@@ -416,7 +508,8 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         HDROP hDrop = (HDROP)wp;
         char path[MAX_PATH];
         if (DragQueryFileA(hDrop, 0, path, MAX_PATH)) {
-            if (g_mpv) g_mpv->loadFile(path);
+            buildPlaylistAround(path);
+            playPath(path);
         }
         DragFinish(hDrop);
         return 0;
@@ -569,31 +662,37 @@ static void renderOverlay() {
         g_text.drawText(w / 2 - 60, dzY + 30, "Drop video here", 13, 161, 161, 166);
         g_text.drawText(w / 2 - 55, dzY + 55, "or press Ctrl+O", 12, 100, 100, 100);
 
-        // recent files grid (from config history)
-        if (!g_cfg.history.empty()) {
-            g_text.drawText(w / 2 - 60, dzY + dzH + 30, "Recent Files", 14, 161, 161, 166);
+        // 播放队列网格（当前文件夹扫描结果）
+        if (!g_playlist.empty()) {
+            g_text.drawText(w / 2 - 60, dzY + dzH + 30, "Playlist", 14, 161, 161, 166);
             int cardW = 140, cardH = 80, gap = 12;
-            int cols = std::min(4, (int)g_cfg.history.size());
+            int cols = std::min(4, (int)g_playlist.size());
             int gridW = cols * cardW + (cols - 1) * gap;
             int gridX = (w - gridW) / 2;
             int gridY = dzY + dzH + 55;
             int idx = 0;
-            for (auto it = g_cfg.history.rbegin(); it != g_cfg.history.rend() && idx < 8; ++it, ++idx) {
+            for (size_t pi = 0; pi < g_playlist.size() && idx < 8; ++pi, ++idx) {
                 int col = idx % cols, row = idx / cols;
                 int cx = gridX + col * (cardW + gap);
                 int cy = gridY + row * (cardH + gap);
+                bool isCur = (g_mpv && g_mpv->path() == g_playlist[pi]);
                 SDL_Rect cardRc = {cx, cy, cardW, cardH};
                 SDL_SetRenderDrawColor(g_sdlRdr, 21, 21, 21, 255);
                 SDL_RenderFillRect(g_sdlRdr, &cardRc);
-                SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 15);
+                SDL_SetRenderDrawColor(g_sdlRdr,
+                    isCur ? 37 : 255, isCur ? 99 : 255, isCur ? 235 : 255, isCur ? 200 : 15);
                 SDL_RenderDrawRect(g_sdlRdr, &cardRc);
-                // file name
-                std::string fn = std::filesystem::path(it->first).filename().string();
+                std::string fn = std::filesystem::path(g_playlist[pi]).filename().string();
                 if (fn.size() > 18) fn = fn.substr(0, 15) + "...";
-                g_text.drawText(cx + 8, cy + 10, fn, 11, 200, 200, 200);
-                // duration hint
-                char timeBuf[16];
-                formatTime(timeBuf, sizeof(timeBuf), it->second);
+                g_text.drawText(cx + 8, cy + 10, fn, 11, isCur ? 255 : 200, isCur ? 255 : 200, isCur ? 255 : 200);
+                double hpos = 0;
+                auto hit = g_cfg.history.find(g_playlist[pi]);
+                if (hit != g_cfg.history.end()) hpos = hit->second;
+                char timeBuf[16] = "--:--";
+                if (hpos > 0) {
+                    std::snprintf(timeBuf, sizeof(timeBuf), "@%02d:%02d",
+                        (int)(hpos / 60), (int)hpos % 60);
+                }
                 g_text.drawText(cx + 8, cy + 35, timeBuf, 10, 100, 100, 100);
             }
         }
@@ -818,12 +917,13 @@ static void renderOverlay() {
         // title
         g_text.drawText(panelX + 16, panelY + 14, "Playlist", 15, 255, 255, 255);
 
-        // items from config history
+        // items from playlist queue
         int itemY = panelY + 45;
         int itemH = 52;
-        int idx = 0;
-        for (auto it = g_cfg.history.rbegin(); it != g_cfg.history.rend() && itemY < panelY + panelH - 10; ++it, ++idx) {
-            bool isCurrent = (g_mpv && g_mpv->path() == it->first);
+        for (size_t pi = 0; pi < g_playlist.size(); ++pi) {
+            if (itemY >= panelY + panelH - 10) break;
+            const std::string& p = g_playlist[pi];
+            bool isCurrent = (g_mpv && g_mpv->path() == p);
 
             // item background (if current)
             if (isCurrent) {
@@ -832,16 +932,25 @@ static void renderOverlay() {
                 SDL_RenderFillRect(g_sdlRdr, &hlRc);
             }
 
+            // index number
+            char num[8];
+            std::snprintf(num, sizeof(num), "%d", (int)(pi + 1));
+            g_text.drawText(panelX + 12, itemY + 6, num, 11, 120, 120, 120);
+
             // file name
-            std::string fn = std::filesystem::path(it->first).filename().string();
-            if (fn.size() > 35) fn = fn.substr(0, 32) + "...";
-            g_text.drawText(panelX + 16, itemY + 4, fn, 12, isCurrent ? 255 : 200, isCurrent ? 255 : 200, isCurrent ? 255 : 200);
+            std::string fn = std::filesystem::path(p).filename().string();
+            if (fn.size() > 30) fn = fn.substr(0, 27) + "...";
+            g_text.drawText(panelX + 40, itemY + 4, fn, 12,
+                isCurrent ? 255 : 200, isCurrent ? 255 : 200, isCurrent ? 255 : 200);
 
             // last position
-            if (it->second > 0) {
+            double hpos = 0;
+            auto hit = g_cfg.history.find(p);
+            if (hit != g_cfg.history.end()) hpos = hit->second;
+            if (hpos > 1.0) {
                 char posBuf[16];
-                formatTime(posBuf, sizeof(posBuf), it->second);
-                g_text.drawText(panelX + 16, itemY + 24, posBuf, 10, 100, 100, 100);
+                formatTime(posBuf, sizeof(posBuf), hpos);
+                g_text.drawText(panelX + 40, itemY + 24, posBuf, 10, 100, 100, 100);
             }
 
             // playing indicator
@@ -853,8 +962,8 @@ static void renderOverlay() {
             itemY += itemH;
         }
 
-        if (g_cfg.history.empty()) {
-            g_text.drawText(panelX + 16, itemY + 10, "No files in history", 12, 100, 100, 100);
+        if (g_playlist.empty()) {
+            g_text.drawText(panelX + 16, itemY + 10, "No files in playlist", 12, 100, 100, 100);
         }
     }
 
@@ -1015,7 +1124,28 @@ int main(int argc, char** argv) {
     mpv.setVolume(g_cfg.volume);
     if (g_cfg.speed >= 0.25f && g_cfg.speed <= 4.0f && std::abs(g_cfg.speed - 1.0f) > 0.01f)
         mpv.setSpeed(g_cfg.speed);
-    mpv.onPlaybackEnded = [](){ LOG_INFO("MAIN", "playback ended"); };
+    mpv.onFileLoaded = [&]() {
+        // 续播：FILE_LOADED 后跳到上次位置
+        if (g_pendingResumePos > 1.0 && g_mpv) {
+            LOG_INFO("MAIN", "resume at %.1fs", g_pendingResumePos);
+            mpv.seek(g_pendingResumePos);
+            char msg[48];
+            std::snprintf(msg, sizeof(msg), "Resumed at %02d:%02d",
+                (int)(g_pendingResumePos / 60), (int)g_pendingResumePos % 60);
+            showToast(msg);
+        }
+        g_pendingResumePos = -1.0;
+    };
+    mpv.onPlaybackEnded = [&]() {
+        LOG_INFO("MAIN", "playback ended");
+        if (!g_mpv) return;
+        std::string cur = g_mpv->path();
+        if (!cur.empty()) g_cfg.history[cur] = 0;   // 看完清零
+        int idx = playlistIndexOf(cur);
+        if (idx >= 0 && idx + 1 < (int)g_playlist.size()) {
+            playIndex(idx + 1);                     // 自动下一个
+        }
+    };
 
     if (!mpv.init(g_mpvHwnd)) { LOG_ERROR("MAIN", "mpv init failed"); return 1; }
 
@@ -1035,19 +1165,21 @@ int main(int argc, char** argv) {
             break;
         }
     }
-    if (initialFile.empty() && g_cfg.resume && !g_cfg.lastFile.empty())
+    if (initialFile.empty() && g_cfg.resume && !g_cfg.lastFile.empty()) {
         initialFile = g_cfg.lastFile;
-
-    if (!initialFile.empty()) {
-        mpv.loadFile(initialFile);
-        g_cfg.history[initialFile] = 0.0;
-        g_cfg.lastFile = initialFile;
+        // 恢复上次播放：队列重建自其所在目录
+        buildPlaylistAround(initialFile);
+        playPath(initialFile);
+    } else if (!initialFile.empty()) {
+        buildPlaylistAround(initialFile);
+        playPath(initialFile);
     }
 
-    LOG_INFO("MAIN", "entering main loop");
+    LOG_INFO("MAIN", "entering main loop (playlist=%d)", (int)g_playlist.size());
 
     // ---- main loop ----
     bool running = true;
+    Uint32 lastPosSave = 0;
     while (running) {
         MSG msg;
         while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
@@ -1057,6 +1189,19 @@ int main(int argc, char** argv) {
         }
         if (!running) break;
 
+        // 周期保存播放进度（3 秒）
+        Uint32 now = SDL_GetTicks();
+        if (now - lastPosSave >= 3000) {
+            lastPosSave = now;
+            if (g_mpv && g_mpv->hasMedia() && g_mpv->state() == MpvBackend::State::Playing) {
+                double pos = g_mpv->clock();
+                double dur = g_mpv->duration();
+                std::string cur = g_mpv->path();
+                if (!cur.empty() && dur > 0)
+                    g_cfg.history[cur] = (pos < dur - 2.0) ? pos : 0.0;  // 结尾视为看完
+            }
+        }
+
         if (g_ui.visible && SDL_GetTicks() > g_ui.hideAt)
             g_ui.visible = false;
 
@@ -1064,6 +1209,14 @@ int main(int argc, char** argv) {
         Sleep(1);
     }
 
+    // 退出前保存最终进度
+    if (g_mpv && g_mpv->hasMedia()) {
+        double pos = g_mpv->clock();
+        double dur = g_mpv->duration();
+        std::string cur = g_mpv->path();
+        if (!cur.empty() && dur > 0)
+            g_cfg.history[cur] = (pos < dur - 2.0) ? pos : 0.0;
+    }
     mpv.close();
     saveConfig(configPath(), g_cfg);
     destroyOverlay();
