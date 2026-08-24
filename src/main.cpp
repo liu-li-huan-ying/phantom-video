@@ -2,6 +2,7 @@
 #define SDL_MAIN_HANDLED
 #endif
 #include <SDL.h>
+#include <SDL_syswm.h>
 
 #include <windows.h>
 #include <shellapi.h>
@@ -12,7 +13,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <ctime>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -21,8 +21,11 @@
 #include "core/config.h"
 #include "core/mpv_backend.h"
 #include "core/logger.h"
+#include "ui/theme.h"
+#include "ui/gdi_text.h"
+#include "ui/svgicon.h"
 
-// ── helpers ──────────────────────────────────────────────────────────────
+// ---- helpers ----
 static std::vector<std::string> utf8Args() {
     std::vector<std::string> out;
     int argc = 0;
@@ -61,126 +64,68 @@ static std::string openFileDialog(HWND hwnd) {
     return "";
 }
 
-// ── GDI overlay drawing ──────────────────────────────────────────────────
-struct OverlayState {
-    bool   visible = false;
-    float  alpha   = 0.0f;   // 0..255
-    Uint32 hideAt  = 0;      // SDL_GetTicks deadline
-    bool   seeking = false;
-    int    mouseX  = -1, mouseY = -1;
+// ---- UI state ----
+static const int CONTROL_BAR_H = 100;
+
+struct UiState {
+    bool   visible   = true;
+    Uint32 hideAt    = 3000;
+    int    mouseX    = -1;
+    int    mouseY    = -1;
+    int    winW      = 960;
+    int    winH      = 540;
+    bool   fullscreen = false;
+
     // seekbar
-    bool   seekingDrag = false;
-    double seekTarget  = 0.0;
+    bool   seekbarHover  = false;
+    bool   seekingDrag   = false;
+    double seekTarget    = 0.0;
 };
 
-static void drawOverlay(HDC hdc, int winW, int winH, const MpvBackend& mpv,
-                         const OverlayState& ov) {
-    if (ov.alpha < 1.0f) return;
+// ---- globals ----
+static HWND          g_parentHwnd = nullptr;
+static HWND          g_mpvHwnd    = nullptr;
+static MpvBackend*   g_mpv        = nullptr;
+static SDL_Window*   g_sdlWin     = nullptr;
+static SDL_Renderer* g_sdlRdr     = nullptr;
+static GdiTextCache  g_text;
+static UiState       g_ui;
+static AppConfig     g_cfg;
 
-    int a = (int)ov.alpha;
-    // 渐变背景（底部控件区）
-    for (int y = winH - 120; y < winH; ++y) {
-        int localA = a * (y - (winH - 120)) / 120;
-        if (localA > 80) localA = 80;
-        RGBQUAD clr = { 0, 0, 0, (BYTE)localA };
-        RECT rc = { 0, y, winW, y + 1 };
-        // 使用 AlphaBlend 需要 DIB section; 这里用简单的半透明近似
-    }
+// ---- seekbar geometry ----
+static const int SB_MARGIN = 20;
 
-    // 简单 GDI 绘制（不透明度通过 SetBkMode 模拟）
-    SetBkMode(hdc, TRANSPARENT);
+static int sbTopY()    { return g_ui.winH - CONTROL_BAR_H; }
+static int sbTrackY()  { return sbTopY() + 10; }
+static int sbLeftX()   { return SB_MARGIN; }
+static int sbRightX()  { return g_ui.winW - SB_MARGIN; }
+static int sbWidth()   { return sbRightX() - sbLeftX(); }
 
-    // 播放状态图标（居中大图标）
-    if (mpv.state() == MpvBackend::State::Paused) {
-        SetTextColor(hdc, RGB(255, 255, 255));
-        HFONT hFont = CreateFontW(72, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
-            DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Segoe MDL2 Assets");
-        HFONT old = (HFONT)SelectObject(hdc, hFont);
-        const wchar_t* pauseGlyph = L"\uE769";
-        SIZE sz;
-        GetTextExtentPoint32W(hdc, pauseGlyph, 1, &sz);
-        TextOutW(hdc, (winW - sz.cx) / 2, (winH - sz.cy) / 2 - 40, pauseGlyph, 1);
-        SelectObject(hdc, old);
-        DeleteObject(hFont);
-    }
-
-    // 底部控制栏背景
-    {
-        HDC memDC = CreateCompatibleDC(hdc);
-        HBITMAP bmp = CreateCompatibleBitmap(hdc, winW, 120);
-        SelectObject(memDC, bmp);
-        RECT rcBg = { 0, 0, winW, 120 };
-        HBRUSH br = CreateSolidBrush(RGB(0, 0, 0));
-        FillRect(memDC, &rcBg, br);
-        DeleteObject(br);
-
-        BLENDFUNCTION bf = { AC_SRC_OVER, 0, (BYTE)a, 0 };
-        AlphaBlend(hdc, 0, winH - 120, winW, 120, memDC, 0, 0, winW, 120, bf);
-
-        DeleteObject(bmp);
-        DeleteDC(memDC);
-    }
-
-    // 进度条
-    double dur = mpv.duration();
-    double pos = ov.seekingDrag ? ov.seekTarget : mpv.clock();
-    if (dur > 0) {
-        int barY = winH - 80;
-        int barH = 4;
-        int barX = 20;
-        int barW = winW - 40;
-        // 背景
-        HBRUSH brBg = CreateSolidBrush(RGB(80, 80, 80));
-        RECT rcBar = { barX, barY, barX + barW, barY + barH };
-        FillRect(hdc, &rcBar, brBg);
-        DeleteObject(brBg);
-        // 进度
-        int progW = (int)(barW * pos / dur);
-        if (progW > 0) {
-            HBRUSH brProg = CreateSolidBrush(RGB(255, 60, 60));
-            RECT rcProg = { barX, barY, barX + progW, barY + barH };
-            FillRect(hdc, &rcProg, brProg);
-            DeleteObject(brProg);
-        }
-        // 时间文本
-        SetTextColor(hdc, RGB(200, 200, 200));
-        HFONT hFont = CreateFontW(16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-            DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
-        HFONT old = (HFONT)SelectObject(hdc, hFont);
-        char cur[32], tot[32];
-        formatTime(cur, sizeof(cur), pos);
-        formatTime(tot, sizeof(tot), dur);
-        char timeStr[80];
-        std::snprintf(timeStr, sizeof(timeStr), "%s / %s", cur, tot);
-        TextOutA(hdc, barX, barY + 10, timeStr, (int)std::strlen(timeStr));
-        // 文件名
-        std::string fname = std::filesystem::path(mpv.path()).filename().string();
-        TextOutA(hdc, barX, barY + 30, fname.c_str(), (int)fname.size());
-        // HW decode 标记
-        if (mpv.hwDecodeActive()) {
-            const char* hw = "[HW]";
-            TextOutA(hdc, winW - 60, barY + 10, hw, 4);
-        }
-        SelectObject(hdc, old);
-        DeleteObject(hFont);
-    }
-}
-
-// ── Win32 window for mpv ─────────────────────────────────────────────────
-static HWND g_mpvHwnd = nullptr;
-static MpvBackend* g_mpv = nullptr;
-static OverlayState g_ov;
-
-static LRESULT CALLBACK mpvWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+// ---- Win32 WndProc ----
+static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
-    case WM_SIZE:
-        if (g_mpvHwnd) {
-            RECT rc;
-            GetClientRect(hwnd, &rc);
-            MoveWindow(g_mpvHwnd, 0, 0, rc.right, rc.bottom, TRUE);
+
+    case WM_SIZE: {
+        RECT rc; GetClientRect(hwnd, &rc);
+        g_ui.winW = rc.right; g_ui.winH = rc.bottom;
+        if (g_mpvHwnd) MoveWindow(g_mpvHwnd, 0, 0, rc.right, rc.bottom, TRUE);
+        if (g_sdlWin) {
+            POINT pt = {0,0}; ClientToScreen(hwnd, &pt);
+            SDL_SetWindowPosition(g_sdlWin, pt.x, pt.y);
+            SDL_SetWindowSize(g_sdlWin, rc.right, rc.bottom);
         }
         return 0;
-    case WM_KEYDOWN:
+    }
+    case WM_MOVE: {
+        if (g_sdlWin) {
+            POINT pt = {0,0}; ClientToScreen(hwnd, &pt);
+            SDL_SetWindowPosition(g_sdlWin, pt.x, pt.y);
+        }
+        return 0;
+    }
+
+    // ---- keyboard ----
+    case WM_KEYDOWN: {
         if (g_mpv) {
             switch (wp) {
             case VK_SPACE: g_mpv->togglePause(); break;
@@ -188,75 +133,103 @@ static LRESULT CALLBACK mpvWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             case VK_RIGHT: g_mpv->seekRelative(5.0); break;
             case VK_UP:    g_mpv->setVolume(g_mpv->volume() + 0.05f); break;
             case VK_DOWN:  g_mpv->setVolume(g_mpv->volume() - 0.05f); break;
-            case 'M':      g_mpv->toggleMute(); break;
+            case 'M': g_mpv->toggleMute(); break;
+            case 'N': g_mpv->seekRelative( 10.0); break;
+            case 'P': g_mpv->seekRelative(-10.0); break;
+            case '[': g_mpv->setSpeed(g_mpv->speed() - 0.25f); break;
+            case ']': g_mpv->setSpeed(g_mpv->speed() + 0.25f); break;
             case 'F': {
-                DWORD style = GetWindowLongPtrW(hwnd, GWL_STYLE);
-                if (style & WS_OVERLAPPEDWINDOW) {
-                    SetWindowLongPtrW(hwnd, GWL_STYLE, style & ~WS_OVERLAPPEDWINDOW);
-                    MONITORINFO mi = { sizeof(mi) };
+                DWORD sty = (DWORD)GetWindowLongPtrW(hwnd, GWL_STYLE);
+                if (sty & WS_OVERLAPPEDWINDOW) {
+                    SetWindowLongPtrW(hwnd, GWL_STYLE, sty & ~WS_OVERLAPPEDWINDOW);
+                    MONITORINFO mi = {sizeof(mi)};
                     GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mi);
                     SetWindowPos(hwnd, HWND_TOP,
                         mi.rcMonitor.left, mi.rcMonitor.top,
-                        mi.rcMonitor.right - mi.rcMonitor.left,
-                        mi.rcMonitor.bottom - mi.rcMonitor.top,
-                        SWP_FRAMECHANGED);
+                        mi.rcMonitor.right  - mi.rcMonitor.left,
+                        mi.rcMonitor.bottom - mi.rcMonitor.top, SWP_FRAMECHANGED);
+                    g_ui.fullscreen = true;
                 } else {
-                    SetWindowLongPtrW(hwnd, GWL_STYLE, style | WS_OVERLAPPEDWINDOW);
+                    SetWindowLongPtrW(hwnd, GWL_STYLE, sty | WS_OVERLAPPEDWINDOW);
                     SetWindowPos(hwnd, nullptr, 100, 100, 960, 540,
                         SWP_FRAMECHANGED | SWP_NOZORDER);
+                    g_ui.fullscreen = false;
                 }
                 break;
             }
             case 'O':
                 if (GetKeyState(VK_CONTROL) & 0x8000) {
-                    std::string file = openFileDialog(hwnd);
-                    if (!file.empty()) g_mpv->loadFile(file);
+                    std::string f = openFileDialog(hwnd);
+                    if (!f.empty()) g_mpv->loadFile(f);
                 }
                 break;
             }
         }
-        // 显示控件
-        g_ov.visible = true;
-        g_ov.hideAt = SDL_GetTicks() + 3000;
-        g_ov.alpha = 255.0f;
-        InvalidateRect(hwnd, nullptr, FALSE);
-        return 0;
-    case WM_MOUSEMOVE:
-        g_ov.mouseX = LOWORD(lp);
-        g_ov.mouseY = HIWORD(lp);
-        g_ov.visible = true;
-        g_ov.hideAt = SDL_GetTicks() + 3000;
-        g_ov.alpha = 255.0f;
-        InvalidateRect(hwnd, nullptr, FALSE);
-        return 0;
-    case WM_LBUTTONDOWN: {
-        int mx = LOWORD(lp), my = HIWORD(lp);
-        RECT rc;
-        GetClientRect(hwnd, &rc);
-        int barY = rc.bottom - 80;
-        if (my >= barY - 10 && my <= barY + 30 && g_mpv && g_mpv->duration() > 0) {
-            // seekbar click
-            double ratio = (double)(mx - 20) / (rc.right - 40);
-            if (ratio < 0) ratio = 0;
-            if (ratio > 1) ratio = 1;
-            g_mpv->seek(g_mpv->duration() * ratio);
-            InvalidateRect(hwnd, nullptr, FALSE);
-        } else if (my > barY + 30) {
-            // 控件区：切换暂停
-            if (g_mpv) g_mpv->togglePause();
-        }
+        g_ui.visible = true;
+        g_ui.hideAt = SDL_GetTicks() + ui::CTRLBAR_HIDE_MS;
         return 0;
     }
-    case WM_MOUSEWHEEL:
+
+    // ---- mouse ----
+    case WM_MOUSEMOVE: {
+        g_ui.mouseX = (short)LOWORD(lp);
+        g_ui.mouseY = (short)HIWORD(lp);
+
+        int barTop = sbTopY();
+        bool onSB = (g_ui.mouseY >= barTop - 6 && g_ui.mouseY <= barTop + 22 &&
+                     g_ui.mouseX >= sbLeftX()   && g_ui.mouseX <= sbRightX());
+        g_ui.seekbarHover = onSB;
+
+        g_ui.visible = true;
+        g_ui.hideAt = SDL_GetTicks() + ui::CTRLBAR_HIDE_MS;
+
+        TRACKMOUSEEVENT tme = {sizeof(tme), TME_LEAVE, hwnd, 0};
+        TrackMouseEvent(&tme);
+        return 0;
+    }
+    case WM_MOUSELEAVE:
+        g_ui.seekbarHover = false;
+        g_ui.mouseX = g_ui.mouseY = -1;
+        return 0;
+
+    case WM_LBUTTONDOWN: {
+        int mx = (short)LOWORD(lp), my = (short)HIWORD(lp);
+        int barTop = sbTopY();
+
+        if (g_mpv && my >= barTop - 6 && my <= barTop + 22 &&
+            mx >= sbLeftX() && mx <= sbRightX() && g_mpv->duration() > 0) {
+            g_ui.seekingDrag = true;
+            double ratio = (double)(mx - sbLeftX()) / sbWidth();
+            if (ratio < 0) ratio = 0; if (ratio > 1) ratio = 1;
+            g_ui.seekTarget = g_mpv->duration() * ratio;
+            SetCapture(hwnd);
+        } else {
+            if (g_mpv) g_mpv->togglePause();
+        }
+
+        g_ui.visible = true;
+        g_ui.hideAt = SDL_GetTicks() + ui::CTRLBAR_HIDE_MS;
+        return 0;
+    }
+    case WM_LBUTTONUP:
+        if (g_ui.seekingDrag) {
+            g_ui.seekingDrag = false;
+            if (g_mpv) g_mpv->seek(g_ui.seekTarget);
+            ReleaseCapture();
+        }
+        return 0;
+
+    case WM_MOUSEWHEEL: {
         if (g_mpv) {
             short d = GET_WHEEL_DELTA_WPARAM(wp);
             g_mpv->setVolume(g_mpv->volume() + (d > 0 ? 0.05f : -0.05f));
-            g_ov.visible = true;
-            g_ov.hideAt = SDL_GetTicks() + 2000;
-            g_ov.alpha = 255.0f;
-            InvalidateRect(hwnd, nullptr, FALSE);
         }
+        g_ui.visible = true;
+        g_ui.hideAt = SDL_GetTicks() + 2000;
         return 0;
+    }
+
+    // ---- drag-drop ----
     case WM_DROPFILES: {
         HDROP hDrop = (HDROP)wp;
         char path[MAX_PATH];
@@ -266,29 +239,7 @@ static LRESULT CALLBACK mpvWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         DragFinish(hDrop);
         return 0;
     }
-    case WM_PAINT: {
-        PAINTSTRUCT ps;
-        HDC hdc = BeginPaint(hwnd, &ps);
-        if (g_mpv && g_mpv->hasMedia()) {
-            drawOverlay(hdc, ps.rcPaint.right - ps.rcPaint.left,
-                       ps.rcPaint.bottom - ps.rcPaint.top, *g_mpv, g_ov);
-        }
-        EndPaint(hwnd, &ps);
-        return 0;
-    }
-    case WM_TIMER:
-        if (wp == 1) {
-            // overlay fade timer
-            if (g_ov.visible && SDL_GetTicks() > g_ov.hideAt) {
-                g_ov.alpha -= 15.0f;
-                if (g_ov.alpha <= 0) {
-                    g_ov.alpha = 0;
-                    g_ov.visible = false;
-                }
-            }
-            InvalidateRect(hwnd, nullptr, FALSE);
-        }
-        return 0;
+
     case WM_DESTROY:
         PostQuitMessage(0);
         return 0;
@@ -296,131 +247,283 @@ static LRESULT CALLBACK mpvWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     return DefWindowProcW(hwnd, msg, wp, lp);
 }
 
-// ── main ─────────────────────────────────────────────────────────────────
+// ---- SDL2 overlay ----
+static const Uint8 TRANSPARENT_R = 255;
+static const Uint8 TRANSPARENT_G = 0;
+static const Uint8 TRANSPARENT_B = 255;
+
+static bool createOverlay(HWND parent, int w, int h) {
+    g_sdlWin = SDL_CreateWindow("VPlayer UI",
+        SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, w, h,
+        SDL_WINDOW_SHOWN | SDL_WINDOW_BORDERLESS);
+    if (!g_sdlWin) {
+        LOG_ERROR("MAIN", "SDL_CreateWindow: %s", SDL_GetError());
+        return false;
+    }
+
+    SDL_SysWMinfo info{};
+    SDL_VERSION(&info.version);
+    if (!SDL_GetWindowWMInfo(g_sdlWin, &info)) {
+        LOG_ERROR("MAIN", "SDL_GetWindowWMInfo failed");
+        return false;
+    }
+    HWND sdlHwnd = info.info.win.window;
+
+    LONG ex = (LONG)GetWindowLongPtrW(sdlHwnd, GWL_EXSTYLE);
+    SetWindowLongPtrW(sdlHwnd, GWL_EXSTYLE,
+        ex | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST);
+    SetLayeredWindowAttributes(sdlHwnd, RGB(TRANSPARENT_R, TRANSPARENT_G, TRANSPARENT_B),
+                               0, LWA_COLORKEY);
+
+    g_sdlRdr = SDL_CreateRenderer(g_sdlWin, -1,
+        SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    if (!g_sdlRdr) {
+        LOG_ERROR("MAIN", "SDL_CreateRenderer: %s", SDL_GetError());
+        return false;
+    }
+    SDL_SetRenderDrawBlendMode(g_sdlRdr, SDL_BLENDMODE_BLEND);
+
+    g_text.init(g_sdlRdr);
+
+    POINT pt = {0,0}; ClientToScreen(parent, &pt);
+    SDL_SetWindowPosition(g_sdlWin, pt.x, pt.y);
+    SDL_SetWindowSize(g_sdlWin, w, h);
+
+    LOG_INFO("MAIN", "overlay created (%dx%d)", w, h);
+    return true;
+}
+
+static void destroyOverlay() {
+    g_text.shutdown();
+    svgicon::shutdown();
+    if (g_sdlRdr) { SDL_DestroyRenderer(g_sdlRdr); g_sdlRdr = nullptr; }
+    if (g_sdlWin) { SDL_DestroyWindow(g_sdlWin);   g_sdlWin = nullptr; }
+}
+
+// ---- rendering ----
+static void renderOverlay() {
+    if (!g_sdlRdr) return;
+
+    SDL_SetRenderDrawColor(g_sdlRdr, TRANSPARENT_R, TRANSPARENT_G, TRANSPARENT_B, 255);
+    SDL_RenderClear(g_sdlRdr);
+
+    int w = g_ui.winW, h = g_ui.winH;
+
+    if (!g_mpv || !g_mpv->hasMedia() || !g_ui.visible) {
+        SDL_RenderPresent(g_sdlRdr);
+        return;
+    }
+
+    double dur = g_mpv->duration();
+    double pos = g_ui.seekingDrag ? g_ui.seekTarget : g_mpv->clock();
+    int barTop = sbTopY();
+
+    // --- control bar background ---
+    SDL_Rect barRc = {0, barTop, w, CONTROL_BAR_H};
+    SDL_SetRenderDrawColor(g_sdlRdr, 11, 11, 11, 230);
+    SDL_RenderFillRect(g_sdlRdr, &barRc);
+
+    // --- seekbar ---
+    if (dur > 0) {
+        int tx = sbLeftX(), tw = sbWidth();
+        int ty = sbTrackY();
+        int th = g_ui.seekbarHover ? ui::SEEKBAR_TRACK_H_HOVER : ui::SEEKBAR_TRACK_H;
+        int tyOff = (g_ui.seekbarHover ? 0 : 1);
+
+        SDL_Rect bgRc = {tx, ty + tyOff, tw, th};
+        SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 25);
+        SDL_RenderFillRect(g_sdlRdr, &bgRc);
+
+        int progW = (int)(tw * pos / dur);
+        if (progW > 0) {
+            SDL_Rect prRc = {tx, ty + tyOff, progW, th};
+            SDL_SetRenderDrawColor(g_sdlRdr, 37, 99, 235, 255);
+            SDL_RenderFillRect(g_sdlRdr, &prRc);
+        }
+
+        if (g_ui.seekbarHover || g_ui.seekingDrag) {
+            int cx = tx + progW;
+            int cy = ty + tyOff + th / 2;
+            int r = ui::SEEKTHUMB_D / 2;
+            SDL_Rect tRc = {cx - r, cy - r, ui::SEEKTHUMB_D, ui::SEEKTHUMB_D};
+            SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 255);
+            SDL_RenderFillRect(g_sdlRdr, &tRc);
+        }
+    }
+
+    // --- play / pause button (center) ---
+    {
+        const char* icon = (g_mpv->state() == MpvBackend::State::Paused) ? "play" : "pause";
+        svgicon::draw(g_sdlRdr, icon, w / 2, barTop + 55, 26, 255, 255, 255, 255);
+    }
+
+    // --- prev / next buttons ---
+    svgicon::draw(g_sdlRdr, "prev", w / 2 - 50, barTop + 55, 20, 161, 161, 166, 200);
+    svgicon::draw(g_sdlRdr, "next", w / 2 + 50, barTop + 55, 20, 161, 161, 166, 200);
+
+    // --- time ---
+    {
+        char cur[32], tot[32], ts[80];
+        formatTime(cur, sizeof(cur), pos);
+        formatTime(tot, sizeof(tot), dur);
+        std::snprintf(ts, sizeof(ts), "%s / %s", cur, tot);
+        g_text.drawText(20, barTop + 35, ts, 14, 161, 161, 166);
+    }
+
+    // --- filename ---
+    {
+        std::string fn = std::filesystem::path(g_mpv->path()).filename().string();
+        if (fn.size() > 60) fn = fn.substr(0, 57) + "...";
+        g_text.drawText(20, barTop + 60, fn, 13, 255, 255, 255);
+    }
+
+    // --- HW badge ---
+    if (g_mpv->hwDecodeActive()) {
+        g_text.drawText(w - 55, barTop + 35, "[HW]", 11, 37, 99, 235);
+    }
+
+    // --- volume icon ---
+    {
+        const char* vid = g_mpv->muted() ? "mute" : "volume";
+        svgicon::draw(g_sdlRdr, vid, w - 45, barTop + 55, 20, 161, 161, 166, 200);
+    }
+
+    // --- fullscreen icon ---
+    {
+        const char* fid = g_ui.fullscreen ? "exitfull" : "full";
+        svgicon::draw(g_sdlRdr, fid, w - 80, barTop + 55, 20, 161, 161, 166, 200);
+    }
+
+    // --- speed label ---
+    {
+        char spd[16];
+        float s = g_mpv->speed();
+        if (s == (int)s) std::snprintf(spd, sizeof(spd), "%.0fx", s);
+        else             std::snprintf(spd, sizeof(spd), "%.2fx", s);
+        g_text.drawText(w - 120, barTop + 40, spd, 12, 161, 161, 166);
+    }
+
+    SDL_RenderPresent(g_sdlRdr);
+}
+
+// ---- main ----
 int main(int argc, char** argv) {
-    (void)argc;
-    (void)argv;
+    (void)argc; (void)argv;
+
     Logger::instance().init("vplayer", 7);
-    bool diagMode = false;
+    bool diag = false;
     for (int i = 1; i < argc; ++i)
-        if (std::string(argv[i]) == "--debug") { diagMode = true; break; }
-    Logger::instance().setLevel(diagMode ? LogLevel::Trace : LogLevel::Warn);
-    LOG_INFO("MAIN", "vplayer (mpv backend) starting");
-    
+        if (std::string(argv[i]) == "--debug") { diag = true; break; }
+    Logger::instance().setLevel(diag ? LogLevel::Trace : LogLevel::Warn);
+    LOG_INFO("MAIN", "vplayer (mpv + SDL2 overlay) starting");
 
-    // config
-    AppConfig cfg;
-    loadConfig(configPath(), cfg);
+    loadConfig(configPath(), g_cfg);
 
-    // Win32 window class
-    WNDCLASSEXW wc = {};
-    wc.cbSize = sizeof(wc);
-    wc.lpfnWndProc = mpvWndProc;
-    wc.hInstance = GetModuleHandleW(nullptr);
-    wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-    wc.lpszClassName = L"VPlayerMpv";
-    wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
-    RegisterClassExW(&wc);
-
-    HWND hwnd = CreateWindowExW(
-        WS_EX_ACCEPTFILES,
-        wc.lpszClassName, L"VPlayer",
-        WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, CW_USEDEFAULT, 960, 540,
-        nullptr, nullptr, wc.hInstance, nullptr);
-
-    if (!hwnd) {
-        LOG_ERROR("MAIN", "CreateWindow failed");
+    SDL_SetMainReady();
+    if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+        LOG_ERROR("MAIN", "SDL_Init: %s", SDL_GetError());
         return 1;
     }
 
-    // DWM shadow + rounded corners
-    MARGINS m = {0, 0, 0, 0};
-    DwmExtendFrameIntoClientArea(hwnd, &m);
-    int pref = 2;
-    DwmSetWindowAttribute(hwnd, 33, &pref, sizeof(pref));
+    // ---- Win32 parent window ----
+    WNDCLASSEXW wc = {};
+    wc.cbSize        = sizeof(wc);
+    wc.lpfnWndProc   = parentProc;
+    wc.hInstance      = GetModuleHandleW(nullptr);
+    wc.hCursor        = LoadCursor(nullptr, IDC_ARROW);
+    wc.lpszClassName  = L"VPlayerParent";
+    wc.hbrBackground  = (HBRUSH)GetStockObject(BLACK_BRUSH);
+    RegisterClassExW(&wc);
+
+    g_parentHwnd = CreateWindowExW(WS_EX_ACCEPTFILES,
+        wc.lpszClassName, L"VPlayer", WS_OVERLAPPEDWINDOW,
+        CW_USEDEFAULT, CW_USEDEFAULT, 960, 540,
+        nullptr, nullptr, wc.hInstance, nullptr);
+    if (!g_parentHwnd) { LOG_ERROR("MAIN", "CreateWindow failed"); return 1; }
+
+    MARGINS mg = {0,0,0,0};
+    DwmExtendFrameIntoClientArea(g_parentHwnd, &mg);
+    int dpPref = 2;
+    DwmSetWindowAttribute(g_parentHwnd, 33, &dpPref, sizeof(dpPref));
 
     // icon
     {
         std::string base = exeDir();
-        const char* rels[] = { "assets/icons/vplay.bmp", "ico/vplay.bmp", "ico/vplay.ico" };
-        for (auto rel : rels) {
-            std::string p = base + rel;
-            HICON icon = (HICON)LoadImageA(nullptr, p.c_str(), IMAGE_ICON, 0, 0,
-                                            LR_LOADFROMFILE | LR_DEFAULTSIZE);
-            if (icon) {
-                SendMessage(hwnd, WM_SETICON, ICON_BIG, (LPARAM)icon);
-                SendMessage(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)icon);
-                break;
-            }
+        const char* rels[] = {"assets/icons/vplay.bmp","ico/vplay.bmp","ico/vplay.ico"};
+        for (auto r : rels) {
+            HICON ic = (HICON)LoadImageA(nullptr, (base+r).c_str(), IMAGE_ICON, 0, 0,
+                                          LR_LOADFROMFILE | LR_DEFAULTSIZE);
+            if (ic) { SendMessage(g_parentHwnd, WM_SETICON, ICON_BIG, (LPARAM)ic);
+                       SendMessage(g_parentHwnd, WM_SETICON, ICON_SMALL, (LPARAM)ic); break; }
         }
     }
 
-    ShowWindow(hwnd, SW_SHOW);
-    UpdateWindow(hwnd);
+    // ---- mpv child window ----
+    RECT rc; GetClientRect(g_parentHwnd, &rc);
+    g_mpvHwnd = CreateWindowExW(0, L"STATIC", nullptr,
+        WS_CHILD | WS_VISIBLE, 0, 0, rc.right, rc.bottom,
+        g_parentHwnd, nullptr, wc.hInstance, nullptr);
 
-    // mpv backend — 创建子窗口作为 mpv 渲染目标
     MpvBackend mpv;
     g_mpv = &mpv;
-    {
-        RECT rc;
-        GetClientRect(hwnd, &rc);
-        g_mpvHwnd = CreateWindowExW(0, L"STATIC", nullptr,
-            WS_CHILD | WS_VISIBLE,
-            0, 0, rc.right, rc.bottom,
-            hwnd, nullptr, wc.hInstance, nullptr);
-        
-        if (!mpv.init(g_mpvHwnd)) {
-            LOG_ERROR("MAIN", "mpv init failed");
-            return 1;
-        }
-    }
+    mpv.setVolume(g_cfg.volume);
+    if (g_cfg.speed >= 0.25f && g_cfg.speed <= 4.0f && std::abs(g_cfg.speed - 1.0f) > 0.01f)
+        mpv.setSpeed(g_cfg.speed);
+    mpv.onPlaybackEnded = [](){ LOG_INFO("MAIN", "playback ended"); };
 
-    // overlay timer (30fps redraw)
-    SetTimer(hwnd, 1, 33, nullptr);
+    if (!mpv.init(g_mpvHwnd)) { LOG_ERROR("MAIN", "mpv init failed"); return 1; }
 
-    // command line
+    // ---- SDL2 overlay ----
+    if (!createOverlay(g_parentHwnd, rc.right, rc.bottom)) { return 1; }
+
+    ShowWindow(g_parentHwnd, SW_SHOW);
+    UpdateWindow(g_parentHwnd);
+
+    // ---- command line / resume ----
     auto args = utf8Args();
     std::string initialFile;
-    if (args.size() > 1 && !args[1].empty() && args[1] != "--debug") {
-        initialFile = args[1];
-    } else if (cfg.resume && !cfg.lastFile.empty()) {
-        initialFile = cfg.lastFile;
+    for (size_t i = 1; i < args.size(); ++i) {
+        if (args[i] == "--debug") continue;
+        if (!args[i].empty() && args[i][0] != '-') {
+            initialFile = args[i];
+            break;
+        }
     }
-
-    mpv.setVolume(cfg.volume);
-    if (cfg.speed >= 0.25f && cfg.speed <= 4.0f && std::abs(cfg.speed - 1.0f) > 0.01f)
-        mpv.setSpeed(cfg.speed);
-
-    mpv.onPlaybackEnded = [&]() {
-        LOG_INFO("MAIN", "playback ended");
-    };
+    if (initialFile.empty() && g_cfg.resume && !g_cfg.lastFile.empty())
+        initialFile = g_cfg.lastFile;
 
     if (!initialFile.empty()) {
         mpv.loadFile(initialFile);
-        // update history
-        cfg.history[initialFile] = 0.0;
-        cfg.lastFile = initialFile;
+        g_cfg.history[initialFile] = 0.0;
+        g_cfg.lastFile = initialFile;
     }
 
-    // message loop
-    MSG msg;
+    LOG_INFO("MAIN", "entering main loop");
+
+    // ---- main loop ----
     bool running = true;
     while (running) {
+        MSG msg;
         while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
             if (msg.message == WM_QUIT) { running = false; break; }
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
         if (!running) break;
-        WaitMessage();
+
+        if (g_ui.visible && SDL_GetTicks() > g_ui.hideAt)
+            g_ui.visible = false;
+
+        renderOverlay();
+        Sleep(1);
     }
 
     mpv.close();
-    saveConfig(configPath(), cfg);
-    KillTimer(hwnd, 1);
-    DestroyWindow(hwnd);
+    saveConfig(configPath(), g_cfg);
+    destroyOverlay();
+    DestroyWindow(g_parentHwnd);
     UnregisterClassW(wc.lpszClassName, wc.hInstance);
+    SDL_Quit();
     LOG_INFO("MAIN", "vplayer exiting");
     return 0;
 }

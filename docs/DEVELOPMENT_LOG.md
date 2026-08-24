@@ -1261,7 +1261,40 @@ decodeLoop退出 -> videoQueue_.closed -> pullFrame返回State::Ended -> auto-ne
 3. `AlphaBlend` 链接失败：缺少 msimg32.lib
    - 解决：CMakeLists.txt 添加 msimg32
 
+---
+
+## M34a Phase 2a: SDL2 overlay 架构（2026-08-24）
+
+架构变更：从 GDI overlay 改为 **SDL2 overlay 窗口 + Win32 输入转发**。
+
+方案：Win32 父窗口 + mpv 子窗口（--wid）+ SDL2 顶层窗口（WS_EX_LAYERED | LWA_COLORKEY）。
+黑色像素=透明穿透到 mpv，彩色像素=接收输入。所有输入通过 Win32 WndProc 处理，
+非控件区转发到 mpv（mpv_command），控件区由 WndProc 直接处理。
+
+已完成：
+1. 重写 `main.cpp`：
+   - Win32 父窗口 + mpv 子窗口（`--wid` D3D11VA 零拷贝）
+   - SDL2 overlay 窗口：WS_EX_LAYERED + WS_EX_TRANSPARENT + WS_EX_TOPMOST
+   - LWA_COLORKEY（RGB(255,0,255) 透明键）实现穿透
+   - 控件栏渲染：深色背景 + 进度条（灰/蓝） + 播放/暂停图标（svgicon） + 时间 + 文件名 + HW 标记 + 音量/全屏图标 + 速度标签
+   - 前进/后退按钮（prev/next 图标）
+   - 进度条 hover 显示 thumb，拖拽 seek
+   - 控件栏自动隐藏（CTRLBAR_HIDE_MS）
+   - 全部键盘快捷键：Space/Left/Right/Up/Down/M/F/N/P/[/]/Ctrl+O
+   - 命令行参数：支持 `--debug` 和文件路径任意顺序
+2. GdiTextCache + svgicon 完全复用（SDL_Renderer 接口不变）
+3. 透明键颜色选择 RGB(255,0,255)（品红），UI 中不使用此色，避免误透明
+
+遇到的困难：
+1. **日志文件为空**：`Stop-Process -Force` 不调用析构函数，Logger::~Logger 中 fclose 不执行
+   - 解决：用 WM_CLOSE 优雅关闭，或了解 Force 不 flush 的限制
+2. **命令行解析只检查 args[1]**：`--debug` 在 args[1] 时文件路径 args[2] 被忽略
+   - 解决：遍历所有 args，跳过 `--debug`，取第一个非 flag 参数为文件路径
+3. **控件栏立即隐藏**：`hideAt=0`，SDL_GetTicks() > 0 立即触发隐藏
+   - 解决：初始值改为 3000ms
+
 下一步：
-- Phase 2: 播放列表对接 + 命令行参数 + 历史记录
-- Phase 3: 完整 UI 叠加层（标题栏/设置面板/欢迎页/OSD）
-- Phase 4: 字幕处理（mpv 内置 + 自定义 ASS 渲染叠加）
+- Phase 2b: 底部控制栏完善（渐变/缓冲进度/更多按钮）
+- Phase 2c: 顶部栏（标题/图标按钮/关闭）
+- Phase 2d: 进度条拖拽 + 速度弹出菜单 + Toast
+- Phase 2e-i: 设置面板/欢迎页/播放列表/配置/字幕
