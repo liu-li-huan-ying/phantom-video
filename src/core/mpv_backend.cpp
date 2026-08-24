@@ -164,6 +164,62 @@ void MpvBackend::setSpeed(float s) {
     mpv_set_property(mpv_, "speed", MPV_FORMAT_DOUBLE, &s);
 }
 
+// ---- 字幕 ----
+bool MpvBackend::subVisible() const {
+    if (!mpv_) return true;
+    int flag = 1;
+    if (mpv_get_property(mpv_, "sub-visibility", MPV_FORMAT_FLAG, &flag) < 0)
+        return true;
+    return flag != 0;
+}
+
+void MpvBackend::setSubVisibility(bool vis) {
+    if (!mpv_) return;
+    int flag = vis ? 1 : 0;
+    mpv_set_property(mpv_, "sub-visibility", MPV_FORMAT_FLAG, &flag);
+}
+
+std::string MpvBackend::currentSubTrack() const {
+    if (!mpv_) return {};
+    // current-tracks/sub 返回形如 "(sub)-id:1 lang:eng title:..." 的描述
+    char* s = mpv_get_property_string(mpv_, "current-tracks/sub");
+    if (!s) return {};
+    std::string result(s);
+    mpv_free(s);
+
+    // 提取 title/lang 拼成可读名
+    std::string name;
+    std::size_t tp = result.find("title:");
+    if (tp != std::string::npos) {
+        name = result.substr(tp + 6);
+        std::size_t sp = name.find(' ');
+        if (sp != std::string::npos) name = name.substr(0, sp);
+    }
+    std::size_t lp = result.find("lang:");
+    if (name.empty() && lp != std::string::npos) {
+        name = result.substr(lp + 5);
+        std::size_t sp = name.find(' ');
+        if (sp != std::string::npos) name = name.substr(0, sp);
+    }
+    return name;
+}
+
+void MpvBackend::addSubDelay(double delta) {
+    if (!mpv_) return;
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "%.2f", delta);
+    const char* cmd[] = { "add", "sub-delay", buf, NULL };
+    mpv_command(mpv_, cmd);
+}
+
+double MpvBackend::subDelay() const {
+    if (!mpv_) return 0.0;
+    double v = 0.0;
+    if (mpv_get_property(mpv_, "sub-delay", MPV_FORMAT_DOUBLE, &v) < 0)
+        return 0.0;
+    return v;
+}
+
 double MpvBackend::clock() const {
     if (!mpv_) return 0.0;
     std::lock_guard<std::mutex> lock(propMutex_);

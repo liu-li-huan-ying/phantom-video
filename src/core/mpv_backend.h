@@ -31,6 +31,13 @@ public:
     void setSpeed(float s);
     float speed() const { return speed_.load(std::memory_order_relaxed); }
 
+    // ---- 字幕 ----
+    bool subVisible() const;
+    void setSubVisibility(bool vis);
+    std::string currentSubTrack() const;   // 当前字幕轨描述(无则空)
+    void addSubDelay(double delta);        // 秒
+    double subDelay() const;
+
     State state() const { return state_.load(); }
     double clock() const;
     double duration() const;

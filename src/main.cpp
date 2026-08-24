@@ -380,6 +380,26 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 showToast(msg);
                 break;
             }
+            case 'C': {
+                bool vis = !g_mpv->subVisible();
+                g_mpv->setSubVisibility(vis);
+                showToast(vis ? "Subtitles ON" : "Subtitles OFF");
+                break;
+            }
+            case 'X': {
+                g_mpv->addSubDelay(-0.5);
+                char msg[40];
+                std::snprintf(msg, sizeof(msg), "Sub delay: %.1fs", -g_mpv->subDelay());
+                showToast(msg);
+                break;
+            }
+            case 'Z': {
+                g_mpv->addSubDelay(0.5);
+                char msg[40];
+                std::snprintf(msg, sizeof(msg), "Sub delay: %.1fs", -g_mpv->subDelay());
+                showToast(msg);
+                break;
+            }
             case VK_ESCAPE:
                 if (g_ui.speedMenuOpen) g_ui.speedMenuOpen = false;
                 else if (g_ui.volumeSliderOpen) g_ui.volumeSliderOpen = false;
@@ -504,8 +524,23 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             }
             g_ui.speedMenuOpen = false;
         }
+        // --- 字幕 cc 图标点击（切换可见性） ---
+        else if (g_mpv && mx >= g_ui.winW - S(134) && mx <= g_ui.winW - S(110) &&
+                 my >= barTop + S(38) && my <= barTop + S(62)) {
+            bool vis = !g_mpv->subVisible();
+            g_mpv->setSubVisibility(vis);
+            std::string trk = g_mpv->currentSubTrack();
+            char msg[96];
+            if (vis)
+                std::snprintf(msg, sizeof(msg), "Subtitles ON %s",
+                              trk.empty() ? "" : ("[" + trk + "]").c_str());
+            else
+                std::snprintf(msg, sizeof(msg), "Subtitles OFF");
+            showToast(msg);
+            LOG_DBG("MAIN", "sub visibility -> %d", vis ? 1 : 0);
+        }
         // --- speed label click (toggle speed popup) ---
-        else if (g_mpv && mx >= g_ui.winW - S(128) && mx <= g_ui.winW - S(84) &&
+        else if (g_mpv && mx >= g_ui.winW - S(166) && mx <= g_ui.winW - S(118) &&
                  my >= barTop + S(36) && my <= barTop + S(62)) {
             g_ui.speedMenuOpen = !g_ui.speedMenuOpen;
         }
@@ -917,9 +952,9 @@ static void renderOverlay() {
         g_text.drawText(S(20), barTop + S(60), title, 13, 255, 255, 255);
     }
 
-    // --- right side: HW badge + speed + gear + volume + fullscreen ---
-    // 布局基准(自右缘): 全屏@w-S(20) 音量@w-S(54) 齿轮@w-S(88)
-    // 速度文本左锚@w-S(126) HW徽标@w-S(170)；命中区与此一一对应
+    // --- right side: HW badge + speed + cc + gear + volume + fullscreen ---
+    // 布局基准(自右缘): 全屏@w-S(20) 音量@w-S(54) 齿轮@w-S(88) 字幕cc@w-S(122)
+    // 速度文本左锚@w-S(160) HW徽标@w-S(204)；命中区与此一一对应
     {
         int cyI = barTop + S(50);
         const char* fid = g_ui.fullscreen ? "exitfull" : "full";
@@ -928,14 +963,19 @@ static void renderOverlay() {
         svgicon::draw(g_sdlRdr, vid, w - S(54), cyI, S(20), 161, 161, 166, 200);
         svgicon::draw(g_sdlRdr, "gear", w - S(88), cyI, S(20), 161, 161, 166, 200);
         {
+            // 字幕图标：可见=亮，隐藏=暗
+            Uint8 ca = g_mpv->subVisible() ? 230 : 90;
+            svgicon::draw(g_sdlRdr, "cc", w - S(122), cyI, S(20), 255, 255, 255, ca);
+        }
+        {
             char spd[16];
             float s = g_mpv->speed();
             if (s == (int)s) std::snprintf(spd, sizeof(spd), "%.0fx", s);
             else             std::snprintf(spd, sizeof(spd), "%.1fx", s);
-            g_text.drawText(w - S(126), barTop + S(42), spd, 12, 161, 161, 166);
+            g_text.drawText(w - S(160), barTop + S(42), spd, 12, 161, 161, 166);
         }
         if (g_mpv->hwDecodeActive()) {
-            g_text.drawText(w - S(170), barTop + S(42), "[HW]", 11, 37, 99, 235);
+            g_text.drawText(w - S(204), barTop + S(42), "[HW]", 11, 37, 99, 235);
         }
     }
 
