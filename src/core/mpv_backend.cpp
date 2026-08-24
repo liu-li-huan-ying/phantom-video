@@ -51,6 +51,7 @@ bool MpvBackend::init(HWND hwnd) {
     mpv_observe_property(mpv_, 7, "width", MPV_FORMAT_INT64);
     mpv_observe_property(mpv_, 8, "height", MPV_FORMAT_INT64);
     mpv_observe_property(mpv_, 9, "mute", MPV_FORMAT_FLAG);
+    mpv_observe_property(mpv_, 10, "paused-for-cache", MPV_FORMAT_FLAG);
 
     running_.store(true);
     eventThread_ = std::thread(&MpvBackend::eventLoop, this);
@@ -166,6 +167,21 @@ double MpvBackend::duration() const {
     return cachedDuration_;
 }
 
+double MpvBackend::bufferFill() const {
+    if (!mpv_) return 0.0;
+    std::lock_guard<std::mutex> lock(propMutex_);
+    return cachedBufferFill_;
+}
+
+std::string MpvBackend::title() const {
+    if (!mpv_) return {};
+    char* str = mpv_get_property_string(mpv_, "media-title");
+    if (!str) return {};
+    std::string result(str);
+    mpv_free(str);
+    return result;
+}
+
 void MpvBackend::eventLoop() {
     while (running_.load()) {
         mpv_event* event = mpv_wait_event(mpv_, 0.1);
@@ -241,5 +257,8 @@ void MpvBackend::handlePropertyChange(const char* name, mpv_event_property* prop
     }
     else if (std::strcmp(name, "mute") == 0 && prop->format == MPV_FORMAT_FLAG) {
         muted_.store(*(int*)prop->data != 0);
+    }
+    else if (std::strcmp(name, "paused-for-cache") == 0 && prop->format == MPV_FORMAT_FLAG) {
+        cachedBufferFill_ = *(int*)prop->data ? 0.0 : 1.0;
     }
 }

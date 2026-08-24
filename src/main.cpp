@@ -300,6 +300,29 @@ static void destroyOverlay() {
     if (g_sdlWin) { SDL_DestroyWindow(g_sdlWin);   g_sdlWin = nullptr; }
 }
 
+// ---- dithered gradient helper ----
+static void drawGradientBar(SDL_Renderer* r, int x, int y, int w, int h,
+                             Uint8 cr, Uint8 cg, Uint8 cb, Uint8 aTop, Uint8 aBot) {
+    static const int bayer[4][4] = {
+        {  0, 136,  34, 170},
+        {204,  68, 238, 102},
+        { 51, 187,  17, 153},
+        {255, 119, 221,  85}
+    };
+    for (int dy = 0; dy < h; ++dy) {
+        int a = aTop + (aBot - aTop) * dy / h;
+        int by = dy % 4;
+        for (int dx = 0; dx < w; ++dx) {
+            int bx = dx % 4;
+            if (a > bayer[by][bx]) {
+                SDL_SetRenderDrawColor(r, cr, cg, cb, 255);
+                SDL_Rect px = {x + dx, y + dy, 1, 1};
+                SDL_RenderFillRect(r, &px);
+            }
+        }
+    }
+}
+
 // ---- rendering ----
 static void renderOverlay() {
     if (!g_sdlRdr) return;
@@ -318,32 +341,45 @@ static void renderOverlay() {
     double pos = g_ui.seekingDrag ? g_ui.seekTarget : g_mpv->clock();
     int barTop = sbTopY();
 
-    // --- control bar background ---
-    SDL_Rect barRc = {0, barTop, w, CONTROL_BAR_H};
-    SDL_SetRenderDrawColor(g_sdlRdr, 11, 11, 11, 230);
-    SDL_RenderFillRect(g_sdlRdr, &barRc);
+    // --- gradient background (top transparent -> bottom opaque) ---
+    drawGradientBar(g_sdlRdr, 0, barTop, w, 60, 11, 11, 11, 0, 220);
+    // solid bottom portion
+    SDL_Rect solidRc = {0, barTop + 60, w, CONTROL_BAR_H - 60};
+    SDL_SetRenderDrawColor(g_sdlRdr, 11, 11, 11, 240);
+    SDL_RenderFillRect(g_sdlRdr, &solidRc);
 
-    // --- seekbar ---
+    // --- seekbar (at very top of bar) ---
     if (dur > 0) {
         int tx = sbLeftX(), tw = sbWidth();
-        int ty = sbTrackY();
+        int ty = barTop + 4;
         int th = g_ui.seekbarHover ? ui::SEEKBAR_TRACK_H_HOVER : ui::SEEKBAR_TRACK_H;
-        int tyOff = (g_ui.seekbarHover ? 0 : 1);
 
-        SDL_Rect bgRc = {tx, ty + tyOff, tw, th};
+        // track background
+        SDL_Rect bgRc = {tx, ty, tw, th};
         SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 25);
         SDL_RenderFillRect(g_sdlRdr, &bgRc);
 
+        // buffer fill (behind progress)
+        double buf = g_mpv->bufferFill();
+        if (buf > 0.0 && buf < 1.0) {
+            int bufW = (int)(tw * buf);
+            SDL_Rect bufRc = {tx, ty, bufW, th};
+            SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 45);
+            SDL_RenderFillRect(g_sdlRdr, &bufRc);
+        }
+
+        // progress
         int progW = (int)(tw * pos / dur);
         if (progW > 0) {
-            SDL_Rect prRc = {tx, ty + tyOff, progW, th};
+            SDL_Rect prRc = {tx, ty, progW, th};
             SDL_SetRenderDrawColor(g_sdlRdr, 37, 99, 235, 255);
             SDL_RenderFillRect(g_sdlRdr, &prRc);
         }
 
+        // thumb (on hover or drag)
         if (g_ui.seekbarHover || g_ui.seekingDrag) {
             int cx = tx + progW;
-            int cy = ty + tyOff + th / 2;
+            int cy = ty + th / 2;
             int r = ui::SEEKTHUMB_D / 2;
             SDL_Rect tRc = {cx - r, cy - r, ui::SEEKTHUMB_D, ui::SEEKTHUMB_D};
             SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 255);
@@ -351,56 +387,59 @@ static void renderOverlay() {
         }
     }
 
-    // --- play / pause button (center) ---
+    // --- transport row: centered prev/play/next ---
     {
+        int cy = barTop + 50;
+        svgicon::draw(g_sdlRdr, "prev", w / 2 - 50, cy, 20, 161, 161, 166, 200);
         const char* icon = (g_mpv->state() == MpvBackend::State::Paused) ? "play" : "pause";
-        svgicon::draw(g_sdlRdr, icon, w / 2, barTop + 55, 26, 255, 255, 255, 255);
+        svgicon::draw(g_sdlRdr, icon, w / 2, cy, ui::PLAYBTN_SIZE, 255, 255, 255, 255);
+        svgicon::draw(g_sdlRdr, "next", w / 2 + 50, cy, 20, 161, 161, 166, 200);
     }
 
-    // --- prev / next buttons ---
-    svgicon::draw(g_sdlRdr, "prev", w / 2 - 50, barTop + 55, 20, 161, 161, 166, 200);
-    svgicon::draw(g_sdlRdr, "next", w / 2 + 50, barTop + 55, 20, 161, 161, 166, 200);
-
-    // --- time ---
+    // --- left side: time + title ---
     {
         char cur[32], tot[32], ts[80];
         formatTime(cur, sizeof(cur), pos);
         formatTime(tot, sizeof(tot), dur);
         std::snprintf(ts, sizeof(ts), "%s / %s", cur, tot);
-        g_text.drawText(20, barTop + 35, ts, 14, 161, 161, 166);
+        g_text.drawText(20, barTop + 38, ts, 14, 161, 161, 166);
     }
-
-    // --- filename ---
     {
-        std::string fn = std::filesystem::path(g_mpv->path()).filename().string();
-        if (fn.size() > 60) fn = fn.substr(0, 57) + "...";
-        g_text.drawText(20, barTop + 60, fn, 13, 255, 255, 255);
+        std::string title = g_mpv->title();
+        if (title.empty()) title = std::filesystem::path(g_mpv->path()).filename().string();
+        if (title.size() > 50) title = title.substr(0, 47) + "...";
+        g_text.drawText(20, barTop + 60, title, 13, 255, 255, 255);
     }
 
-    // --- HW badge ---
-    if (g_mpv->hwDecodeActive()) {
-        g_text.drawText(w - 55, barTop + 35, "[HW]", 11, 37, 99, 235);
-    }
-
-    // --- volume icon ---
+    // --- right side: HW badge + speed + subtitle + volume + fullscreen ---
     {
-        const char* vid = g_mpv->muted() ? "mute" : "volume";
-        svgicon::draw(g_sdlRdr, vid, w - 45, barTop + 55, 20, 161, 161, 166, 200);
-    }
-
-    // --- fullscreen icon ---
-    {
+        int rx = w - 20;
+        // fullscreen (rightmost)
         const char* fid = g_ui.fullscreen ? "exitfull" : "full";
-        svgicon::draw(g_sdlRdr, fid, w - 80, barTop + 55, 20, 161, 161, 166, 200);
+        svgicon::draw(g_sdlRdr, fid, rx, barTop + 50, 20, 161, 161, 166, 200);
+        rx -= 34;
+        // volume
+        const char* vid = g_mpv->muted() ? "mute" : "volume";
+        svgicon::draw(g_sdlRdr, vid, rx, barTop + 50, 20, 161, 161, 166, 200);
+        rx -= 34;
+        // speed label
+        {
+            char spd[16];
+            float s = g_mpv->speed();
+            if (s == (int)s) std::snprintf(spd, sizeof(spd), "%.0fx", s);
+            else             std::snprintf(spd, sizeof(spd), "%.1fx", s);
+            g_text.drawText(rx - 16, barTop + 42, spd, 12, 161, 161, 166);
+        }
+        rx -= 40;
+        // HW badge
+        if (g_mpv->hwDecodeActive()) {
+            g_text.drawText(rx, barTop + 42, "[HW]", 11, 37, 99, 235);
+        }
     }
 
-    // --- speed label ---
-    {
-        char spd[16];
-        float s = g_mpv->speed();
-        if (s == (int)s) std::snprintf(spd, sizeof(spd), "%.0fx", s);
-        else             std::snprintf(spd, sizeof(spd), "%.2fx", s);
-        g_text.drawText(w - 120, barTop + 40, spd, 12, 161, 161, 166);
+    // --- buffering indicator ---
+    if (g_mpv->bufferFill() < 0.5) {
+        g_text.drawText(w / 2 - 20, barTop + 75, "Buffering...", 12, 161, 161, 166);
     }
 
     SDL_RenderPresent(g_sdlRdr);

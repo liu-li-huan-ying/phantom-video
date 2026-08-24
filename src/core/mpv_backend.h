@@ -40,6 +40,9 @@ public:
 
     int videoWidth() const { return videoWidth_.load(); }
     int videoHeight() const { return videoHeight_.load(); }
+    double bufferFill() const;
+
+    std::string title() const;
 
     mpv_handle* mpv() const { return mpv_; }
 
@@ -67,4 +70,5 @@ private:
     mutable std::mutex propMutex_;
     double cachedDuration_ = 0.0;
     double cachedClock_ = 0.0;
+    double cachedBufferFill_ = 0.0;
 };
