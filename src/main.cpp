@@ -1,8 +1,7 @@
-ï»¿#ifndef SDL_MAIN_HANDLED
+#ifndef SDL_MAIN_HANDLED
 #define SDL_MAIN_HANDLED
 #endif
 #include <SDL.h>
-#include <SDL_syswm.h>
 
 #include <windows.h>
 #include <shellapi.h>
@@ -12,24 +11,18 @@
 
 #include <cstdio>
 #include <cstdlib>
-#include <filesystem>
+#include <cstring>
 #include <ctime>
-#include <fstream>
+#include <filesystem>
 #include <string>
-#include <thread>
-#include <chrono>
 #include <vector>
+#include <fstream>
 
 #include "core/config.h"
-#include "core/player.h"
-#include "core/playlist.h"
-#include "core/thumbnail_extractor.h"
-#include "ui/osd.h"
-#include "ui/custom_titlebar.h"
-#include "ui/playlist_panel.h"
-#include "video/video_renderer.h"
+#include "core/mpv_backend.h"
 #include "core/logger.h"
 
+// ©¤©¤ helpers ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
 static std::vector<std::string> utf8Args() {
     std::vector<std::string> out;
     int argc = 0;
@@ -49,53 +42,18 @@ static void formatTime(char* buf, size_t n, double sec) {
     int s = (int)(sec + 0.5);
     if (s < 0) s = 0;
     int h = s / 3600, m = (s % 3600) / 60, ss = s % 60;
-    if (h > 0)
-        std::snprintf(buf, n, "%d:%02d:%02d", h, m, ss);
-    else
-        std::snprintf(buf, n, "%02d:%02d", m, ss);
+    if (h > 0) std::snprintf(buf, n, "%d:%02d:%02d", h, m, ss);
+    else       std::snprintf(buf, n, "%02d:%02d", m, ss);
 }
 
-static std::string replaceExt(const std::string& path, const char* newExt) {
-    std::size_t dot = path.find_last_of('.');
-    std::size_t slash = path.find_last_of("\\/");
-    if (dot != std::string::npos && (slash == std::string::npos || dot > slash))
-        return path.substr(0, dot) + newExt;
-    return path + newExt;
-}
-
-static void loadExternalSubtitle(Player& player, const std::string& video,
-                                 VideoRenderer* vrender = nullptr) {
-    for (const char* ext : { ".srt", ".ass", ".ssa", ".sub" }) {
-        std::string cand = replaceExt(video, ext);
-        FILE* f = std::fopen(cand.c_str(), "rb");
-        if (f) {
-            std::fclose(f);
-            if (player.loadExternalSubtitle(cand)) {
-                std::printf("å·²åŠ è½½å­—å¹•: %s\n", cand.c_str());
-                // Set ASS styles on renderer if available
-                if (vrender && (ext[1] == 'a' || ext[1] == 's')) {  // .ass or .ssa
-                    std::ifstream ifs(cand, std::ios::binary);
-                    if (ifs) {
-                        std::string content((std::istreambuf_iterator<char>(ifs)),
-                                            std::istreambuf_iterator<char>());
-                        vrender->setAssContent(content);
-                    }
-                }
-                return;
-            }
-        }
-    }
-}
-
-// M33j: æ–‡ä»¶/æ–‡ä»¶å¤¹å¯¹è¯æ¡†
 static std::string openFileDialog(HWND hwnd) {
     char file[MAX_PATH] = {};
     OPENFILENAMEA ofn = {};
     ofn.lStructSize = sizeof(ofn);
     ofn.hwndOwner = hwnd;
     ofn.lpstrFilter =
-        "è§†é¢‘æ–‡ä»¶\0*.mp4;*.avi;*.mkv;*.mov;*.flv;*.wmv;*.rmvb;*.rm;*.3gp;*.mpg;*.mpeg;*.webm;*.ts;*.m2ts\0"
-        "æ‰€æœ‰æ–‡ä»¶\0*.*\0";
+        "Video\0*.mp4;*.avi;*.mkv;*.mov;*.flv;*.wmv;*.rmvb;*.rm;*.3gp;*.mpg;*.mpeg;*.webm;*.ts;*.m2ts\0"
+        "All\0*.*\0";
     ofn.lpstrFile = file;
     ofn.nMaxFile = MAX_PATH;
     ofn.Flags = OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
@@ -103,926 +61,366 @@ static std::string openFileDialog(HWND hwnd) {
     return "";
 }
 
-static std::string openFolderDialog(HWND hwnd) {
-    BROWSEINFOA bi = {};
-    bi.hwndOwner = hwnd;
-    bi.lpszTitle = "é€‰æ‹©æ–‡ä»¶å¤¹";
-    bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
-    LPITEMIDLIST pidl = SHBrowseForFolderA(&bi);
-    if (!pidl) return "";
-    char path[MAX_PATH] = {};
-    if (SHGetPathFromIDListA(pidl, path)) {
-        CoTaskMemFree(pidl);
-        return std::string(path);
+// ©¤©¤ GDI overlay drawing ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
+struct OverlayState {
+    bool   visible = false;
+    float  alpha   = 0.0f;   // 0..255
+    Uint32 hideAt  = 0;      // SDL_GetTicks deadline
+    bool   seeking = false;
+    int    mouseX  = -1, mouseY = -1;
+    // seekbar
+    bool   seekingDrag = false;
+    double seekTarget  = 0.0;
+};
+
+static void drawOverlay(HDC hdc, int winW, int winH, const MpvBackend& mpv,
+                         const OverlayState& ov) {
+    if (ov.alpha < 1.0f) return;
+
+    int a = (int)ov.alpha;
+    // ½¥±ä±³¾°£¨µ×²¿¿Ø¼şÇø£©
+    for (int y = winH - 120; y < winH; ++y) {
+        int localA = a * (y - (winH - 120)) / 120;
+        if (localA > 80) localA = 80;
+        RGBQUAD clr = { 0, 0, 0, (BYTE)localA };
+        RECT rc = { 0, y, winW, y + 1 };
+        // Ê¹ÓÃ AlphaBlend ĞèÒª DIB section; ÕâÀïÓÃ¼òµ¥µÄ°ëÍ¸Ã÷½üËÆ
     }
-    CoTaskMemFree(pidl);
-    return "";
+
+    // ¼òµ¥ GDI »æÖÆ£¨²»Í¸Ã÷¶ÈÍ¨¹ı SetBkMode Ä£Äâ£©
+    SetBkMode(hdc, TRANSPARENT);
+
+    // ²¥·Å×´Ì¬Í¼±ê£¨¾ÓÖĞ´óÍ¼±ê£©
+    if (mpv.state() == MpvBackend::State::Paused) {
+        SetTextColor(hdc, RGB(255, 255, 255));
+        HFONT hFont = CreateFontW(72, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+            DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Segoe MDL2 Assets");
+        HFONT old = (HFONT)SelectObject(hdc, hFont);
+        const wchar_t* pauseGlyph = L"\uE769";
+        SIZE sz;
+        GetTextExtentPoint32W(hdc, pauseGlyph, 1, &sz);
+        TextOutW(hdc, (winW - sz.cx) / 2, (winH - sz.cy) / 2 - 40, pauseGlyph, 1);
+        SelectObject(hdc, old);
+        DeleteObject(hFont);
+    }
+
+    // µ×²¿¿ØÖÆÀ¸±³¾°
+    {
+        HDC memDC = CreateCompatibleDC(hdc);
+        HBITMAP bmp = CreateCompatibleBitmap(hdc, winW, 120);
+        SelectObject(memDC, bmp);
+        RECT rcBg = { 0, 0, winW, 120 };
+        HBRUSH br = CreateSolidBrush(RGB(0, 0, 0));
+        FillRect(memDC, &rcBg, br);
+        DeleteObject(br);
+
+        BLENDFUNCTION bf = { AC_SRC_OVER, 0, (BYTE)a, 0 };
+        AlphaBlend(hdc, 0, winH - 120, winW, 120, memDC, 0, 0, winW, 120, bf);
+
+        DeleteObject(bmp);
+        DeleteDC(memDC);
+    }
+
+    // ½ø¶ÈÌõ
+    double dur = mpv.duration();
+    double pos = ov.seekingDrag ? ov.seekTarget : mpv.clock();
+    if (dur > 0) {
+        int barY = winH - 80;
+        int barH = 4;
+        int barX = 20;
+        int barW = winW - 40;
+        // ±³¾°
+        HBRUSH brBg = CreateSolidBrush(RGB(80, 80, 80));
+        RECT rcBar = { barX, barY, barX + barW, barY + barH };
+        FillRect(hdc, &rcBar, brBg);
+        DeleteObject(brBg);
+        // ½ø¶È
+        int progW = (int)(barW * pos / dur);
+        if (progW > 0) {
+            HBRUSH brProg = CreateSolidBrush(RGB(255, 60, 60));
+            RECT rcProg = { barX, barY, barX + progW, barY + barH };
+            FillRect(hdc, &rcProg, brProg);
+            DeleteObject(brProg);
+        }
+        // Ê±¼äÎÄ±¾
+        SetTextColor(hdc, RGB(200, 200, 200));
+        HFONT hFont = CreateFontW(16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+            DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
+        HFONT old = (HFONT)SelectObject(hdc, hFont);
+        char cur[32], tot[32];
+        formatTime(cur, sizeof(cur), pos);
+        formatTime(tot, sizeof(tot), dur);
+        char timeStr[80];
+        std::snprintf(timeStr, sizeof(timeStr), "%s / %s", cur, tot);
+        TextOutA(hdc, barX, barY + 10, timeStr, (int)std::strlen(timeStr));
+        // ÎÄ¼şÃû
+        std::string fname = std::filesystem::path(mpv.path()).filename().string();
+        TextOutA(hdc, barX, barY + 30, fname.c_str(), (int)fname.size());
+        // HW decode ±ê¼Ç
+        if (mpv.hwDecodeActive()) {
+            const char* hw = "[HW]";
+            TextOutA(hdc, winW - 60, barY + 10, hw, 4);
+        }
+        SelectObject(hdc, old);
+        DeleteObject(hFont);
+    }
 }
 
+// ©¤©¤ Win32 window for mpv ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
+static HWND g_mpvHwnd = nullptr;
+static MpvBackend* g_mpv = nullptr;
+static OverlayState g_ov;
+
+static LRESULT CALLBACK mpvWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    switch (msg) {
+    case WM_SIZE:
+        if (g_mpvHwnd) {
+            RECT rc;
+            GetClientRect(hwnd, &rc);
+            MoveWindow(g_mpvHwnd, 0, 0, rc.right, rc.bottom, TRUE);
+        }
+        return 0;
+    case WM_KEYDOWN:
+        if (g_mpv) {
+            switch (wp) {
+            case VK_SPACE: g_mpv->togglePause(); break;
+            case VK_LEFT:  g_mpv->seekRelative(-5.0); break;
+            case VK_RIGHT: g_mpv->seekRelative(5.0); break;
+            case VK_UP:    g_mpv->setVolume(g_mpv->volume() + 0.05f); break;
+            case VK_DOWN:  g_mpv->setVolume(g_mpv->volume() - 0.05f); break;
+            case 'M':      g_mpv->toggleMute(); break;
+            case 'F': {
+                DWORD style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+                if (style & WS_OVERLAPPEDWINDOW) {
+                    SetWindowLongPtrW(hwnd, GWL_STYLE, style & ~WS_OVERLAPPEDWINDOW);
+                    MONITORINFO mi = { sizeof(mi) };
+                    GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mi);
+                    SetWindowPos(hwnd, HWND_TOP,
+                        mi.rcMonitor.left, mi.rcMonitor.top,
+                        mi.rcMonitor.right - mi.rcMonitor.left,
+                        mi.rcMonitor.bottom - mi.rcMonitor.top,
+                        SWP_FRAMECHANGED);
+                } else {
+                    SetWindowLongPtrW(hwnd, GWL_STYLE, style | WS_OVERLAPPEDWINDOW);
+                    SetWindowPos(hwnd, nullptr, 100, 100, 960, 540,
+                        SWP_FRAMECHANGED | SWP_NOZORDER);
+                }
+                break;
+            }
+            case 'O':
+                if (GetKeyState(VK_CONTROL) & 0x8000) {
+                    std::string file = openFileDialog(hwnd);
+                    if (!file.empty()) g_mpv->loadFile(file);
+                }
+                break;
+            }
+        }
+        // ÏÔÊ¾¿Ø¼ş
+        g_ov.visible = true;
+        g_ov.hideAt = SDL_GetTicks() + 3000;
+        g_ov.alpha = 255.0f;
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return 0;
+    case WM_MOUSEMOVE:
+        g_ov.mouseX = LOWORD(lp);
+        g_ov.mouseY = HIWORD(lp);
+        g_ov.visible = true;
+        g_ov.hideAt = SDL_GetTicks() + 3000;
+        g_ov.alpha = 255.0f;
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return 0;
+    case WM_LBUTTONDOWN: {
+        int mx = LOWORD(lp), my = HIWORD(lp);
+        RECT rc;
+        GetClientRect(hwnd, &rc);
+        int barY = rc.bottom - 80;
+        if (my >= barY - 10 && my <= barY + 30 && g_mpv && g_mpv->duration() > 0) {
+            // seekbar click
+            double ratio = (double)(mx - 20) / (rc.right - 40);
+            if (ratio < 0) ratio = 0;
+            if (ratio > 1) ratio = 1;
+            g_mpv->seek(g_mpv->duration() * ratio);
+            InvalidateRect(hwnd, nullptr, FALSE);
+        } else if (my > barY + 30) {
+            // ¿Ø¼şÇø£ºÇĞ»»ÔİÍ£
+            if (g_mpv) g_mpv->togglePause();
+        }
+        return 0;
+    }
+    case WM_MOUSEWHEEL:
+        if (g_mpv) {
+            short d = GET_WHEEL_DELTA_WPARAM(wp);
+            g_mpv->setVolume(g_mpv->volume() + (d > 0 ? 0.05f : -0.05f));
+            g_ov.visible = true;
+            g_ov.hideAt = SDL_GetTicks() + 2000;
+            g_ov.alpha = 255.0f;
+            InvalidateRect(hwnd, nullptr, FALSE);
+        }
+        return 0;
+    case WM_DROPFILES: {
+        HDROP hDrop = (HDROP)wp;
+        char path[MAX_PATH];
+        if (DragQueryFileA(hDrop, 0, path, MAX_PATH)) {
+            if (g_mpv) g_mpv->loadFile(path);
+        }
+        DragFinish(hDrop);
+        return 0;
+    }
+    case WM_PAINT: {
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(hwnd, &ps);
+        if (g_mpv && g_mpv->hasMedia()) {
+            drawOverlay(hdc, ps.rcPaint.right - ps.rcPaint.left,
+                       ps.rcPaint.bottom - ps.rcPaint.top, *g_mpv, g_ov);
+        }
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+    case WM_TIMER:
+        if (wp == 1) {
+            // overlay fade timer
+            if (g_ov.visible && SDL_GetTicks() > g_ov.hideAt) {
+                g_ov.alpha -= 15.0f;
+                if (g_ov.alpha <= 0) {
+                    g_ov.alpha = 0;
+                    g_ov.visible = false;
+                }
+            }
+            InvalidateRect(hwnd, nullptr, FALSE);
+        }
+        return 0;
+    case WM_DESTROY:
+        PostQuitMessage(0);
+        return 0;
+    }
+    return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
+// ©¤©¤ main ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
 int main(int argc, char** argv) {
     (void)argc;
     (void)argv;
-    SDL_SetMainReady();
     Logger::instance().init("vplayer", 7);
-    // æ—¥å¸¸æ¨¡å¼é»˜è®¤ WARNï¼ˆä»…è­¦å‘Š/é”™è¯¯ï¼‰ï¼Œ--debug å¼€å¯è¯Šæ–­æ¨¡å¼ï¼ˆTRACE ä»¥ä¸Šå…¨è®°å½•ï¼‰
     bool diagMode = false;
     for (int i = 1; i < argc; ++i)
         if (std::string(argv[i]) == "--debug") { diagMode = true; break; }
     Logger::instance().setLevel(diagMode ? LogLevel::Trace : LogLevel::Warn);
-    LOG_INFO("MAIN", "vplayer starting (log=%s)", diagMode ? "debug" : "normal");
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) != 0) {
-        std::printf("SDL é’æ¿†îé–æ §ã‘ç’? %s\n", SDL_GetError());
-        return 1;
-    }
+    LOG_INFO("MAIN", "vplayer (mpv backend) starting");
+    
 
-    SDL_Window* win = SDL_CreateWindow("VPlayer", SDL_WINDOWPOS_CENTERED,
-                                       SDL_WINDOWPOS_CENTERED, 960, 540,
-                                       SDL_WINDOW_RESIZABLE);
-    if (!win) {
-        std::printf("é’æ¶˜ç¼“ç»æ¥€å½›æ¾¶è¾«è§¦: %s\n", SDL_GetError());
-        SDL_Quit();
-        return 1;
-    }
-    // --- è‡ªå®šä¹‰çª—å£å›¾æ ‡ ---
-    // M31j: ç›¸å¯¹ exe ç›®å½•è§£æï¼ˆCWD å¯èƒ½æ˜¯åŒå‡»æ‰“å¼€çš„è§†é¢‘æ‰€åœ¨ç›®å½•ï¼‰ã€‚
-    // çª—å£å›¾æ ‡ä¸æ ‡é¢˜æ  logo åŒæºï¼šassets/icons/vplay.bmpï¼ˆCMake æ‹·è´åˆ° build/assetsï¼‰ã€‚
-    {
-        std::string base = exeDir();
-        const char* rels[] = { "assets/icons/vplay.bmp", "ico/vplay.bmp", "ico/vplay.ico" };
-        SDL_Surface* icon = nullptr;
-        for (auto rel : rels) {
-            if (icon) break;
-            std::string p = base + rel;
-            icon = SDL_LoadBMP(p.c_str());
-        }
-        if (!icon) {
-            fprintf(stderr, "[warn] window icon not found (assets/icons/vplay.bmp)\n");
-        }
-        if (icon) {
-            SDL_SetWindowIcon(win, icon);
-            SDL_FreeSurface(icon);
-        }
-    }
-
-    // --- DWM: å¯ç”¨çª—å£é˜´å½± + åœ†è§’ï¼ˆWindows 11+ï¼‰---
-    HWND hwnd = nullptr;
-    {
-        SDL_SysWMinfo wmi;
-        SDL_VERSION(&wmi.version);
-        if (SDL_GetWindowWMInfo(win, &wmi)) {
-            hwnd = wmi.info.win.window;
-            // DwmExtendFrameIntoClientArea: ä½¿çª—å£æœ‰ç³»ç»Ÿé˜´å½±
-            MARGINS m = {0, 0, 0, 0};
-            DwmExtendFrameIntoClientArea(hwnd, &m);
-            // DWMWA_WINDOW_CORNER_PREFERENCE (33): 2=åœ†è§’ (Windows 11)
-            int pref = 2;
-            DwmSetWindowAttribute(hwnd, 33, &pref, sizeof(pref));
-        }
-    }
-
-    // --- è‡ªå®šä¹‰æ ‡é¢˜æ  ---
-    CustomTitlebar titlebar;
-    if (hwnd) {
-        // å»æ‰ç³»ç»Ÿé»˜è®¤æ ‡é¢˜æ ï¼ˆWS_CAPTIONï¼‰ï¼Œä¿ç•™çª—å£è¾¹æ¡†ç”¨äº DWM é˜´å½±
-        LONG_PTR style = GetWindowLongPtrW(hwnd, GWL_STYLE);
-        style &= ~WS_CAPTION;   // å»æ‰æ ‡é¢˜æ 
-        style &= ~WS_THICKFRAME; // å»æ‰å¯è°ƒè¾¹æ¡†ï¼ˆè‡ªç»˜æ§ä»¶ä¸éœ€è¦ï¼‰
-        SetWindowLongPtrW(hwnd, GWL_STYLE, style);
-        // é€šçŸ¥ç³»ç»Ÿçª—å£æ ·å¼å·²æ”¹å˜ï¼Œé‡æ–°è®¡ç®—éå®¢æˆ·åŒº
-        RECT rc;
-        GetWindowRect(hwnd, &rc);
-        SetWindowPos(hwnd, nullptr, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top,
-                     SWP_FRAMECHANGED | SWP_NOZORDER);
-
-        titlebar.init(hwnd);
-        titlebar.setTitle("VPlayer");
-    }
-
-    Player player;
-    VideoRenderer vrender;
-    OSD osd;
-    ThumbnailExtractor thumbnail;
-    if (!vrender.init(win)) {
-        std::printf("é’æ¶˜ç¼“å¨“å‰ç…‹é£ã„¥ã‘ç’? %s\n", SDL_GetError());
-        SDL_DestroyWindow(win);
-        SDL_Quit();
-        return 1;
-    }
-    osd.init(vrender.renderer());
-    // M18: seeking çŠ¶æ€å›è°ƒ â†’ æ˜¾ç¤º/éšè— Seeking æŒ‡ç¤ºå™¨
-    player.onSeekingChanged = [&](bool seeking) {
-        if (seeking) vrender.showSeekingOverlay();
-        else vrender.hideSeekingOverlay();
-    };
-
-auto args = utf8Args();
+    // config
     AppConfig cfg;
     loadConfig(configPath(), cfg);
 
-    Playlist playlist;
-    bool multiArgs = args.size() > 1 && !args[1].empty();
-    if (multiArgs) {
-        std::vector<std::string> files;
-        for (std::size_t i = 1; i < args.size(); ++i)
-            if (!args[i].empty() && args[i] != "--debug") files.push_back(args[i]);
-        playlist.set(files);
+    // Win32 window class
+    WNDCLASSEXW wc = {};
+    wc.cbSize = sizeof(wc);
+    wc.lpfnWndProc = mpvWndProc;
+    wc.hInstance = GetModuleHandleW(nullptr);
+    wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+    wc.lpszClassName = L"VPlayerMpv";
+    wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
+    RegisterClassExW(&wc);
+
+    HWND hwnd = CreateWindowExW(
+        WS_EX_ACCEPTFILES,
+        wc.lpszClassName, L"VPlayer",
+        WS_OVERLAPPEDWINDOW,
+        CW_USEDEFAULT, CW_USEDEFAULT, 960, 540,
+        nullptr, nullptr, wc.hInstance, nullptr);
+
+    if (!hwnd) {
+        LOG_ERROR("MAIN", "CreateWindow failed");
+        return 1;
+    }
+
+    // DWM shadow + rounded corners
+    MARGINS m = {0, 0, 0, 0};
+    DwmExtendFrameIntoClientArea(hwnd, &m);
+    int pref = 2;
+    DwmSetWindowAttribute(hwnd, 33, &pref, sizeof(pref));
+
+    // icon
+    {
+        std::string base = exeDir();
+        const char* rels[] = { "assets/icons/vplay.bmp", "ico/vplay.bmp", "ico/vplay.ico" };
+        for (auto rel : rels) {
+            std::string p = base + rel;
+            HICON icon = (HICON)LoadImageA(nullptr, p.c_str(), IMAGE_ICON, 0, 0,
+                                            LR_LOADFROMFILE | LR_DEFAULTSIZE);
+            if (icon) {
+                SendMessage(hwnd, WM_SETICON, ICON_BIG, (LPARAM)icon);
+                SendMessage(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)icon);
+                break;
+            }
+        }
+    }
+
+    ShowWindow(hwnd, SW_SHOW);
+    UpdateWindow(hwnd);
+
+    // mpv backend ¡ª ´´½¨×Ó´°¿Ú×÷Îª mpv äÖÈ¾Ä¿±ê
+    MpvBackend mpv;
+    g_mpv = &mpv;
+    {
+        RECT rc;
+        GetClientRect(hwnd, &rc);
+        g_mpvHwnd = CreateWindowExW(0, L"STATIC", nullptr,
+            WS_CHILD | WS_VISIBLE,
+            0, 0, rc.right, rc.bottom,
+            hwnd, nullptr, wc.hInstance, nullptr);
+        
+        if (!mpv.init(g_mpvHwnd)) {
+            LOG_ERROR("MAIN", "mpv init failed");
+            return 1;
+        }
+    }
+
+    // overlay timer (30fps redraw)
+    SetTimer(hwnd, 1, 33, nullptr);
+
+    // command line
+    auto args = utf8Args();
+    std::string initialFile;
+    if (args.size() > 1 && !args[1].empty() && args[1] != "--debug") {
+        initialFile = args[1];
     } else if (cfg.resume && !cfg.lastFile.empty()) {
-        // resume=1: reopen last file with its directory playlist
-        if (!playlist.scanDirectory(cfg.lastFile))
-            playlist.set(cfg.lastFile);
+        initialFile = cfg.lastFile;
     }
-    playlist.setMode(static_cast<PlayMode>(cfg.playMode));
 
-    PlaylistPanel panel;
-    panel.init(vrender.renderer());
-    panel.setPlaylist(&playlist);
-
-    // M33j: æ”¶é›†å†å²è®°å½•ï¼ˆæ¬¢è¿é¡µç”¨ï¼‰
-    std::vector<std::string> historyPaths;   // å®Œæ•´è·¯å¾„ï¼ˆç‚¹å‡»æ—¶ç”¨ï¼‰
-    std::vector<std::string> historyNames;   // æ˜¾ç¤ºå
-    for (const auto& kv : cfg.history) {
-        historyPaths.push_back(kv.first);
-        historyNames.push_back(std::filesystem::path(kv.first).stem().string());
-    }
-    if (historyNames.size() > 8) { historyNames.resize(8); historyPaths.resize(8); }
-
-    player.setVolume(cfg.volume);
+    mpv.setVolume(cfg.volume);
     if (cfg.speed >= 0.25f && cfg.speed <= 4.0f && std::abs(cfg.speed - 1.0f) > 0.01f)
-        player.setSpeed(cfg.speed);
+        mpv.setSpeed(cfg.speed);
 
-    // M31k: è‡ªåŠ¨åŒ–æµ‹è¯•é’©å­ï¼ˆä»…å½“ç¯å¢ƒå˜é‡å­˜åœ¨æ—¶ç”Ÿæ•ˆï¼Œæ­£å¸¸ç”¨æˆ·æ— æ„ŸçŸ¥ï¼‰
-    if (const char* s = std::getenv("VPLAYER_AUTOTEST_SEEK")) {
-        double t = std::atof(s);
-        if (t > 0.0) {
-            // ç­‰å¾…é¦–å¸§å°±ç»ªåå†å‘èµ·ç»å¯¹è·³è½¬
-            std::thread([t, &player]() {
-                std::this_thread::sleep_for(std::chrono::milliseconds(4000));
-                LOG_INFO("MAIN", "AUTOTEST seek -> %.3f", t);
-                player.seek(t);
-            }).detach();
-        }
+    mpv.onPlaybackEnded = [&]() {
+        LOG_INFO("MAIN", "playback ended");
+    };
+
+    if (!initialFile.empty()) {
+        mpv.loadFile(initialFile);
+        // update history
+        cfg.history[initialFile] = 0.0;
+        cfg.lastFile = initialFile;
     }
 
-    // M32e: è®¾ç½®é¢æ¿ä¸šåŠ¡çŠ¶æ€ï¼ˆopenCurrent æ•è·ç”¨ï¼‰
-    bool subAutoLoad = cfg.subAutoLoad != 0;
-    int langIdx = 0, themeIdx = 0;
-
-    auto openCurrent = [&]() {
-        if (playlist.empty()) {
-            SDL_SetWindowTitle(win, "VPlayer");
-            vrender.clear();
-            return;
-        }
-        const std::string& p = playlist.current();
-        std::string base = p;
-        std::size_t slash = base.find_last_of("\\/");
-        if (slash != std::string::npos) base = base.substr(slash + 1);
-        char title[512];
-        if (playlist.size() > 1)
-            std::snprintf(title, sizeof(title), "VPlayer - %s (%d/%d)", base.c_str(),
-                          playlist.index() + 1, playlist.size());
-        else
-            std::snprintf(title, sizeof(title), "VPlayer - %s", base.c_str());
-        SDL_SetWindowTitle(win, title);
-        titlebar.setTitle(title);
-          if (player.openFile(p)) {
-            loadExternalSubtitle(player, p, &vrender);
-            thumbnail.open(p);
-            bool resumed = false;
-            if (cfg.resume) {
-                auto it = cfg.history.find(p);
-                if (it != cfg.history.end() && it->second > 2.0) {
-                    player.seek(it->second);
-                    resumed = true;
-                    vrender.showToast("å·²ä»ä¸Šæ¬¡ä½ç½®ç»­æ’­ (æŒ‰ R å…³é—­)");
-                }
-            }
-            // M32g.3/M32f.10: seek(0) å·²ç§»é™¤â€”â€”å¯¹ AVI/WMV/MKV ç­‰æ ¼å¼
-            // av_seek_frame(ts=0, BACKWARD) å av_read_frame ç«‹å³è¿”å›
-            // AVERROR_EOF â†’ decodeLoop é€€å‡º â†’ State::Ended â†’ è‡ªåŠ¨è¿è·³ã€‚
-            // ç”¨æˆ·ç¡®è®¤ä¸å­˜åœ¨èµ·æ’­å‡æ­»ï¼Œæ­¤è°ƒç”¨æ— ç”¨ä¸”æœ‰å®³ã€‚
-        } else {
-            SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "æ‰“å¼€å¤±è´¥",
-                                     player.error().c_str(), win);
-        }
-    };
-    openCurrent();
-
+    // message loop
+    MSG msg;
     bool running = true;
-    bool fullscreen = false;
-    Uint32 volHideAt = 0;
-    bool draggingProgress = false;
-    bool draggingVolume = false;
-
-    static const float kSpeeds[] = { 0.25f, 0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f, 3.0f };
-    static const int kSpeedCount = (int)(sizeof(kSpeeds) / sizeof(kSpeeds[0]));
-    auto cycleSpeed = [&](int dir) {
-        float cur = player.speed();
-        int idx = 1;
-        for (int i = 0; i < kSpeedCount; ++i)
-            if (kSpeeds[i] == cur) { idx = i; break; }
-        idx = (idx + dir + kSpeedCount) % kSpeedCount;
-        player.setSpeed(kSpeeds[idx]);
-        char msg[32];
-        std::snprintf(msg, sizeof(msg), "å€é€Ÿ: x%.2g", kSpeeds[idx]);
-        vrender.showToast(msg);
-        volHideAt = SDL_GetTicks() + 2000;
-    };
-
-    auto nextTrack = [&]() {
-        if (playlist.next()) openCurrent();
-    };
-    // M32f.2: æ’­æ”¾åˆ—è¡¨å¼€åˆ â€”â€” çª—å£æ•´ä½“å‘å³è†¨å‡ºé¢æ¿å®½ï¼ˆæ’­æ”¾å™¨æœ¬ä½“å°ºå¯¸ä¸å˜ï¼‰
-    auto applyPlaylistToggle = [&]() {
-        bool opening = !panel.isOpen();
-        LOG_INFO("MAIN", "playlist toggle: %s", opening ? "OPEN(expand window)" : "CLOSE(shrink window)");
-        if (opening && (fullscreen || (SDL_GetWindowFlags(win) & SDL_WINDOW_MAXIMIZED))) {
-            vrender.showToast("é€€å‡ºå…¨å±åå†æ‰“å¼€æ’­æ”¾åˆ—è¡¨");
-            return;
-        }
-        int w = 0, h = 0;
-        SDL_GetWindowSize(win, &w, &h);
-        int pw;
-        if (opening) {
-            panel.toggle();               // å…ˆç¿»è½¬ï¼Œwidth() å³ä¸ºç›®æ ‡å®½
-            pw = panel.width();
-            int newW = w + pw;
-            // è¶…å‡ºå±å¹•å³ç¼˜åˆ™æ•´ä½“å·¦ç§»é’³åˆ¶
-            int di = SDL_GetWindowDisplayIndex(win);
-            SDL_Rect b{};
-            if (di < 0 || SDL_GetDisplayUsableBounds(di, &b) != 0) { b.x = 0; b.w = newW + 100; }
-            int px = 0, py = 0;
-            SDL_GetWindowPosition(win, &px, &py);
-            if (px + newW > b.x + b.w)
-                SDL_SetWindowPosition(win, std::max(b.x, b.x + b.w - newW), py);
-            SDL_SetWindowSize(win, newW, h);
-        } else {
-            pw = panel.width();
-            panel.toggle();
-            // M32f.9: å…³é—­æ—¶çª—å£æš‚ä¸ç¼©å›â€”â€”ç­‰é¢æ¿å‘å³æ»‘å‡ºåŠ¨ç”»ç»“æŸå
-            // ç”±ä¸»å¾ªç¯ shrinkReady() åˆ†æ”¯æ‰§è¡Œç¼©çª—ï¼Œè§†é¢‘åŒºå…¨ç¨‹çº¹ä¸ä¸åŠ¨
-        }
-    };
-    auto prevTrack = [&]() {
-        if (playlist.prev()) openCurrent();
-    };
-    auto cyclePlayMode = [&]() {
-        int m = ((int)playlist.mode() + 1) % 3;
-        playlist.setMode(static_cast<PlayMode>(m));
-        const char* names[] = { "å•ç‹¬æ’­æ”¾", "å¾ªç¯æ’­æ”¾", "éšæœºæ’­æ”¾" };
-        std::printf("æ’­æ”¾æ¨¡å¼: %s\n", names[m]);
-        vrender.showToast(std::string("æ’­æ”¾æ¨¡å¼: ").append(names[m]).c_str());
-        volHideAt = SDL_GetTicks() + 2000;
-    };
-
-    auto cycleResume = [&]() {
-        cfg.resume = cfg.resume ? 0 : 1;
-        std::printf("æ¢å¤æ’­æ”¾ä½ç½®: %s\n", cfg.resume ? "å¼€å¯" : "å…³é—­");
-        vrender.showToast(cfg.resume ? "æ¢å¤æ’­æ”¾ä½ç½®: å¼€å¯" : "æ¢å¤æ’­æ”¾ä½ç½®: å…³é—­");
-        volHideAt = SDL_GetTicks() + 2000;
-    };
-
     while (running) {
-        SDL_Event e;
-        while (SDL_PollEvent(&e)) {
-            switch (e.type) {
-            case SDL_QUIT:
-                running = false;
-                break;
-              case SDL_DROPBEGIN:
-                  vrender.setWelcomeDropHover(true);
-                  break;
-              case SDL_DROPCOMPLETE:
-                  vrender.setWelcomeDropHover(false);
-                  break;
-              case SDL_DROPFILE:
-                  if (player.openFile(e.drop.file)) {
-                    loadExternalSubtitle(player, e.drop.file, &vrender);
-                    thumbnail.open(e.drop.file);
-                    panel.clearThumbnailCache();
-                    playlist.scanDirectory(e.drop.file);
-                    // seek(0.0) å·²ç§»é™¤â€”â€”åŒ openCurrentï¼Œä¼šå¯¼è‡´ EOF é“¾å¼è·³è½¬
-                    std::string base = e.drop.file;
-                    std::size_t slash = base.find_last_of("\\/");
-                    if (slash != std::string::npos) base = base.substr(slash + 1);
-                    char title[512];
-                    std::snprintf(title, sizeof(title), "VPlayer - %s", base.c_str());
-                    SDL_SetWindowTitle(win, title);
-                    titlebar.setTitle(title);
-                    std::printf("å·²æ‰“å¼€: %s\n", e.drop.file);
-                }
-                else
-                    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "æ‰“å¼€å¤±è´¥",
-                                             player.error().c_str(), win);
-                SDL_free(e.drop.file);
-                break;
-            case SDL_MOUSEMOTION:
-                {
-                    int mx = e.motion.x, my = e.motion.y;
-                    int winW = 0, winH = 0;
-                    SDL_GetWindowSize(win, &winW, &winH);
-                    // M16: æ’­æ”¾åˆ—è¡¨é¢æ¿äº‹ä»¶ä¼˜å…ˆå¤„ç†
-                    panel.setPlaylist(&playlist);
-                    if (panel.handleMouseMove(mx, my, winW, winH)) {
-                        vrender.setPanelWidth(panel.width());
-                        break;
-                    }
-                    vrender.onMouseMove(mx, my);
-                    if (draggingProgress) {
-                        ControlLayout lay = ControlLayout::compute(winW, winH, panel.width());
-                        float pct = (float)(mx - lay.progX) / lay.progW;
-                        if (pct < 0) pct = 0; if (pct > 1) pct = 1;
-                        player.setDragPreview(pct * player.duration());
-                        vrender.setThumbnail(nullptr, 0, 0, -1);
-                    } else if (draggingVolume) {
-                        ControlLayout lay = ControlLayout::compute(winW, winH, panel.width());
-                        float v = (float)(mx - lay.volSlX) / lay.volSlW;
-                        if (v < 0) v = 0; if (v > 1) v = 1;
-                        player.setVolume(v == 0 ? 0.0001f : v);
-                    } else if (player.hasMedia()) {
-                        // è¿›åº¦æ¡ hover ç¼©ç•¥å›¾ï¼ˆåŒæ­¥æå–ï¼Œå¯é æ˜¾ç¤ºï¼‰
-                        int winW = 0, winH = 0;
-                        SDL_GetWindowSize(win, &winW, &winH);
-                        ControlLayout lay = ControlLayout::compute(winW, winH, panel.width());
-                        bool overProg = mx >= lay.progX && mx < lay.progX + lay.progW &&
-                                        my >= lay.progY - 10 && my < lay.progY + 12;
-                        if (overProg && player.duration() > 0) {
-                            float pct = (float)(mx - lay.progX) / lay.progW;
-                            if (pct < 0) pct = 0; if (pct > 1) pct = 1;
-                            double targetTime = pct * player.duration();
-                            // åªåœ¨æ—¶é—´å·®è·è¾ƒå¤§æ—¶é‡æ–°æå–ï¼ˆé¿å…é¢‘ç¹ seek å¡é¡¿ï¼‰
-                            static double lastThumbTime = -1;
-                            if (std::abs(targetTime - lastThumbTime) > 1.0) {
-                                lastThumbTime = targetTime;
-                                if (thumbnail.isOpen()) {
-                                    uint8_t* pixels = nullptr;
-                                    int tw = 0, th = 0;
-                                    if (thumbnail.getFrame(targetTime, &pixels, tw, th) && pixels) {
-                                        SDL_Texture* tex = SDL_CreateTexture(
-                                            vrender.renderer(), SDL_PIXELFORMAT_RGB24,
-                                            SDL_TEXTUREACCESS_STREAMING, tw, th);
-                                        if (tex) {
-                                            void* tbits = nullptr;
-                                            int pitch = 0;
-                                            if (SDL_LockTexture(tex, nullptr, &tbits, &pitch) == 0) {
-                                                for (int row = 0; row < th; ++row)
-                                                    memcpy((Uint8*)tbits + row * pitch,
-                                                           pixels + row * tw * 3, tw * 3);
-                                                SDL_UnlockTexture(tex);
-                                                SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
-                                                vrender.setThumbnail(tex, tw, th, targetTime);
-                                            } else {
-                                                SDL_DestroyTexture(tex);
-                                            }
-                                        }
-                                        av_free(pixels);
-                                    }
-                                }
-                            }
-                        } else {
-                            vrender.setThumbnail(nullptr, 0, 0, -1);
-                        }
-                    }
-                }
-                break;
-            case SDL_MOUSEBUTTONDOWN:
-                {
-                    int mx = e.button.x, my = e.button.y;
-                    int winW = 0, winH = 0;
-                    SDL_GetWindowSize(win, &winW, &winH);
-                    bool hitControlTop = false;
-                    // ---- M32c: é¡¶æ ç‚¹å‡»æ‹¦æˆª ----
-                    if (my < VideoRenderer::TOPBAR_H) {
-                        int act = vrender.topBarClick(mx, my);
-                        if (act >= 0) {
-                            switch (act) {
-                        case VideoRenderer::TB_CAMERA: {
-                            auto dir = exeDir() + "shots";
-                            std::filesystem::create_directories(dir);
-                            char ts[40];
-                            time_t now = time(nullptr);
-                            strftime(ts, sizeof(ts), "%Y%m%d_%H%M%S", localtime(&now));
-                            std::string path = dir + "\\shot_" + ts + ".png";
-                            vrender.setShotPath(path);
-                            vrender.showToast("å·²æˆªå›¾");
-                            break;
-                        }
-                        case VideoRenderer::TB_PIP: vrender.showToast("ç”»ä¸­ç”»å¼€å‘ä¸­"); break;      // pip
-                        case VideoRenderer::TB_LIST: applyPlaylistToggle(); break;
-                        case VideoRenderer::TB_MIN: SDL_MinimizeWindow(win); break;
-                        case VideoRenderer::TB_MAX:                                                  // æœ€å¤§åŒ–/è¿˜åŸ
-                            if (SDL_GetWindowFlags(win) & SDL_WINDOW_MAXIMIZED)
-                                SDL_RestoreWindow(win);
-                            else
-                                SDL_MaximizeWindow(win);
-                            break;
-                        case VideoRenderer::TB_CLOSE: running = false; break;
-                        default: break;  // ç©ºç™½åŒº=æ‹–æ‹½ï¼ˆç”± WndProc HTCAPTION å¤„ç†ï¼‰
-                        }
-                        hitControlTop = true;
-                    }
-                    }
-                    // M32f.5: é¢æ¿å¤´éƒ¨åŒºåŸŸè®©ä½ï¼ˆå…³é—­é’®åœ¨æ­¤ï¼‰ï¼Œæ”¾è¡Œç»™é¢æ¿å±‚å¤„ç†
-                    if (panel.isOpen() && my < VideoRenderer::TOPBAR_H &&
-                        mx >= winW - panel.width())
-                        hitControlTop = false;
-                    if (hitControlTop) break;
-                    // ---- M32e: è®¾ç½®æ¨¡æ€ç‚¹å‡»è·¯ç”±ï¼ˆæ¨¡æ€æ‰“å¼€æ—¶ç‹¬å ï¼‰----
-                    if (vrender.settingsVisible()) {
-                        int sa = vrender.settingsClick(mx, my);
-                        if (sa == -2 || sa == -1) vrender.setSettingsVisible(false);
-                        else if (sa == 1) {  // éŸ³é‡æ ‡å‡†åŒ–
-                            bool on = !player.audio().normalization();
-                            player.audio().setNormalization(on);
-                            vrender.showToast(on ? "éŸ³é‡æ ‡å‡†åŒ–: å¼€" : "éŸ³é‡æ ‡å‡†åŒ–: å…³");
-                        } else if (sa == 2) {  // è®°å¿†æ’­æ”¾ä½ç½®
-                            cfg.resume = cfg.resume ? 0 : 1;
-                            vrender.showToast(cfg.resume ? "è®°å¿†æ’­æ”¾ä½ç½®: å¼€" : "è®°å¿†æ’­æ”¾ä½ç½®: å…³");
-                        } else if (sa == 3) {  // è‡ªåŠ¨æ’­æ”¾ä¸‹ä¸€ä¸ª = å•æ›²/å¾ªç¯
-                            playlist.setMode(playlist.mode() == PlayMode::Single
-                                                 ? PlayMode::Loop : PlayMode::Single);
-                            vrender.showToast(playlist.mode() != PlayMode::Single
-                                                  ? "è‡ªåŠ¨æ’­æ”¾ä¸‹ä¸€ä¸ª: å¼€" : "è‡ªåŠ¨æ’­æ”¾ä¸‹ä¸€ä¸ª: å…³");
-                        } else if (sa == 4) {
-                            subAutoLoad = !subAutoLoad;
-                            vrender.showToast(subAutoLoad ? "å­—å¹•è‡ªåŠ¨åŠ è½½: å¼€" : "å­—å¹•è‡ªåŠ¨åŠ è½½: å…³");
-                        } else if (sa == 5) {
-                            cfg.thumbCache = cfg.thumbCache ? 0 : 1;
-                            vrender.showToast(cfg.thumbCache ? "ç¼©ç•¥å›¾ç¼“å­˜: å¼€" : "ç¼©ç•¥å›¾ç¼“å­˜: å…³");
-                        } else if (sa == 6) {
-                            vrender.showToast("èµ·æ’­åŒæ­¥: å·²å¯ç”¨");
-                        } else if (sa >= 30 && sa < 36) {
-                            static const float spdVals[6] = { 0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f };
-                            player.setSpeed(spdVals[sa - 30]);
-                            cfg.speed = spdVals[sa - 30];
-                            char msg[32];
-                            std::snprintf(msg, sizeof(msg), "å€é€Ÿ: x%.2g", spdVals[sa - 30]);
-                            vrender.showToast(msg);
-                        } else if (sa >= 40 && sa < 43) {
-                            static const float szVals[3] = { 0.75f, 1.0f, 1.5f };
-                            cfg.subScale = szVals[sa - 40];
-                            const char* szNames[3] = { "å°", "ä¸­", "å¤§" };
-                            char msg[32];
-                            std::snprintf(msg, sizeof(msg), "å­—å¹•å­—å·: %s", szNames[sa - 40]);
-                            vrender.showToast(msg);
-                        } else if (sa == 0) {
-                            vrender.showToast(player.usingHardware()
-                                                  ? "ç¡¬ä»¶è§£ç å·²å¯ç”¨ï¼ˆé‡å¯åº”ç”¨åå¯åˆ‡æ¢ï¼‰"
-                                                  : "å½“å‰ä¸ºè½¯è§£ï¼ˆåˆ‡æ¢éœ€é‡å¯åº”ç”¨ï¼‰");
-                        } else if (sa >= 10 && sa < 13) { langIdx = sa - 10;
-                            vrender.showToast("ç•Œé¢è¯­è¨€åˆ‡æ¢å¼€å‘ä¸­"); }
-                        else if (sa >= 20 && sa < 22) { themeIdx = sa - 20;
-                            vrender.showToast("ä¸»é¢˜åˆ‡æ¢å¼€å‘ä¸­"); }
-                        break;
-                    }
-                    // M33j: æ¬¢è¿é¡µé¢ç‚¹å‡»ï¼ˆæ— åª’ä½“æ—¶ï¼‰
-                    if (!player.hasMedia()) {
-                        int wa = vrender.welcomeClick(mx, my);
-                        if (wa == 0) {
-                            // æ‰“å¼€æ–‡ä»¶
-                            HWND hwnd = nullptr;
-                            SDL_SysWMinfo info;
-                            SDL_VERSION(&info.version);
-                            if (SDL_GetWindowWMInfo(win, &info)) hwnd = info.info.win.window;
-                            std::string file = openFileDialog(hwnd);
-                            if (!file.empty()) {
-                                playlist.set(file);
-                                openCurrent();
-                                historyNames.clear();
-                                for (const auto& kv : cfg.history)
-                                    historyNames.push_back(std::filesystem::path(kv.first).stem().string());
-                                if (historyNames.size() > 8) historyNames.resize(8);
-                            }
-                        } else if (wa == 1) {
-                            // æ‰“å¼€æ–‡ä»¶å¤¹
-                            HWND hwnd = nullptr;
-                            SDL_SysWMinfo info;
-                            SDL_VERSION(&info.version);
-                            if (SDL_GetWindowWMInfo(win, &info)) hwnd = info.info.win.window;
-                            std::string folder = openFolderDialog(hwnd);
-                            if (!folder.empty()) {
-                                playlist.scanDirectory(folder);
-                                openCurrent();
-                            }
-                        } else if (wa >= 2 && wa < 2 + (int)historyPaths.size()) {
-                            // ç‚¹å‡»å†å²è®°å½•
-                            int idx = wa - 2;
-                            playlist.set(historyPaths[idx]);
-                            openCurrent();
-                        }
-                        break;
-                    }
-                    // M16: æ’­æ”¾åˆ—è¡¨é¢æ¿äº‹ä»¶ä¼˜å…ˆå¤„ç†
-                    if (panel.handleMouseDown(mx, my, winW, winH)) {
-                        vrender.setPanelWidth(panel.width());
-                        // M32f.2: é¢æ¿å†…éƒ¨å¼€åˆè¯·æ±‚ â†’ çª—å£å‘å³è†¨å‡º/æ”¶å›
-                        if (panel.consumeToggleRequest()) {
-                            applyPlaylistToggle();
-                            break;
-                        }
-                        // æ£€æŸ¥é¢æ¿ç‚¹å‡»é€‰æ›²
-                        int clicked = panel.clickedIndex();
-                        if (clicked >= 0 && clicked < (int)playlist.size()) {
-                            // è·³è½¬åˆ°ç‚¹å‡»çš„æ›²ç›®
-                            while (playlist.index() < clicked) playlist.next();
-                            while (playlist.index() > clicked) playlist.prev();
-                            openCurrent();
-                            panel.clearClick();
-                        }
-                        break;
-                    }
-                    ControlLayout lay = ControlLayout::compute(winW, winH, panel.width());
-                    bool hitControl = false;
-                    auto inR = [&](int x, int y, int w, int h) {
-                        return mx >= x && mx < x + w && my >= y && my < y + h;
-                    };
-                    // ---- è¡Œ1ï¼šä¼ è¾“é’®ï¼ˆprev34 / play42 / next34ï¼‰----
-                    if (inR(lay.prevX, lay.row1Y, 34, 34)) {
-                        prevTrack(); hitControl = true;
-                    } else if (inR(lay.playX, lay.row1Y, 42, 42)) {
-                        player.togglePause(); hitControl = true;
-                    } else if (inR(lay.nextX, lay.row1Y, 34, 34)) {
-                        nextTrack(); hitControl = true;
-                    }
-                    // ---- è¡Œ2ï¼šå­—å¹• / å€é€Ÿ / ç”»è´¨ / éŸ³é‡ / è®¾ç½® / å…¨å± ----
-                    else if (inR(lay.subX, lay.row1Y + 4, 44, 34)) {
-                        // å­—å¹•ï¼šå†…å°å­—å¹•è½¨å¾ªç¯åˆ‡æ¢ï¼ˆ-1=å…³é—­ï¼‰
-                        int cnt = player.subtitleStreamCount();
-                        if (cnt <= 0) {
-                            vrender.showToast("æ— å†…å°å­—å¹•");
-                        } else {
-                            static int subIdx = -1;
-                            subIdx = (subIdx + 1) % (cnt + 1);
-                            player.switchSubtitleTrack(subIdx < cnt ? subIdx : -1);
-                            char msg[64];
-                            std::snprintf(msg, sizeof(msg), "å­—å¹•è½¨: %s",
-                                          subIdx < cnt ? "å¼€å¯" : "å…³é—­");
-                            vrender.showToast(msg);
-                        }
-                        hitControl = true;
-                    }
-                    else if (inR(lay.spdX - 9, lay.row1Y + 4, 84, 34)) {
-                        vrender.toggleSpeedMenu();
-                        volHideAt = SDL_GetTicks() + 2000;
-                        hitControl = true;
-                    }
-                    else if (vrender.speedMenuOpen()) {
-                        bool inMenu = false;
-                        for (int i = 0; i < 8; ++i) {
-                            SDL_Rect r = VideoRenderer::speedMenuItemRect(lay, i);
-                            if (mx >= r.x && mx < r.x + r.w && my >= r.y && my < r.y + r.h) {
-                                player.setSpeed(kSpeeds[i]);
-                                vrender.setSpeedMenuOpen(false);
-                                char msg[32];
-                                std::snprintf(msg, sizeof(msg), "å€é€Ÿ: x%.2g", kSpeeds[i]);
-                                vrender.showToast(msg);
-                                hitControl = true;
-                                inMenu = true;
-                                break;
-                            }
-                        }
-                        if (!inMenu) vrender.setSpeedMenuOpen(false);
-                    }
-                    else if (inR(lay.qualX, lay.row1Y + 4, 48, 34)) {
-                        vrender.showToast("æœ¬åœ°æ’­æ”¾ï¼Œå·²æ˜¯æœ€ä½³ç”»è´¨");
-                        hitControl = true;
-                    }
-                    else if (inR(lay.volBxX, lay.row1Y + 4, 34, 34)) {
-                        player.toggleMute();
-                        volHideAt = SDL_GetTicks() + 2000;
-                        hitControl = true;
-                    }
-                    else if (inR(lay.volSlX, lay.row1Y + 12, lay.volSlW, 18)) {
-                        draggingVolume = true;
-                        float v = (float)(mx - lay.volSlX) / lay.volSlW;
-                        if (v < 0) v = 0; if (v > 1) v = 1;
-                        player.setVolume(v == 0 ? 0.0001f : v);
-                        hitControl = true;
-                    }
-                    else if (inR(lay.setX, lay.row1Y + 4, 44, 34)) {
-                        vrender.setSettingsVisible(true);
-                        hitControl = true;
-                    }
-                    else if (inR(lay.fs2X, lay.row1Y + 4, 34, 34)) {
-                        fullscreen = !fullscreen;
-                        SDL_SetWindowFullscreen(win,
-                            fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
-                        hitControl = true;
-                    }
-                    // è¿›åº¦æ¡ç‚¹å‡»è·³è½¬ï¼ˆseek å¸¦å‘½ä¸­ï¼‰
-                    if (!hitControl &&
-                        mx >= lay.progX && mx < lay.progX + lay.progW &&
-                        my >= lay.progY - 10 && my < lay.progY + 12) {
-                        float pct = (float)(mx - lay.progX) / lay.progW;
-                        if (pct < 0) pct = 0; if (pct > 1) pct = 1;
-                        player.seek(pct * player.duration());
-                        draggingProgress = true;
-                        hitControl = true;
-                    }
-                    // å•å‡»è§†é¢‘åŒºåŸŸæš‚åœ/ç»§ç»­
-                    if (e.button.clicks == 1 && !hitControl && player.hasMedia()) {
-                        player.togglePause();
-                    }
-                    // Double-click for fullscreen only outside controls
-                    if (e.button.clicks == 2 && !hitControl) {
-                        fullscreen = !fullscreen;
-                        SDL_SetWindowFullscreen(win,
-                            fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
-                    }
-                }
-                break;
-            case SDL_MOUSEBUTTONUP:
-                panel.handleMouseUp(e.button.x, e.button.y);
-                if (draggingProgress) {
-                    // M33h: æ¾æ‰‹æ—¶æ‰çœŸæ­£ seek
-                    int ww = 0, wh = 0;
-                    SDL_GetWindowSize(win, &ww, &wh);
-                    ControlLayout lay2 = ControlLayout::compute(ww, wh, panel.width());
-                    float finalPct = (float)(e.button.x - lay2.progX) / lay2.progW;
-                    if (finalPct < 0) finalPct = 0; if (finalPct > 1) finalPct = 1;
-                    player.seek(finalPct * player.duration());
-                }
-                draggingProgress = false;
-                draggingVolume = false;
-                break;
-            case SDL_MOUSEWHEEL:
-                {
-                    int winH = 0;
-                    SDL_GetWindowSize(win, nullptr, &winH);
-                    int winW2 = 0, winH2 = 0;
-                    SDL_GetWindowSize(win, &winW2, &winH2);
-                    panel.handleMouseWheel(e.wheel.y, winW2, winH2);
-                }
-                break;
-            case SDL_KEYDOWN:
-                switch (e.key.keysym.sym) {
-                case SDLK_SPACE:
-                    player.togglePause();
-                    break;
-                case SDLK_LEFT:
-                    player.seekRelative(e.key.keysym.mod & KMOD_CTRL ? -30.0 : -5.0);
-                    break;
-                case SDLK_RIGHT:
-                    player.seekRelative(e.key.keysym.mod & KMOD_CTRL ? 30.0 : 5.0);
-                    break;
-                case SDLK_UP:
-                    player.setVolume(player.volume() + 0.1f);
-                    volHideAt = SDL_GetTicks() + 2000;
-                    break;
-                case SDLK_DOWN:
-                    player.setVolume(player.volume() - 0.1f);
-                    volHideAt = SDL_GetTicks() + 2000;
-                    break;
-                case SDLK_m:
-                    player.toggleMute();
-                    volHideAt = SDL_GetTicks() + 2000;
-                    break;
-                case SDLK_n:
-                    nextTrack();
-                    break;
-                case SDLK_p:
-                    prevTrack();
-                    break;
-                case SDLK_x:
-                    cyclePlayMode();
-                    break;
-                case SDLK_r:
-                    cycleResume();
-                    break;
-                case SDLK_f:
-                    fullscreen = !fullscreen;
-                    SDL_SetWindowFullscreen(win,
-                        fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
-                    break;
-                case SDLK_s:
-                    cycleSpeed(-1);
-                    break;
-                case SDLK_l:
-                    cycleSpeed(1);
-                    break;
-                case SDLK_a: {
-                    bool on = !player.audio().normalization();
-                    player.audio().setNormalization(on);
-                    vrender.showToast(on ? "éŸ³é‡æ ‡å‡†åŒ–: å¼€å¯" : "éŸ³é‡æ ‡å‡†åŒ–: å…³é—­");
-                    volHideAt = SDL_GetTicks() + 2000;
-                    break;
-                }
-                case SDLK_i:
-                    osd.toggleInfo();
-                    break;
-                case SDLK_b: {
-                    // M31b: å­—å¹•è½¨åˆ‡æ¢ï¼ˆå¾ªç¯ + å…³é—­ï¼‰
-                    int count = player.subtitleStreamCount();
-                    if (count > 0) {
-                        int cur = player.currentSubtitleTrack();
-                        int next = cur + 1;
-                        if (next >= count) next = -1;  // -1 = å…³é—­
-                        if (next >= 0) {
-                            player.switchSubtitleTrack(next);
-                            std::string msg = "Sub: " + player.subtitleStreamName(next);
-                            vrender.showToast(msg.c_str());
-                        } else {
-                            player.switchSubtitleTrack(-1);
-                            vrender.showToast("Sub: OFF");
-                        }
-                    } else {
-                        vrender.showToast("No subtitle tracks");
-                    }
-                    volHideAt = SDL_GetTicks() + 2000;
-                    break;
-                }
-                case SDLK_MINUS:
-                case SDLK_KP_MINUS: {
-                    double d = player.subtitleDelay() - 0.5;
-                    if (d < -10.0) d = -10.0;
-                    player.setSubtitleDelay(d);
-                    char buf[32];
-                    std::snprintf(buf, sizeof(buf), "SubDelay %.1fs", d);
-                    vrender.showToast(buf);
-                    volHideAt = SDL_GetTicks() + 2000;
-                    break;
-                }
-                case SDLK_EQUALS:
-                case SDLK_KP_PLUS: {
-                    double d = player.subtitleDelay() + 0.5;
-                    if (d > 10.0) d = 10.0;
-                    player.setSubtitleDelay(d);
-                    char buf[32];
-                    std::snprintf(buf, sizeof(buf), "SubDelay %+.1fs", d);
-                    vrender.showToast(buf);
-                    volHideAt = SDL_GetTicks() + 2000;
-                    break;
-                }
-                case SDLK_ESCAPE:
-                case SDLK_q:
-                    running = false;
-                    break;
-                case SDLK_TAB:
-                    applyPlaylistToggle();
-                    break;
-                case SDLK_LEFTBRACKET:
-                    cycleSpeed(-1);
-                    break;
-                case SDLK_RIGHTBRACKET:
-                    cycleSpeed(1);
-                    break;
-                case SDLK_1: case SDLK_2: case SDLK_3: case SDLK_4: case SDLK_5:
-                case SDLK_6: case SDLK_7: case SDLK_8: case SDLK_9: {
-                    int digit = e.key.keysym.sym - SDLK_0;
-                    double t = player.duration() * digit / 10.0;
-                    player.seek(t);
-                    char buf[32];
-                    std::snprintf(buf, sizeof(buf), "%d0%%", digit);
-                    vrender.showToast(buf);
-                    break;
-                }
-                case SDLK_0:
-                    player.seek(player.duration());
-                    vrender.showToast("100%");
-                    break;
-                default:
-                    // Ctrl+O: æ‰“å¼€æ–‡ä»¶
-                    if (e.key.keysym.sym == SDLK_o && (e.key.keysym.mod & KMOD_CTRL)) {
-                        HWND hwnd = nullptr;
-                        SDL_SysWMinfo info;
-                        SDL_VERSION(&info.version);
-                        if (SDL_GetWindowWMInfo(win, &info)) hwnd = info.info.win.window;
-                        std::string file = openFileDialog(hwnd);
-                        if (!file.empty()) {
-                            playlist.set(file);
-                            openCurrent();
-                            historyPaths.clear();
-                            historyNames.clear();
-                            for (const auto& kv : cfg.history) {
-                                historyPaths.push_back(kv.first);
-                                historyNames.push_back(std::filesystem::path(kv.first).stem().string());
-                            }
-                            if (historyNames.size() > 8) { historyNames.resize(8); historyPaths.resize(8); }
-                        }
-                        break;
-                    }
-                    break;
-                }
-                break;
-            default:
-                break;
-            }
+        while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+            if (msg.message == WM_QUIT) { running = false; break; }
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
         }
-
-        if (player.hasMedia()) {
-            FramePtr f = player.pullFrame();
-            // seek / åˆ‡å€é€Ÿåï¼Œæ—¶é’Ÿè¿½ä¸Š target æ—¶è§£é™¤ UI å†»ç»“
-            if (player.uiSeeking()) {
-                if (player.clock() >= player.uiTargetPts() - 0.1) {
-                    player.clearUiSeeking();
-                }
-            }
-            if (f) {
-                RenderStats stats;
-                stats.playing = (player.state() == Player::State::Playing);
-                stats.paused = (player.state() == Player::State::Paused);
-                stats.clock = player.clock();
-                stats.uiClock = player.uiClock();
-                stats.duration = player.duration();
-                stats.bufferPct = player.bufferFill();
-                stats.volume = player.muted() ? 0.0f : player.volume();
-                stats.muted = player.muted();
-                stats.fullscreen = fullscreen;
-                stats.speed = player.speed();
-                stats.playMode = (int)playlist.mode();
-                stats.draggingVolume = draggingVolume;
-                // M32e: è®¾ç½®é¢æ¿çŠ¶æ€é•œåƒ
-                stats.swHw = player.usingHardware();
-                stats.swNorm = player.audio().normalization();
-                stats.swResume = cfg.resume != 0;
-                stats.swAutoNext = (playlist.mode() != PlayMode::Single);
-                stats.swSub = subAutoLoad;
-                stats.swThumbCache = cfg.thumbCache != 0;
-                stats.subScale = cfg.subScale;
-                stats.langIdx = langIdx;
-                stats.themeIdx = themeIdx;
-                static std::string subtitleBuf;
-                static std::string rawSubBuf;
-                if (player.hasSubtitle()) {
-                    subtitleBuf = player.subtitleText(stats.clock);
-                    rawSubBuf = player.rawSubtitleText(stats.clock);
-                    stats.subtitle = subtitleBuf.c_str();
-                    stats.rawSubtitle = rawSubBuf.c_str();
-                } else {
-                    subtitleBuf.clear();
-                    rawSubBuf.clear();
-                    stats.subtitle = nullptr;
-                    stats.rawSubtitle = nullptr;
-                }
-                stats.onPlayPause = [&]() { player.togglePause(); return true; };
-                stats.onToggleFullscreen = [&]() { fullscreen = !fullscreen; SDL_SetWindowFullscreen(win, fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0); return true; };
-                stats.onSeekTo = [&](double p) { player.seek(p); return true; };
-                stats.onVolumeUp = [&]() { player.setVolume(player.volume() + 0.1f); volHideAt = SDL_GetTicks() + 2000; };
-                stats.onNextTrack = [&]() { nextTrack(); };
-                stats.onPrevTrack = [&]() { prevTrack(); };
-                stats.onCycleMode = [&]() { cyclePlayMode(); };
-                stats.onCycleSpeed = [&]() { cycleSpeed(1); };
-                vrender.setPanelWidth(panel.width());  // M32f.2: æ¯å¸§åŒæ­¥é¢æ¿å®½
-                // M32f.9: æ”¶èµ·åŠ¨ç”»ç»“æŸ â†’ ç°åœ¨æ‰ç¼©å›çª—å£å®½åº¦
-                if (panel.shrinkReady()) {
-                    int cw = 0, ch = 0;
-                    SDL_GetWindowSize(win, &cw, &ch);
-                    int pw2 = panel.width();
-                    panel.consumeShrink();
-                    SDL_SetWindowSize(win, std::max(640, cw - pw2), ch);
-                    LOG_INFO("MAIN", "playlist shrink done: -%d", pw2);
-                }
-                vrender.render(f.get(), stats);
-            }
-            else if (player.state() == Player::State::Ended) {
-                if (playlist.hasNext()) {
-                    nextTrack();
-                } else {
-                    vrender.drawWelcome(historyNames);
-                }
-            }
-        } else {
-            vrender.drawWelcome(historyNames);
-        }
-        // ç»˜åˆ¶è‡ªå®šä¹‰æ ‡é¢˜æ ï¼ˆæ¯å¸§ï¼Œè¦†ç›– SDL æ¸²æŸ“ï¼‰
-        // M32c: é¡¶æ ç”± VideoRenderer::drawTopBar ç»˜åˆ¶ï¼ˆè¦†ç›–å¼ï¼‰ï¼Œä¸å†ç”»æ—§æ ‡é¢˜æ 
-        // titlebar.draw(vrender.renderer());
-        // M16: ç»˜åˆ¶æ’­æ”¾åˆ—è¡¨é¢æ¿
-        {
-            int pw = 0, ph = 0;
-            SDL_GetWindowSize(win, &pw, &ph);
-            panel.setPlaylist(&playlist);
-            panel.draw(playlist.index(), pw, ph);
-        }
-        // M30c: OSD ä¿¡æ¯å åŠ 
-        if (osd.isInfoVisible()) {
-            int ww = 0, wh = 0;
-            SDL_GetWindowSize(win, &ww, &wh);
-            osd.drawInfoOverlay(ww, wh,
-                player.videoWidth(), player.videoHeight(),
-                player.videoBitrate(), player.videoFps(), player.videoCodecName(),
-                player.audioSampleRate(), player.audioBitrate(), player.audioCodecName(),
-                player.usingHardware(), player.duration());
-        }
-
-        SDL_RenderPresent(vrender.renderer());
-        SDL_Delay(8);
+        if (!running) break;
+        WaitMessage();
     }
 
-    if (!playlist.empty() && player.hasMedia())
-        cfg.history[playlist.current()] = player.clock();
-    if (!playlist.empty())
-        cfg.lastFile = playlist.current();
-    cfg.playMode = (int)playlist.mode();
-    cfg.volume = player.volume();
-    cfg.speed = player.speed();
-    cfg.subAutoLoad = subAutoLoad ? 1 : 0;
+    mpv.close();
     saveConfig(configPath(), cfg);
-
-    player.close();
-    vrender.shutdown();
-    titlebar.shutdown();
-    SDL_DestroyWindow(win);
-    SDL_Quit();
+    KillTimer(hwnd, 1);
+    DestroyWindow(hwnd);
+    UnregisterClassW(wc.lpszClassName, wc.hInstance);
+    LOG_INFO("MAIN", "vplayer exiting");
     return 0;
 }
