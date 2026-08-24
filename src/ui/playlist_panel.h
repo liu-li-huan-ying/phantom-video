@@ -98,6 +98,9 @@ private:
     static constexpr int kMaxThumbCache = 60;
     float scrollbarAlpha_ = 0.0f;
     uint32_t lastScrollTick_ = 0;
+    bool scrollbarDragging_ = false;
+    int scrollbarDragOffset_ = 0;
+    SDL_Rect scrollbarRect_{ 0, 0, 0, 0 };
 
     void startWorker();
     void stopWorker();

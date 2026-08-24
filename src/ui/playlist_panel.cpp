@@ -426,10 +426,13 @@ void PlaylistPanel::draw(int currentIndex, int winW, int winH) {
     }
 
     // 滚动条（头部之后绘制，确保在最上层）
+    scrollbarRect_ = { 0, 0, 0, 0 };
     if (contentH > visibleH && totalItems > 0) {
-        float targetAlpha = (SDL_GetTicks() - lastScrollTick_ < 2000) ? 1.0f : 0.0f;
+        bool nearEdge = (mx_ >= panelX + pw - 40);
+        float targetAlpha = (nearEdge || scrollbarDragging_ ||
+                            SDL_GetTicks() - lastScrollTick_ < 2000) ? 1.0f : 0.0f;
         if (scrollbarAlpha_ < targetAlpha)
-            scrollbarAlpha_ = std::min(1.0f, scrollbarAlpha_ + 0.08f);
+            scrollbarAlpha_ = std::min(1.0f, scrollbarAlpha_ + 0.10f);
         else if (scrollbarAlpha_ > targetAlpha)
             scrollbarAlpha_ = std::max(0.0f, scrollbarAlpha_ - 0.04f);
 
@@ -437,11 +440,12 @@ void PlaylistPanel::draw(int currentIndex, int winW, int winH) {
             int sbH = std::max(30, (int)((float)visibleH / contentH * visibleH));
             int sbY = itemsY + (int)((float)scrollOffset_ / contentH * visibleH);
             int sbW = 6;
-            Uint8 alpha = (Uint8)(180 * scrollbarAlpha_);
+            Uint8 alpha = (Uint8)(200 * scrollbarAlpha_);
             SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
             SDL_SetRenderDrawColor(renderer_, 255, 255, 255, alpha);
             SDL_Rect sbRect{ panelX + pw - sbW - 6, sbY, sbW, sbH };
             SDL_RenderFillRect(renderer_, &sbRect);
+            scrollbarRect_ = sbRect;
         }
     }
 
@@ -506,12 +510,12 @@ void PlaylistPanel::drawItem(int baseX, int y, int index, const std::string& fil
 
 bool PlaylistPanel::handleMouseMove(int mx, int my, int winW, int winH) {
     mx_ = mx; my_ = my;
-    const int panelTop = 0;   // M32f.6: 全高面板，无底部空白
+    const int panelTop = 0;
     const int panelBot = winH;
 
-    // M32g: 右缘条已移除；面板关闭时不拦截任何鼠标事件
     if (!open_) {
         toggleHover_ = false;
+        scrollbarDragging_ = false;
         return false;
     }
 
@@ -519,7 +523,34 @@ bool PlaylistPanel::handleMouseMove(int mx, int my, int winW, int winH) {
     if (w == 0) return false;
     int panelX = winW - w;
 
-    // 面板关闭按钮 hover（M32f.6: 以实绘矩形为准）
+    // 滚动条拖动中
+    if (scrollbarDragging_ && scrollbarRect_.h > 0) {
+        int totalItems = playlist_ ? (int)playlist_->size() : 0;
+        if (totalItems > 0) {
+            int visibleH = panelBot - panelTop - kHeaderH;
+            int contentH = totalItems * kItemH;
+            int maxScroll = std::max(0, contentH - visibleH);
+            float trackH = (float)(visibleH - scrollbarRect_.h);
+            if (trackH > 0) {
+                float ratio = (float)(my - scrollbarRect_.y - scrollbarDragOffset_) / trackH;
+                if (ratio < 0) ratio = 0; if (ratio > 1) ratio = 1;
+                scrollOffset_ = (int)(ratio * maxScroll);
+            }
+        }
+        lastScrollTick_ = SDL_GetTicks();
+        SDL_SetCursor(SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_HAND));
+        return true;
+    }
+
+    // 滚动条 hover → 手型光标
+    if (scrollbarRect_.w > 0 &&
+        mx >= scrollbarRect_.x - 4 && mx < scrollbarRect_.x + scrollbarRect_.w + 4 &&
+        my >= scrollbarRect_.y - 4 && my < scrollbarRect_.y + scrollbarRect_.h + 4) {
+        SDL_SetCursor(SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_HAND));
+        return true;
+    }
+
+    // 关闭按钮 hover
     if (open_ && mx >= closeRect_.x - 4 && mx < closeRect_.x + closeRect_.w + 4 &&
         my >= closeRect_.y - 4 && my < closeRect_.y + closeRect_.h + 4) {
         closeHover_ = true;
@@ -557,15 +588,14 @@ bool PlaylistPanel::handleMouseMove(int mx, int my, int winW, int winH) {
 }
 
 bool PlaylistPanel::handleMouseDown(int mx, int my, int winW, int winH) {
-    const int panelTop = 0;   // M32f.6: 全高面板，无底部空白
+    const int panelTop = 0;
     const int panelBot = winH;
 
     int w = width();
 
-    // 面板打开时的拖拽/点击在面板区域内处理
     if (w > 0) {
         int panelX = winW - w;
-        // M32f.6: 关闭钮命中 —— 以实绘矩形为准（外扩 6px 容差）
+        // 关闭钮
         if (open_ &&
             mx >= closeRect_.x - 6 && mx < closeRect_.x + closeRect_.w + 6 &&
             my >= closeRect_.y - 6 && my < closeRect_.y + closeRect_.h + 6) {
@@ -580,6 +610,30 @@ bool PlaylistPanel::handleMouseDown(int mx, int my, int winW, int winH) {
             resizeStartW_ = baseWidth_;
             return true;
         }
+        // 滚动条拖动
+        if (open_ && scrollbarRect_.w > 0 &&
+            mx >= scrollbarRect_.x - 4 && mx < scrollbarRect_.x + scrollbarRect_.w + 4 &&
+            my >= scrollbarRect_.y - 4 && my < scrollbarRect_.y + scrollbarRect_.h + 4) {
+            scrollbarDragging_ = true;
+            scrollbarDragOffset_ = my - scrollbarRect_.y;
+            lastScrollTick_ = SDL_GetTicks();
+            return true;
+        }
+        // 滚动条轨道点击 → 跳页
+        if (open_ && scrollbarRect_.w > 0 &&
+            mx >= scrollbarRect_.x - 10 && mx < scrollbarRect_.x + scrollbarRect_.w + 10 &&
+            my >= panelTop + kHeaderH && my < panelBot) {
+            if (playlist_ && playlist_->size() > 0) {
+                int totalItems = (int)playlist_->size();
+                int visibleH = panelBot - panelTop - kHeaderH;
+                int contentH = totalItems * kItemH;
+                float ratio = (float)(my - panelTop - kHeaderH) / visibleH;
+                scrollOffset_ = (int)(ratio * contentH) - visibleH / 2;
+                scrollOffset_ = std::max(0, std::min(std::max(0, contentH - visibleH), scrollOffset_));
+                lastScrollTick_ = SDL_GetTicks();
+            }
+            return true;
+        }
         // 列表项点击
         if (mx >= panelX && mx < panelX + w && my >= panelTop + kHeaderH && my < panelBot) {
             int idx = (my - panelTop - kHeaderH + scrollOffset_) / kItemH;
@@ -591,12 +645,15 @@ bool PlaylistPanel::handleMouseDown(int mx, int my, int winW, int winH) {
         if (mx >= panelX && my >= panelTop && my < panelBot) return true;
     }
 
-    // M32g: 右缘条已移除
     return false;
 }
 
 bool PlaylistPanel::handleMouseUp(int mx, int my) {
     (void)mx; (void)my;
+    if (scrollbarDragging_) {
+        scrollbarDragging_ = false;
+        return true;
+    }
     if (resizing_) {
         resizing_ = false;
         return true;
