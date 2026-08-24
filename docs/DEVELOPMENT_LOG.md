@@ -1469,3 +1469,33 @@ SetCursorPos 用物理像素 → 全部错位；渲染同时被系统拉伸模�
   `mpv-shot0001.png`(4.9MB) ✓
 - 教训：PS5.1 测试脚本含中文注释时 UTF-8 无 BOM 会破坏解析；
   FindWindow 在此环境不可用，统一用 EnumWindows(by pid)。
+
+---
+
+## M34a Phase 2k: UI 全面 DPI 缩放（2026-08-24）
+
+任务：Phase 2j 遗留 TODO——DPI aware 后像素度量未缩放，125% 下控件显小。
+
+实现：
+1. `g_dpi` + `S()`：所有像素度量（图标/边距/条高/弹窗/面板/网格卡片）
+   经 S() 换算；**文字 pt 不缩放**——GdiTextCache 内部
+   `-MulDiv(pt, LOGPIXELSY, 72)` 在 PMv2 进程中已按真实 DPI 渲染，
+   调用点再乘会双重放大（关键区分点）
+2. 窗口创建前先 GetDC 读主屏 DPI → S(960)xS(540) 物理展开；
+   创建后 updateDpiForWindow(GetDpiForWindow) 以所在屏精调
+3. WM_DPICHANGED：跨缩放屏拖动实时跟随（MinGW 头无此宏，手写 0x02E0）
+4. 顺带修正右侧图标区渲染/命中错位（原实现两套坐标本就对不上），
+   统一基准：全屏@w-S(20) 音量@w-S(54) 齿轮@w-S(88) 速度@w-S(126) HW@w-S(170)
+
+验证（125% 实机）：
+- initial/window dpi scale=1.25 ✓
+- 客户区 942x493逻辑 → **1182x628 物理** ✓
+- 点击 camera：`topbar click mx=944 icon=5` → `screenshot ret=0` +
+  mpv-shot0002.png 落盘 ✓
+
+经验：
+1. 排查输入问题时"插桩日志 + 动态定位点击"组合最有效——
+   CW_USEDEFAULT 每次启动级联偏移 + DPI 虚拟化叠加，
+   固定坐标猜测全部失真
+2. MinGW w64devkit 头文件缺新 API 宏/声明（WM_DPICHANGED、
+   SetProcessDPIAware 守卫），一律 GetProcAddress 动态加载绕过
