@@ -1499,3 +1499,38 @@ SetCursorPos 用物理像素 → 全部错位；渲染同时被系统拉伸模�
    固定坐标猜测全部失真
 2. MinGW w64devkit 头文件缺新 API 宏/声明（WM_DPICHANGED、
    SetProcessDPIAware 守卫），一律 GetProcAddress 动态加载绕过
+
+---
+
+## M34a Phase 3a-3d：PIP / 字幕 / OSD / 缩略图（2026-08-24）
+
+### Phase 3a: PIP 置顶迷你小窗 (5a8307c)
+- 方案取舍：mpv --wid 固定绑定子窗口，双实例真 PIP 需双解码且状态难同步；
+  采用主流播放器**置顶迷你窗**（WS_POPUP S(480)xS(270) 右下角）
+- toggleMini() 保存/还原 style+rect；与全屏互斥；raiseOverlayAbove()
+  在 parent TOPMOST 变化后重提 overlay z 序
+- 抽取 toggleFullscreen() 消除 F 键/maximize 两处重复
+- 验证：注入点击 -> 'pip mini ON (600x338)' Popup=True -> OFF 还原 1200x675
+
+### Phase 3b: 字幕 UI 控制 (1477970)
+- MpvBackend 新增 subVisible/setSubVisibility/currentSubTrack/addSubDelay/subDelay
+- 控制栏 cc 图标（可见=亮/隐藏=暗）+ C 键切换 + X/Z 延迟 ±0.5s + Toast 轨道名
+
+### Phase 3c: OSD 信息叠加 (2034926)
+- I 键切换左上角信息面板：codec/分辨率/fps/码率/音频参数，8 秒自动消失
+- mpvStr() 通用属性查询封装
+
+### Phase 3d: 列表面板缩略图 (aa98195)
+- 复用旧 ThumbnailExtractor：worker 线程解码、互斥锁传 ThumbRgb(w,h,px)、
+  渲染线程 uploadThumbs() 惰性转纹理（SDL 纹理限渲染线程）
+- 每帧 swap 可见缺图集 → 天然限流；磁盘缓存 v1 未做（会话内存缓存）
+
+### 本轮教训
+1. **引用参数误当指针输出参**：getFrame(...,int&,int&) 传了 &w,&h，
+   g++ 诊断"invalid conversion int* to int"极具误导性（看似签名不符）。
+   排查弯路：怀疑头文件重复/编码污染/宏污染，甚至预处理 13.6MB 全量展开——
+   实际一眼看穿即可。先核对 API 调用约定再怀疑环境！
+2. **缓存两级去重**：RGB→纹理迁移后原键删除，单级检查导致同文件重复解码
+   696 次；收集端须同时查 rgb+tex 两级
+3. 测试物理点击受 z 序影响（终端遮挡时穿透落到别的窗口），
+   逻辑层验证改用 PostMessage 注入，稳定可靠
