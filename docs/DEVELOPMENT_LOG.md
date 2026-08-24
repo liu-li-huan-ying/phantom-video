@@ -1294,7 +1294,77 @@ decodeLoop退出 -> videoQueue_.closed -> pullFrame返回State::Ended -> auto-ne
    - 解决：初始值改为 3000ms
 
 下一步：
-- Phase 2b: 底部控制栏完善（渐变/缓冲进度/更多按钮）
-- Phase 2c: 顶部栏（标题/图标按钮/关闭）
-- Phase 2d: 进度条拖拽 + 速度弹出菜单 + Toast
-- Phase 2e-i: 设置面板/欢迎页/播放列表/配置/字幕
+- Phase 2h: 配置持久化 + 文件拖放增强
+- Phase 2i: 字幕 + OSD
+
+---
+
+## M34a Phase 2b: 控件栏改进（2026-08-24）
+
+已完成：
+1. Bayer 矩阵抖动渐变背景（顶部透明→底部不透明）
+2. 缓冲进度指示器（paused-for-cache → bufferFill 0/1）
+3. 传输按钮布局：prev/play(PPLAYBTN_SIZE)/next 居中
+4. 左侧：时间 + 媒体标题（优先 mpv media-title）
+5. 右侧：HW 标记 / 速度 / gear / 音量 / 全屏（从右到左）
+6. MpvBackend 新增 bufferFill()、title()、paused-for-cache 观察
+
+---
+
+## M34a Phase 2c: 顶部栏（2026-08-24）
+
+已完成：
+1. 渐变背景（顶部不透明→底部透明），Bayer 矩阵抖动
+2. 标题：mpv media-title 或 "VPlayer"
+3. 图标：close / maximize / minimize / list / pip / camera（右到左）
+4. 窗口拖拽：非图标区域 → WM_NCLBUTTONDOWN HTCAPTION
+5. 图标点击：close→关闭、maximize→全屏、minimize→最小化
+6. 鼠标移入顶部栏：延长控件显示到 4 秒
+7. hitTestTopbarIcon() 辅助函数
+
+---
+
+## M34a Phase 2d: 速度菜单 + Toast + 音量滑块（2026-08-24）
+
+已完成：
+1. 速度弹出菜单：点击速度标签，8 档预设（0.25x-3x），高亮当前
+2. 音量滑块：点击音量图标展开，拖拽调节，显示百分比
+3. Toast 通知：静音/取消/变速操作反馈，1.8 秒淡出
+4. Escape 键关闭弹出菜单
+5. showToast() 辅助函数
+6. 键盘 M/[/] 操作显示 Toast 反馈
+
+---
+
+## M34a Phase 2e: 设置面板模态框（2026-08-24）
+
+已完成：
+1. 底部控件栏新增 gear 图标
+2. 模态面板：半透明黑色背景 + 居中面板
+3. 开关项：Hardware Decode / Volume Normalization / Resume / Auto Next / Subtitle Auto-Load
+4. 语言选择：CN / EN / JP 三个按钮
+5. 主题选择：Dark / Light 两个按钮
+6. 点击面板外区域关闭
+
+---
+
+## M34a Phase 2f: 欢迎页面（2026-08-24）
+
+已完成：
+1. 顶部栏 + 图标（VPlayer 标题 + close/maximize/minimize）
+2. Logo：play 图标（蓝色）+ VPlayer 标题
+3. 拖放区：虚线边框 + "Drop video here" + "Ctrl+O"
+4. 最近播放网格：最多 8 个卡片（4 列），文件名 + 时间
+5. 底部快捷键提示
+6. 无媒体时始终显示（不受 overlay hide 控制）
+
+---
+
+## M34a Phase 2g: 播放列表面板（2026-08-24）
+
+已完成：
+1. 右侧 320px 面板，半透明深色背景
+2. 历史记录列表：从 config history 加载，倒序显示
+3. 当前播放高亮：蓝色背景 + 播放/暂停图标
+4. 文件名截断 35 字符 + 上次播放位置
+5. 顶部栏 list 图标切换面板
