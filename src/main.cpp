@@ -103,11 +103,17 @@ struct UiState {
     int    playlistTargetW = 0;  // target window width when playlist open
     int    playlistAnimW = 0;   // current animation width
     int    playlistScroll = 0;  // 滚动偏移(px)
+
+    // PIP / mini mode（置顶迷你小窗）
+    bool   miniMode  = false;
+    RECT   savedRect  = {};     // 还原用窗口 rect
+    DWORD  savedStyle = 0;      // 还原用 style
 };
 
 // ---- globals ----
 static HWND          g_parentHwnd = nullptr;
 static HWND          g_mpvHwnd    = nullptr;
+static HWND          g_overlayHwnd = nullptr;   // overlay 原生句柄(z序调整用)
 static MpvBackend*   g_mpv        = nullptr;
 static SDL_Window*   g_sdlWin     = nullptr;
 static SDL_Renderer* g_sdlRdr     = nullptr;
@@ -171,6 +177,63 @@ static void showToast(const char* msg) {
     std::snprintf(g_ui.toastMsg, sizeof(g_ui.toastMsg), "%s", msg);
     g_ui.toastActive = true;
     g_ui.toastStart = SDL_GetTicks();
+}
+
+// ---- overlay z 序 ----
+static void raiseOverlayAbove() {
+    if (!g_overlayHwnd) return;
+    // parent 变 TOPMOST/还原后，把 overlay 重新提到同层最上
+    SetWindowPos(g_overlayHwnd, HWND_TOPMOST, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+}
+
+// ---- 全屏切换（F 键 / maximize 按钮 / pip 共用） ----
+static void toggleFullscreen(HWND hwnd) {
+    DWORD sty = (DWORD)GetWindowLongPtrW(hwnd, GWL_STYLE);
+    if (sty & WS_OVERLAPPEDWINDOW) {
+        SetWindowLongPtrW(hwnd, GWL_STYLE, sty & ~WS_OVERLAPPEDWINDOW);
+        MONITORINFO mi = {sizeof(mi)};
+        GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mi);
+        SetWindowPos(hwnd, HWND_TOP,
+            mi.rcMonitor.left, mi.rcMonitor.top,
+            mi.rcMonitor.right - mi.rcMonitor.left,
+            mi.rcMonitor.bottom - mi.rcMonitor.top, SWP_FRAMECHANGED);
+        g_ui.fullscreen = true;
+    } else {
+        SetWindowLongPtrW(hwnd, GWL_STYLE, sty | WS_OVERLAPPEDWINDOW);
+        SetWindowPos(hwnd, nullptr, 100, 100, S(960), S(540),
+            SWP_FRAMECHANGED | SWP_NOZORDER);
+        g_ui.fullscreen = false;
+    }
+    raiseOverlayAbove();
+}
+
+static void toggleMini(HWND hwnd) {
+    if (!g_ui.miniMode) {
+        GetWindowRect(hwnd, &g_ui.savedRect);
+        g_ui.savedStyle = (DWORD)GetWindowLongPtrW(hwnd, GWL_STYLE);
+        SetWindowLongPtrW(hwnd, GWL_STYLE,
+            (g_ui.savedStyle & ~WS_OVERLAPPEDWINDOW) | WS_POPUP);
+        int w = S(480), h = S(270);
+        RECT wa; SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0);
+        SetWindowPos(hwnd, HWND_TOPMOST,
+            wa.right - w - S(20), wa.bottom - h - S(20), w, h,
+            SWP_FRAMECHANGED | SWP_NOACTIVATE);
+        g_ui.miniMode = true;
+        LOG_INFO("MAIN", "pip mini ON (%dx%d)", w, h);
+        showToast("Picture-in-picture: ON");
+    } else {
+        SetWindowLongPtrW(hwnd, GWL_STYLE, g_ui.savedStyle);
+        SetWindowPos(hwnd, HWND_NOTOPMOST,
+            g_ui.savedRect.left, g_ui.savedRect.top,
+            g_ui.savedRect.right  - g_ui.savedRect.left,
+            g_ui.savedRect.bottom - g_ui.savedRect.top,
+            SWP_FRAMECHANGED | SWP_NOACTIVATE);
+        g_ui.miniMode = false;
+        LOG_INFO("MAIN", "pip mini OFF");
+        showToast("Picture-in-picture: OFF");
+    }
+    raiseOverlayAbove();
 }
 
 // ---- 播放队列（稳定顺序，文件夹扫描生成，不随播放重排） ----
@@ -321,25 +384,9 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 if (g_ui.speedMenuOpen) g_ui.speedMenuOpen = false;
                 else if (g_ui.volumeSliderOpen) g_ui.volumeSliderOpen = false;
                 break;
-            case 'F': {
-                DWORD sty = (DWORD)GetWindowLongPtrW(hwnd, GWL_STYLE);
-                if (sty & WS_OVERLAPPEDWINDOW) {
-                    SetWindowLongPtrW(hwnd, GWL_STYLE, sty & ~WS_OVERLAPPEDWINDOW);
-                    MONITORINFO mi = {sizeof(mi)};
-                    GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mi);
-                    SetWindowPos(hwnd, HWND_TOP,
-                        mi.rcMonitor.left, mi.rcMonitor.top,
-                        mi.rcMonitor.right  - mi.rcMonitor.left,
-                        mi.rcMonitor.bottom - mi.rcMonitor.top, SWP_FRAMECHANGED);
-                    g_ui.fullscreen = true;
-                } else {
-                    SetWindowLongPtrW(hwnd, GWL_STYLE, sty | WS_OVERLAPPEDWINDOW);
-                    SetWindowPos(hwnd, nullptr, 100, 100, S(960), S(540),
-                        SWP_FRAMECHANGED | SWP_NOZORDER);
-                    g_ui.fullscreen = false;
-                }
+            case 'F':
+                toggleFullscreen(hwnd);
                 break;
-            }
             case 'O':
                 if (GetKeyState(VK_CONTROL) & 0x8000) {
                     std::string f = openFileDialog(hwnd);
@@ -397,33 +444,22 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             case 0: // close
                 PostMessage(hwnd, WM_CLOSE, 0, 0);
                 return 0;
-            case 1: { // maximize / fullscreen
-                DWORD sty = (DWORD)GetWindowLongPtrW(hwnd, GWL_STYLE);
-                if (sty & WS_OVERLAPPEDWINDOW) {
-                    SetWindowLongPtrW(hwnd, GWL_STYLE, sty & ~WS_OVERLAPPEDWINDOW);
-                    MONITORINFO mi = {sizeof(mi)};
-                    GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mi);
-                    SetWindowPos(hwnd, HWND_TOP,
-                        mi.rcMonitor.left, mi.rcMonitor.top,
-                        mi.rcMonitor.right - mi.rcMonitor.left,
-                        mi.rcMonitor.bottom - mi.rcMonitor.top, SWP_FRAMECHANGED);
-                    g_ui.fullscreen = true;
-                } else {
-                    SetWindowLongPtrW(hwnd, GWL_STYLE, sty | WS_OVERLAPPEDWINDOW);
-                    SetWindowPos(hwnd, nullptr, 100, 100, S(960), S(540),
-                        SWP_FRAMECHANGED | SWP_NOZORDER);
-                    g_ui.fullscreen = false;
-                }
+            case 1: // maximize / fullscreen
+                toggleFullscreen(hwnd);
                 return 0;
-            }
             case 2: // minimize
                 ShowWindow(hwnd, SW_MINIMIZE);
                 return 0;
             case 3: // playlist
                 g_ui.playlistOpen = !g_ui.playlistOpen;
                 return 0;
-            case 4: // PIP (TODO)
+            case 4: { // PIP 置顶迷你小窗
+                if (g_mpv && g_mpv->hasMedia()) {
+                    if (g_ui.fullscreen) toggleFullscreen(hwnd);  // 全屏先退出
+                    toggleMini(hwnd);
+                }
                 return 0;
+            }
             case 5: { // camera/screenshot
                 if (g_mpv && g_mpv->mpv()) {
                     const char* cmd[] = { "screenshot", NULL };
@@ -622,6 +658,7 @@ static bool createOverlay(HWND parent, int w, int h) {
         return false;
     }
     HWND ov = info.info.win.window;
+    g_overlayHwnd = ov;   // 供 mini 模式 z 序调整使用
 
     LONG_PTR ex = GetWindowLongPtrW(ov, GWL_EXSTYLE);
     SetWindowLongPtrW(ov, GWL_EXSTYLE,
@@ -659,6 +696,7 @@ static void destroyOverlay() {
     svgicon::shutdown();
     if (g_sdlRdr) { SDL_DestroyRenderer(g_sdlRdr); g_sdlRdr = nullptr; }
     if (g_sdlWin) { SDL_DestroyWindow(g_sdlWin);   g_sdlWin = nullptr; }  // 连同 HWND 一起销毁
+    g_overlayHwnd = nullptr;
 }
 
 // ---- dithered gradient helper ----
@@ -801,7 +839,9 @@ static void renderOverlay() {
         svgicon::draw(g_sdlRdr, "maximize", rx, iconY, S(20), 161, 161, 166, 200); rx -= S(34);
         svgicon::draw(g_sdlRdr, "minimize", rx, iconY, S(20), 161, 161, 166, 200); rx -= S(34);
         svgicon::draw(g_sdlRdr, "list",     rx, iconY, S(20), 161, 161, 166, 200); rx -= S(34);
-        svgicon::draw(g_sdlRdr, "pip",      rx, iconY, S(20), 161, 161, 166, 200); rx -= S(34);
+        svgicon::draw(g_sdlRdr, "pip",      rx, iconY, S(20),
+            g_ui.miniMode ? 37 : 161, g_ui.miniMode ? 99 : 161,
+            g_ui.miniMode ? 235 : 166, 200); rx -= S(34);
         svgicon::draw(g_sdlRdr, "camera",   rx, iconY, S(20), 161, 161, 166, 200);
     }
 
