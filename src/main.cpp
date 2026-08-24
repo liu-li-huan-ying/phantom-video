@@ -92,6 +92,9 @@ struct UiState {
     bool   toastActive = false;
     Uint32 toastStart  = 0;
     char   toastMsg[128] = {};
+
+    // settings panel
+    bool   settingsOpen = false;
 };
 
 // ---- globals ----
@@ -339,6 +342,15 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         else if (g_mpv && mx >= g_ui.winW - 110 && mx <= g_ui.winW - 70 &&
                  my >= barTop + 36 && my <= barTop + 60) {
             g_ui.speedMenuOpen = !g_ui.speedMenuOpen;
+        }
+        // --- settings gear click ---
+        else if (g_mpv && mx >= g_ui.winW - 88 && mx <= g_ui.winW - 68 &&
+                 my >= barTop + 40 && my <= barTop + 60) {
+            g_ui.settingsOpen = !g_ui.settingsOpen;
+        }
+        // --- settings modal backdrop click (close) ---
+        else if (g_ui.settingsOpen && my < sbTopY()) {
+            g_ui.settingsOpen = false;
         }
         // --- volume icon click ---
         else if (g_mpv && mx >= g_ui.winW - 64 && mx <= g_ui.winW - 44 &&
@@ -595,7 +607,7 @@ static void renderOverlay() {
         g_text.drawText(20, barTop + 60, title, 13, 255, 255, 255);
     }
 
-    // --- right side: HW badge + speed + subtitle + volume + fullscreen ---
+    // --- right side: HW badge + speed + gear + volume + fullscreen ---
     {
         int rx = w - 20;
         // fullscreen (rightmost)
@@ -605,6 +617,9 @@ static void renderOverlay() {
         // volume
         const char* vid = g_mpv->muted() ? "mute" : "volume";
         svgicon::draw(g_sdlRdr, vid, rx, barTop + 50, 20, 161, 161, 166, 200);
+        rx -= 34;
+        // settings gear
+        svgicon::draw(g_sdlRdr, "gear", rx, barTop + 50, 20, 161, 161, 166, 200);
         rx -= 34;
         // speed label
         {
@@ -689,6 +704,83 @@ static void renderOverlay() {
         char vStr[16];
         std::snprintf(vStr, sizeof(vStr), "%d%%", (int)(vol * 100));
         g_text.drawText(sliderX + sliderW/2 - 10, sliderY - 16, vStr, 11, 161, 161, 166);
+    }
+
+    // --- settings modal panel ---
+    if (g_ui.settingsOpen) {
+        // semi-transparent backdrop
+        SDL_SetRenderDrawColor(g_sdlRdr, 0, 0, 0, 180);
+        SDL_Rect fullRc = {0, 0, w, h};
+        SDL_RenderFillRect(g_sdlRdr, &fullRc);
+
+        // panel
+        int panelW = 380, panelH = 360;
+        int panelX = (w - panelW) / 2;
+        int panelY = (h - panelH) / 2;
+        SDL_Rect panelRc = {panelX, panelY, panelW, panelH};
+        SDL_SetRenderDrawColor(g_sdlRdr, 21, 21, 21, 250);
+        SDL_RenderFillRect(g_sdlRdr, &panelRc);
+        // border
+        SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 25);
+        SDL_RenderDrawRect(g_sdlRdr, &panelRc);
+
+        // title
+        g_text.drawText(panelX + 20, panelY + 16, "Settings", 16, 255, 255, 255);
+
+        // close button
+        svgicon::draw(g_sdlRdr, "close", panelX + panelW - 22, panelY + 22, 18, 161, 161, 166, 200);
+
+        // setting rows
+        int toggleVals[5] = {0, 0, g_cfg.resume, 0, g_cfg.subAutoLoad};
+        const char* rowLabels[] = {
+            "Hardware Decode (requires restart)",
+            "Volume Normalization",
+            "Resume Playback",
+            "Auto Next",
+            "Subtitle Auto-Load",
+        };
+        int rowY = panelY + 55;
+        for (int i = 0; i < 5; ++i) {
+            g_text.drawText(panelX + 20, rowY + 4, rowLabels[i], 13, 200, 200, 200);
+
+            // toggle switch
+            int swX = panelX + panelW - 60;
+            int swW = 40, swH = 20;
+            bool on = (toggleVals[i] != 0);
+            SDL_Rect swRc = {swX, rowY, swW, swH};
+            SDL_SetRenderDrawColor(g_sdlRdr, on ? 37 : 80, on ? 99 : 80, on ? 235 : 80, 255);
+            SDL_RenderFillRect(g_sdlRdr, &swRc);
+            // thumb
+            int thumbX = on ? swX + swW - swH : swX;
+            SDL_Rect tRc = {thumbX + 2, rowY + 2, swH - 4, swH - 4};
+            SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 255);
+            SDL_RenderFillRect(g_sdlRdr, &tRc);
+
+            rowY += 44;
+        }
+
+        // language row
+        g_text.drawText(panelX + 20, rowY + 4, "Language", 13, 200, 200, 200);
+        const char* langs[] = {"CN", "EN", "JP"};
+        for (int i = 0; i < 3; ++i) {
+            int lx = panelX + panelW - 130 + i * 40;
+            SDL_Rect lr = {lx, rowY, 34, 22};
+            SDL_SetRenderDrawColor(g_sdlRdr, 37, 99, 235, 255);
+            SDL_RenderFillRect(g_sdlRdr, &lr);
+            g_text.drawText(lx + 8, rowY + 3, langs[i], 11, 255, 255, 255);
+        }
+        rowY += 36;
+
+        // theme row
+        g_text.drawText(panelX + 20, rowY + 4, "Theme", 13, 200, 200, 200);
+        const char* themes[] = {"Dark", "Light"};
+        for (int i = 0; i < 2; ++i) {
+            int lx = panelX + panelW - 100 + i * 50;
+            SDL_Rect tr = {lx, rowY, 44, 22};
+            SDL_SetRenderDrawColor(g_sdlRdr, i == 0 ? 37 : 80, i == 0 ? 99 : 80, i == 0 ? 235 : 80, 255);
+            SDL_RenderFillRect(g_sdlRdr, &tr);
+            g_text.drawText(lx + 6, rowY + 3, themes[i], 11, 255, 255, 255);
+        }
     }
 
     // --- toast notification ---
