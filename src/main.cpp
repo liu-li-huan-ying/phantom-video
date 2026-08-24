@@ -243,7 +243,6 @@ auto args = utf8Args();
           if (player.openFile(p)) {
             loadExternalSubtitle(player, p, &vrender);
             thumbnail.open(p);
-            panel.clearThumbnailCache();
             bool resumed = false;
             if (cfg.resume) {
                 auto it = cfg.history.find(p);
