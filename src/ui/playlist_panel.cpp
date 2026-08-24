@@ -338,11 +338,15 @@ void PlaylistPanel::draw(int currentIndex, int winW, int winH) {
     if (playlist_ && playlist_->size() > 0) {
         int visStart = std::max(0, -scrollOffset_ / kItemH);
         int visEnd = std::min(totalItems, (visibleH + scrollOffset_) / kItemH + 1);
-        if (visStart < visEnd) {
+        // 上下各预留 4 个缓冲项（滚动时已有缩略图）
+        const int kBuf = 4;
+        int rangeStart = std::max(0, visStart - kBuf);
+        int rangeEnd = std::min(totalItems, visEnd + kBuf);
+        if (rangeStart < rangeEnd) {
             startWorker();
             std::vector<std::string> visPaths;
             std::vector<int> visIndices;
-            for (int i = visStart; i < visEnd; ++i) {
+            for (int i = rangeStart; i < rangeEnd; ++i) {
                 visPaths.push_back(playlist_->fileAt(i));
                 visIndices.push_back(i);
             }
