@@ -307,6 +307,7 @@ void PlaylistPanel::clearThumbnailCache() {
         worker_.cachedIndices.clear();
     }
     worker_.nextIdx.store(0);
+    lastReqStart_ = lastReqEnd_ = -1;
 }
 
 void PlaylistPanel::evictOldThumbnails() {
@@ -382,15 +383,16 @@ void PlaylistPanel::draw(int currentIndex, int winW, int winH) {
         std::string filename = std::filesystem::path(playlist_->fileAt(i)).filename().string();
         drawItem(panelX, y, i, filename, isActive, isHover, pw);
     }
-    // M33: 请求可见区域缩略图
+    // M33: 请求可见区域缩略图（只在范围变化时才请求，避免每帧重置nextIdx）
     if (playlist_ && playlist_->size() > 0) {
         int visStart = std::max(0, -scrollOffset_ / kItemH);
         int visEnd = std::min(totalItems, (visibleH + scrollOffset_) / kItemH + 1);
-        // 上下各预留 4 个缓冲项（滚动时已有缩略图）
         const int kBuf = 4;
         int rangeStart = std::max(0, visStart - kBuf);
         int rangeEnd = std::min(totalItems, visEnd + kBuf);
-        if (rangeStart < rangeEnd) {
+        if (rangeStart < rangeEnd && (rangeStart != lastReqStart_ || rangeEnd != lastReqEnd_)) {
+            lastReqStart_ = rangeStart;
+            lastReqEnd_ = rangeEnd;
             startWorker();
             std::vector<std::string> visPaths;
             std::vector<int> visIndices;

@@ -101,6 +101,7 @@ private:
     bool scrollbarDragging_ = false;
     int scrollbarDragOffset_ = 0;
     SDL_Rect scrollbarRect_{ 0, 0, 0, 0 };
+    int lastReqStart_ = -1, lastReqEnd_ = -1;
 
     void startWorker();
     void stopWorker();
