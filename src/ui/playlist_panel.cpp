@@ -403,25 +403,6 @@ void PlaylistPanel::draw(int currentIndex, int winW, int winH) {
     }
     SDL_RenderSetClipRect(renderer_, nullptr);
 
-    // 滚动条（超过 15 项才显示）
-    if (totalItems > 15 && contentH > visibleH) {
-        float targetAlpha = (SDL_GetTicks() - lastScrollTick_ < 2000) ? 1.0f : 0.0f;
-        if (scrollbarAlpha_ < targetAlpha)
-            scrollbarAlpha_ = std::min(1.0f, scrollbarAlpha_ + 0.08f);
-        else if (scrollbarAlpha_ > targetAlpha)
-            scrollbarAlpha_ = std::max(0.0f, scrollbarAlpha_ - 0.04f);
-
-        if (scrollbarAlpha_ > 0.01f) {
-            int sbH = std::max(30, (int)((float)visibleH / contentH * visibleH));
-            int sbY = itemsY + (int)((float)scrollOffset_ / contentH * visibleH);
-            int sbW = 4;
-            int sbR = 2;
-            Uint8 alpha = (Uint8)(160 * scrollbarAlpha_);
-            fillRR(renderer_, panelX + pw - sbW - 4, sbY, sbW, sbH, sbR,
-                   255, 255, 255, alpha);
-        }
-    }
-
     // ---- Header（最后绘制，永远盖在条目之上）----
     SDL_Rect headerBg{ panelX, panelTop, pw, kHeaderH };
     SDL_SetRenderDrawColor(renderer_, kHeaderBg.r, kHeaderBg.g, kHeaderBg.b, kHeaderBg.a);
@@ -442,6 +423,26 @@ void PlaylistPanel::draw(int currentIndex, int winW, int winH) {
         svgicon::draw(renderer_, "close", bx + 14, by + 14, 16,
                       closeHover ? 255 : 212, closeHover ? 255 : 212,
                       closeHover ? 255 : 216, 220);
+    }
+
+    // 滚动条（头部之后绘制，确保在最上层）
+    if (contentH > visibleH && totalItems > 0) {
+        float targetAlpha = (SDL_GetTicks() - lastScrollTick_ < 2000) ? 1.0f : 0.0f;
+        if (scrollbarAlpha_ < targetAlpha)
+            scrollbarAlpha_ = std::min(1.0f, scrollbarAlpha_ + 0.08f);
+        else if (scrollbarAlpha_ > targetAlpha)
+            scrollbarAlpha_ = std::max(0.0f, scrollbarAlpha_ - 0.04f);
+
+        if (scrollbarAlpha_ > 0.01f) {
+            int sbH = std::max(30, (int)((float)visibleH / contentH * visibleH));
+            int sbY = itemsY + (int)((float)scrollOffset_ / contentH * visibleH);
+            int sbW = 6;
+            Uint8 alpha = (Uint8)(180 * scrollbarAlpha_);
+            SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+            SDL_SetRenderDrawColor(renderer_, 255, 255, 255, alpha);
+            SDL_Rect sbRect{ panelX + pw - sbW - 6, sbY, sbW, sbH };
+            SDL_RenderFillRect(renderer_, &sbRect);
+        }
     }
 
     // 拖拽调整宽度手柄（面板左边缘）—— kResizeW=0 时不可见
