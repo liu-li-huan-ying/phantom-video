@@ -90,6 +90,9 @@ void PlaylistPanel::toggle() {
         resizing_ = false;
         shrinkPending_ = true;
         stopWorker();
+    } else {
+        lastScrollTick_ = SDL_GetTicks();  // 打开时立即显示滚动条
+        scrollbarAlpha_ = 0.0f;
     }
     if (wasOpen) LOG_INFO("UI", "playlist closing anim -> window shrink pending");
 }
