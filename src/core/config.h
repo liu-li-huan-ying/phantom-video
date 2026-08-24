@@ -12,6 +12,10 @@ struct AppConfig {
     int subAutoLoad = 1;   // 字幕自动加载
     int thumbCache = 1;    // 缩略图磁盘缓存
     float subScale = 1.0f; // 字幕缩放系数
+    // 窗口位置（物理像素；x==INVALID_POS 表示未记忆）
+    static const int INVALID_POS = -32001;
+    int posX = INVALID_POS, posY = INVALID_POS;
+    int posW = 0, posH = 0;
 };
 
 std::string configPath();

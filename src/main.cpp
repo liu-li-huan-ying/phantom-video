@@ -177,6 +177,16 @@ static int sbLeftX()   { return S(SB_MARGIN); }
 static int sbRightX()  { return g_ui.winW - S(SB_MARGIN); }
 static int sbWidth()   { return sbRightX() - sbLeftX(); }
 
+// ---- 窗口位置保存（须在窗口销毁前调用） ----
+static void saveWindowPos(HWND hwnd) {
+    if (!IsWindow(hwnd)) return;
+    if (g_ui.fullscreen || g_ui.miniMode || IsIconic(hwnd)) return;
+    RECT wr;
+    if (!GetWindowRect(hwnd, &wr)) return;
+    g_cfg.posX = wr.left; g_cfg.posY = wr.top;
+    g_cfg.posW = wr.right - wr.left; g_cfg.posH = wr.bottom - wr.top;
+}
+
 static void showToast(const char* msg) {
     std::snprintf(g_ui.toastMsg, sizeof(g_ui.toastMsg), "%s", msg);
     g_ui.toastActive = true;
@@ -759,6 +769,10 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     }
 
+    case WM_CLOSE:
+        saveWindowPos(hwnd);          // 销毁前抓取位置
+        DestroyWindow(hwnd);
+        return 0;
     case WM_DESTROY:
         PostQuitMessage(0);
         return 0;
@@ -1452,9 +1466,17 @@ int main(int argc, char** argv) {
         ReleaseDC(nullptr, dc);
         LOG_INFO("MAIN", "initial dpi scale=%.2f", g_dpi);
     }
+    // 记忆位置优先；无效则默认尺寸 + 系统级联位置
+    int winX = CW_USEDEFAULT, winY = CW_USEDEFAULT;
+    int winW = S(960), winH = S(540);
+    if (g_cfg.posX != AppConfig::INVALID_POS && g_cfg.posW > 0) {
+        winX = g_cfg.posX; winY = g_cfg.posY;
+        winW = g_cfg.posW; winH = g_cfg.posH;
+        LOG_INFO("MAIN", "restore window pos (%d,%d) %dx%d", winX, winY, winW, winH);
+    }
     g_parentHwnd = CreateWindowExW(WS_EX_ACCEPTFILES,
         wc.lpszClassName, L"VPlayer", WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, CW_USEDEFAULT, S(960), S(540),
+        winX, winY, winW, winH,
         nullptr, nullptr, wc.hInstance, nullptr);
     if (!g_parentHwnd) { LOG_ERROR("MAIN", "CreateWindow failed"); return 1; }
     updateDpiForWindow(g_parentHwnd);   // 以窗口所在显示器为准精调
@@ -1580,7 +1602,7 @@ int main(int argc, char** argv) {
         Sleep(1);
     }
 
-    // 退出前保存最终进度
+    // 退出前保存最终进度 + 窗口位置（WM_CLOSE 已存，此处兜底）
     if (g_mpv && g_mpv->hasMedia()) {
         double pos = g_mpv->clock();
         double dur = g_mpv->duration();
@@ -1588,6 +1610,7 @@ int main(int argc, char** argv) {
         if (!cur.empty() && dur > 0)
             g_cfg.history[cur] = (pos < dur - 2.0) ? pos : 0.0;
     }
+    saveWindowPos(g_parentHwnd);
 
     g_thumbQuit.store(true);
     if (g_thumbThread.joinable()) g_thumbThread.join();

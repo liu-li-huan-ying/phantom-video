@@ -60,6 +60,13 @@ bool loadConfig(const std::string& path, AppConfig& out) {
         } else if (line.rfind("subscale=", 0) == 0) {
             float s = (float)std::atof(line.c_str() + 9);
             if (s >= 0.5f && s <= 3.0f) out.subScale = s;
+        } else if (line.rfind("pos=", 0) == 0) {
+            int x, y, w, h;
+            if (sscanf(line.c_str() + 4, "%d,%d,%d,%d", &x, &y, &w, &h) == 4 &&
+                x > -32000 && y > -32000 && w > 200 && h > 150 &&
+                w < 20000 && h < 20000) {
+                out.posX = x; out.posY = y; out.posW = w; out.posH = h;
+            }
         } else if (line.rfind("hist=", 0) == 0) {
             std::size_t tab = line.find('\t', 5);
             if (tab != std::string::npos) {
@@ -84,6 +91,8 @@ bool saveConfig(const std::string& path, const AppConfig& cfg) {
     out << "subautoload=" << cfg.subAutoLoad << "\n";
     out << "thumbcache=" << cfg.thumbCache << "\n";
     out << "subscale=" << cfg.subScale << "\n";
+    if (cfg.posX != AppConfig::INVALID_POS && cfg.posW > 0)
+        out << "pos=" << cfg.posX << "," << cfg.posY << "," << cfg.posW << "," << cfg.posH << "\n";
     for (const auto& kv : cfg.history) {
         out << "hist=" << kv.first << "\t" << kv.second << "\n";
     }
