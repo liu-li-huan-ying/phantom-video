@@ -139,10 +139,32 @@ static const int SB_MARGIN = 20;
 static const float SPEED_PRESETS[] = {0.25f, 0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f, 3.0f};
 static const int SPEED_PRESET_COUNT = 8;
 
-static int sbTopY()    { return g_ui.winH - CONTROL_BAR_H; }
-static int sbTrackY()  { return sbTopY() + 10; }
-static int sbLeftX()   { return SB_MARGIN; }
-static int sbRightX()  { return g_ui.winW - SB_MARGIN; }
+// ---- DPI 缩放 ----
+// g_dpi = 当前显示器 DPI/96。像素度量(图标/边距/条高)经 S() 缩放；
+// 文字 pt 不缩放——GdiTextCache 内部已按 LOGPIXELSY 换算，双重缩放会过大。
+static float g_dpi = 1.0f;
+static int S(int v) { return (int)(v * g_dpi + 0.5f); }
+
+#ifndef WM_DPICHANGED
+#define WM_DPICHANGED 0x02E0
+#endif
+
+static void updateDpiForWindow(HWND hwnd) {
+    HMODULE u32 = GetModuleHandleW(L"user32.dll");
+    if (u32) {
+        using Fn = UINT(WINAPI*)(HWND);
+        auto f = (Fn)(void*)GetProcAddress(u32, "GetDpiForWindow");
+        if (f) { g_dpi = f(hwnd) / 96.0f; return; }
+    }
+    HDC dc = GetDC(nullptr);
+    g_dpi = GetDeviceCaps(dc, LOGPIXELSX) / 96.0f;
+    ReleaseDC(nullptr, dc);
+}
+
+static int sbTopY()    { return g_ui.winH - S(CONTROL_BAR_H); }
+static int sbTrackY()  { return sbTopY() + S(10); }
+static int sbLeftX()   { return S(SB_MARGIN); }
+static int sbRightX()  { return g_ui.winW - S(SB_MARGIN); }
 static int sbWidth()   { return sbRightX() - sbLeftX(); }
 
 static void showToast(const char* msg) {
@@ -212,10 +234,10 @@ static void playIndex(int idx, bool relative = false) {
 
 // ---- topbar icon hit test ----
 static int hitTestTopbarIcon(int mx, int my, int winW) {
-    if (my < 0 || my > ui::TOPBAR_H) return -1;
-    int iconY = ui::TOPBAR_H / 2;
-    int iconHalf = 12;
-    int rx = winW - 20;
+    if (my < 0 || my > S(ui::TOPBAR_H)) return -1;
+    int iconY = S(ui::TOPBAR_H) / 2;
+    int iconHalf = S(12);
+    int rx = winW - S(20);
     struct IDef { const char* id; int idIdx; };
     static const IDef icons[] = {
         {"close", 0}, {"maximize", 1}, {"minimize", 2},
@@ -225,7 +247,7 @@ static int hitTestTopbarIcon(int mx, int my, int winW) {
         if (mx >= rx - iconHalf && mx <= rx + iconHalf &&
             my >= iconY - iconHalf && my <= iconY + iconHalf)
             return icons[i].idIdx;
-        rx -= 34;
+        rx -= S(34);
     }
     return -1;
 }
@@ -244,6 +266,17 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             SDL_SetWindowPosition(g_sdlWin, pt.x, pt.y);
             SDL_SetWindowSize(g_sdlWin, rc.right, rc.bottom);
         }
+        return 0;
+    }
+    case WM_DPICHANGED: {
+        // 显示器 DPI 变化（拖到不同缩放屏/改系统缩放）
+        int newDpi = HIWORD(wp);
+        g_dpi = newDpi / 96.0f;
+        RECT* prc = (RECT*)lp;
+        SetWindowPos(hwnd, nullptr, prc->left, prc->top,
+                     prc->right - prc->left, prc->bottom - prc->top,
+                     SWP_NOZORDER | SWP_NOACTIVATE);
+        LOG_INFO("MAIN", "dpi changed to %d (scale %.2f)", newDpi, g_dpi);
         return 0;
     }
     case WM_MOVE: {
@@ -301,7 +334,7 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     g_ui.fullscreen = true;
                 } else {
                     SetWindowLongPtrW(hwnd, GWL_STYLE, sty | WS_OVERLAPPEDWINDOW);
-                    SetWindowPos(hwnd, nullptr, 100, 100, 960, 540,
+                    SetWindowPos(hwnd, nullptr, 100, 100, S(960), S(540),
                         SWP_FRAMECHANGED | SWP_NOZORDER);
                     g_ui.fullscreen = false;
                 }
@@ -326,18 +359,18 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         g_ui.mouseY = (short)HIWORD(lp);
 
         int barTop = sbTopY();
-        bool onSB = (g_ui.mouseY >= barTop - 6 && g_ui.mouseY <= barTop + 22 &&
+        bool onSB = (g_ui.mouseY >= barTop - S(6) && g_ui.mouseY <= barTop + S(22) &&
                      g_ui.mouseX >= sbLeftX()   && g_ui.mouseX <= sbRightX());
         g_ui.seekbarHover = onSB;
 
-        bool onTopbar = (g_ui.mouseY >= 0 && g_ui.mouseY <= ui::TOPBAR_H);
+        bool onTopbar = (g_ui.mouseY >= 0 && g_ui.mouseY <= S(ui::TOPBAR_H));
         g_ui.visible = true;
         g_ui.hideAt = SDL_GetTicks() + (onTopbar ? 4000 : ui::CTRLBAR_HIDE_MS);
 
         // volume slider drag
         if (g_ui.volumeDragging && g_mpv) {
-            int sliderW = ui::VOLSIDER_W;
-            int sliderX = g_ui.winW - 54 - sliderW - 10;
+            int sliderW = S(ui::VOLSIDER_W);
+            int sliderX = g_ui.winW - S(54) - sliderW - S(10);
             float ratio = (float)(g_ui.mouseX - sliderX) / sliderW;
             if (ratio < 0) ratio = 0; if (ratio > 1) ratio = 1;
             g_mpv->setVolume(ratio);
@@ -357,8 +390,9 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         int barTop = sbTopY();
 
         // --- topbar icon clicks ---
-        if (my >= 0 && my <= ui::TOPBAR_H) {
+        if (my >= 0 && my <= S(ui::TOPBAR_H)) {
             int icon = hitTestTopbarIcon(mx, my, g_ui.winW);
+            LOG_TRACE("MAIN", "topbar click mx=%d my=%d winW=%d icon=%d", mx, my, g_ui.winW, icon);
             switch (icon) {
             case 0: // close
                 PostMessage(hwnd, WM_CLOSE, 0, 0);
@@ -376,7 +410,7 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     g_ui.fullscreen = true;
                 } else {
                     SetWindowLongPtrW(hwnd, GWL_STYLE, sty | WS_OVERLAPPEDWINDOW);
-                    SetWindowPos(hwnd, nullptr, 100, 100, 960, 540,
+                    SetWindowPos(hwnd, nullptr, 100, 100, S(960), S(540),
                         SWP_FRAMECHANGED | SWP_NOZORDER);
                     g_ui.fullscreen = false;
                 }
@@ -410,7 +444,7 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
 
         // --- seekbar ---
-        if (g_mpv && my >= barTop - 6 && my <= barTop + 22 &&
+        if (g_mpv && my >= barTop - S(6) && my <= barTop + S(22) &&
             mx >= sbLeftX() && mx <= sbRightX() && g_mpv->duration() > 0) {
             g_ui.seekingDrag = true;
             double ratio = (double)(mx - sbLeftX()) / sbWidth();
@@ -420,9 +454,9 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
         // --- speed popup ---
         else if (g_ui.speedMenuOpen) {
-            int menuW = 80, itemH = 30;
-            int menuX = g_ui.winW - 150;
-            int menuY = barTop - SPEED_PRESET_COUNT * itemH - 5;
+            int menuW = S(80), itemH = S(30);
+            int menuX = g_ui.winW - S(150);
+            int menuY = barTop - SPEED_PRESET_COUNT * itemH - S(5);
             if (mx >= menuX && mx <= menuX + menuW && my >= menuY && my <= menuY + SPEED_PRESET_COUNT * itemH) {
                 int idx = (my - menuY) / itemH;
                 if (idx >= 0 && idx < SPEED_PRESET_COUNT) {
@@ -435,13 +469,13 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             g_ui.speedMenuOpen = false;
         }
         // --- speed label click (toggle speed popup) ---
-        else if (g_mpv && mx >= g_ui.winW - 110 && mx <= g_ui.winW - 70 &&
-                 my >= barTop + 36 && my <= barTop + 60) {
+        else if (g_mpv && mx >= g_ui.winW - S(128) && mx <= g_ui.winW - S(84) &&
+                 my >= barTop + S(36) && my <= barTop + S(62)) {
             g_ui.speedMenuOpen = !g_ui.speedMenuOpen;
         }
         // --- settings gear click ---
-        else if (g_mpv && mx >= g_ui.winW - 88 && mx <= g_ui.winW - 68 &&
-                 my >= barTop + 40 && my <= barTop + 60) {
+        else if (g_mpv && mx >= g_ui.winW - S(100) && mx <= g_ui.winW - S(76) &&
+                 my >= barTop + S(38) && my <= barTop + S(62)) {
             g_ui.settingsOpen = !g_ui.settingsOpen;
         }
         // --- settings modal backdrop click (close) ---
@@ -449,16 +483,16 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             g_ui.settingsOpen = false;
         }
         // --- volume icon click ---
-        else if (g_mpv && mx >= g_ui.winW - 64 && mx <= g_ui.winW - 44 &&
-                 my >= barTop + 40 && my <= barTop + 60) {
+        else if (g_mpv && mx >= g_ui.winW - S(66) && mx <= g_ui.winW - S(42) &&
+                 my >= barTop + S(38) && my <= barTop + S(62)) {
             g_ui.volumeSliderOpen = !g_ui.volumeSliderOpen;
         }
         // --- volume slider drag ---
         else if (g_ui.volumeSliderOpen && g_mpv) {
-            int sliderW = ui::VOLSIDER_W;
-            int sliderX = g_ui.winW - 54 - sliderW - 10;
-            int sliderY = barTop + 50 - 2;
-            if (mx >= sliderX && mx <= sliderX + sliderW && my >= sliderY - 8 && my <= sliderY + 12) {
+            int sliderW = S(ui::VOLSIDER_W);
+            int sliderX = g_ui.winW - S(54) - sliderW - S(10);
+            int sliderY = barTop + S(50) - S(2);
+            if (mx >= sliderX && mx <= sliderX + sliderW && my >= sliderY - S(8) && my <= sliderY + S(12)) {
                 g_ui.volumeDragging = true;
                 float ratio = (float)(mx - sliderX) / sliderW;
                 if (ratio < 0) ratio = 0; if (ratio > 1) ratio = 1;
@@ -470,13 +504,13 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             }
         }
         // --- prev / next 按钮（传输区两侧） ---
-        else if (g_mpv && my >= barTop + 36 && my <= barTop + 64) {
+        else if (g_mpv && my >= barTop + S(36) && my <= barTop + S(64)) {
             int cx0 = g_ui.winW / 2;
-            if (mx >= cx0 - 64 && mx <= cx0 - 36) {          // prev
+            if (mx >= cx0 - S(64) && mx <= cx0 - S(36)) {          // prev
                 int idx = playlistIndexOf(g_mpv->path());
                 if (idx > 0) { playIndex(idx - 1); showToast("Previous"); }
             }
-            else if (mx >= cx0 + 36 && mx <= cx0 + 64) {     // next
+            else if (mx >= cx0 + S(36) && mx <= cx0 + S(64)) {     // next
                 int idx = playlistIndexOf(g_mpv->path());
                 if (idx >= 0 && idx + 1 < (int)g_playlist.size()) {
                     playIndex(idx + 1); showToast("Next");
@@ -484,16 +518,16 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     showToast("No next track");
                 }
             }
-            else if (mx >= cx0 - 21 && mx <= cx0 + 21) {     // play/pause
+            else if (mx >= cx0 - S(21) && mx <= cx0 + S(21)) {     // play/pause
                 g_mpv->togglePause();
             }
             // 其余空隙不处理
         }
         // --- 播放列表面板区域 ---
-        else if (g_ui.playlistOpen && mx >= g_ui.winW - 320) {
-            int panelY = ui::TOPBAR_H;
-            int itemH = 52;
-            int rel = my - (panelY + 45) + g_ui.playlistScroll;
+        else if (g_ui.playlistOpen && mx >= g_ui.winW - S(320)) {
+            int panelY = S(ui::TOPBAR_H);
+            int itemH = S(52);
+            int rel = my - (panelY + S(45)) + g_ui.playlistScroll;
             if (rel >= 0) {
                 int itemIdx = rel / itemH;
                 if (itemIdx < (int)g_playlist.size())
@@ -527,11 +561,12 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         short d = GET_WHEEL_DELTA_WPARAM(wp);
 
         // 播放列表面板区域：滚动列表
-        if (g_ui.playlistOpen && pt.x >= g_ui.winW - 320) {
-            int panelH = g_ui.winH - ui::TOPBAR_H;
-            int contentH = (int)g_playlist.size() * 52;
-            int viewH = panelH - 55;
-            g_ui.playlistScroll -= (d > 0 ? 52 : -52) * 2;
+        if (g_ui.playlistOpen && pt.x >= g_ui.winW - S(320)) {
+            int panelH = g_ui.winH - S(ui::TOPBAR_H);
+            int contentH = (int)g_playlist.size() * S(52);
+            int viewH = panelH - S(55);
+            int step = S(52) * 2;
+            g_ui.playlistScroll -= (d > 0 ? step : -step);
             if (g_ui.playlistScroll < 0) g_ui.playlistScroll = 0;
             if (contentH > viewH && g_ui.playlistScroll > contentH - viewH)
                 g_ui.playlistScroll = contentH - viewH;
@@ -663,26 +698,26 @@ static void renderOverlay() {
         int w = g_ui.winW, h = g_ui.winH;
 
         // topbar still visible
-        drawGradientBar(g_sdlRdr, 0, 0, w, ui::TOPBAR_H, 11, 11, 11, 220, 0);
+        drawGradientBar(g_sdlRdr, 0, 0, w, S(ui::TOPBAR_H), 11, 11, 11, 220, 0);
         // title
-        g_text.drawText(20, 14, "VPlayer", 14, 255, 255, 255);
+        g_text.drawText(S(20), S(14), "VPlayer", 14, 255, 255, 255);
         // topbar icons
-        int iconY = ui::TOPBAR_H / 2;
-        int rx = w - 20;
-        svgicon::draw(g_sdlRdr, "close",    rx, iconY, 20, 255, 255, 255, 200); rx -= 34;
-        svgicon::draw(g_sdlRdr, "maximize", rx, iconY, 20, 161, 161, 166, 200); rx -= 34;
-        svgicon::draw(g_sdlRdr, "minimize", rx, iconY, 20, 161, 161, 166, 200);
+        int iconY = S(ui::TOPBAR_H) / 2;
+        int rx = w - S(20);
+        svgicon::draw(g_sdlRdr, "close",    rx, iconY, S(20), 255, 255, 255, 200); rx -= S(34);
+        svgicon::draw(g_sdlRdr, "maximize", rx, iconY, S(20), 161, 161, 166, 200); rx -= S(34);
+        svgicon::draw(g_sdlRdr, "minimize", rx, iconY, S(20), 161, 161, 166, 200);
 
         // logo
-        svgicon::draw(g_sdlRdr, "play", w / 2, h / 2 - 80, 64, 37, 99, 235, 255);
-        g_text.drawText(w / 2 - 40, h / 2 - 30, "VPlayer", 28, 255, 255, 255);
+        svgicon::draw(g_sdlRdr, "play", w / 2, h / 2 - S(80), S(64), 37, 99, 235, 255);
+        g_text.drawText(w / 2 - S(40), h / 2 - S(30), "VPlayer", 28, 255, 255, 255);
 
         // drop zone (dashed border)
-        int dzW = 400, dzH = 120;
-        int dzX = (w - dzW) / 2, dzY = h / 2 + 10;
+        int dzW = S(400), dzH = S(120);
+        int dzX = (w - dzW) / 2, dzY = h / 2 + S(10);
         SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 30);
         // draw dashed border (approximate with segments)
-        int dashLen = 8, gapLen = 5;
+        int dashLen = S(8), gapLen = S(5);
         for (int side = 0; side < 4; ++side) {
             int x0, y0, x1, y1;
             if (side == 0) { x0 = dzX; y0 = dzY; x1 = dzX + dzW; y1 = dzY; }
@@ -701,17 +736,17 @@ static void renderOverlay() {
                 pos = segEnd + gapLen;
             }
         }
-        g_text.drawText(w / 2 - 60, dzY + 30, "Drop video here", 13, 161, 161, 166);
-        g_text.drawText(w / 2 - 55, dzY + 55, "or press Ctrl+O", 12, 100, 100, 100);
+        g_text.drawText(w / 2 - S(60), dzY + S(30), "Drop video here", 13, 161, 161, 166);
+        g_text.drawText(w / 2 - S(55), dzY + S(55), "or press Ctrl+O", 12, 100, 100, 100);
 
         // 播放队列网格（当前文件夹扫描结果）
         if (!g_playlist.empty()) {
-            g_text.drawText(w / 2 - 60, dzY + dzH + 30, "Playlist", 14, 161, 161, 166);
-            int cardW = 140, cardH = 80, gap = 12;
+            g_text.drawText(w / 2 - S(60), dzY + dzH + S(30), "Playlist", 14, 161, 161, 166);
+            int cardW = S(140), cardH = S(80), gap = S(12);
             int cols = std::min(4, (int)g_playlist.size());
             int gridW = cols * cardW + (cols - 1) * gap;
             int gridX = (w - gridW) / 2;
-            int gridY = dzY + dzH + 55;
+            int gridY = dzY + dzH + S(55);
             int idx = 0;
             for (size_t pi = 0; pi < g_playlist.size() && idx < 8; ++pi, ++idx) {
                 int col = idx % cols, row = idx / cols;
@@ -726,7 +761,7 @@ static void renderOverlay() {
                 SDL_RenderDrawRect(g_sdlRdr, &cardRc);
                 std::string fn = std::filesystem::path(g_playlist[pi]).filename().string();
                 if (fn.size() > 18) fn = fn.substr(0, 15) + "...";
-                g_text.drawText(cx + 8, cy + 10, fn, 11, isCur ? 255 : 200, isCur ? 255 : 200, isCur ? 255 : 200);
+                g_text.drawText(cx + S(8), cy + S(10), fn, 11, isCur ? 255 : 200, isCur ? 255 : 200, isCur ? 255 : 200);
                 double hpos = 0;
                 auto hit = g_cfg.history.find(g_playlist[pi]);
                 if (hit != g_cfg.history.end()) hpos = hit->second;
@@ -735,12 +770,12 @@ static void renderOverlay() {
                     std::snprintf(timeBuf, sizeof(timeBuf), "@%02d:%02d",
                         (int)(hpos / 60), (int)hpos % 60);
                 }
-                g_text.drawText(cx + 8, cy + 35, timeBuf, 10, 100, 100, 100);
+                g_text.drawText(cx + S(8), cy + S(35), timeBuf, 10, 100, 100, 100);
             }
         }
 
         // keyboard hints
-        g_text.drawText(20, h - 30, "Space=Play/Pause  Left/Right=Seek  F=Fullscreen  M=Mute  [/]=Speed", 10, 80, 80, 80);
+        g_text.drawText(S(20), h - S(30), "Space=Play/Pause  Left/Right=Seek  F=Fullscreen  M=Mute  [/]=Speed", 10, 80, 80, 80);
 
         SDL_RenderPresent(g_sdlRdr);
         return;
@@ -751,39 +786,39 @@ static void renderOverlay() {
 
     // --- topbar (gradient opaque->transparent from top) ---
     {
-        drawGradientBar(g_sdlRdr, 0, 0, w, ui::TOPBAR_H, 11, 11, 11, 220, 0);
+        drawGradientBar(g_sdlRdr, 0, 0, w, S(ui::TOPBAR_H), 11, 11, 11, 220, 0);
 
         // title (left)
         std::string title = g_mpv->title();
         if (title.empty()) title = "VPlayer";
         if (title.size() > 55) title = title.substr(0, 52) + "...";
-        g_text.drawText(20, 14, title, 14, 255, 255, 255);
+        g_text.drawText(S(20), S(14), title, 14, 255, 255, 255);
 
         // icons (right) - same order as design mockup
-        int iconY = ui::TOPBAR_H / 2;
-        int rx = w - 20;
-        svgicon::draw(g_sdlRdr, "close",    rx, iconY, 20, 255, 255, 255, 200); rx -= 34;
-        svgicon::draw(g_sdlRdr, "maximize", rx, iconY, 20, 161, 161, 166, 200); rx -= 34;
-        svgicon::draw(g_sdlRdr, "minimize", rx, iconY, 20, 161, 161, 166, 200); rx -= 34;
-        svgicon::draw(g_sdlRdr, "list",     rx, iconY, 20, 161, 161, 166, 200); rx -= 34;
-        svgicon::draw(g_sdlRdr, "pip",      rx, iconY, 20, 161, 161, 166, 200); rx -= 34;
-        svgicon::draw(g_sdlRdr, "camera",   rx, iconY, 20, 161, 161, 166, 200);
+        int iconY = S(ui::TOPBAR_H) / 2;
+        int rx = w - S(20);
+        svgicon::draw(g_sdlRdr, "close",    rx, iconY, S(20), 255, 255, 255, 200); rx -= S(34);
+        svgicon::draw(g_sdlRdr, "maximize", rx, iconY, S(20), 161, 161, 166, 200); rx -= S(34);
+        svgicon::draw(g_sdlRdr, "minimize", rx, iconY, S(20), 161, 161, 166, 200); rx -= S(34);
+        svgicon::draw(g_sdlRdr, "list",     rx, iconY, S(20), 161, 161, 166, 200); rx -= S(34);
+        svgicon::draw(g_sdlRdr, "pip",      rx, iconY, S(20), 161, 161, 166, 200); rx -= S(34);
+        svgicon::draw(g_sdlRdr, "camera",   rx, iconY, S(20), 161, 161, 166, 200);
     }
 
     int barTop = sbTopY();
 
     // --- gradient background (top transparent -> bottom opaque) ---
-    drawGradientBar(g_sdlRdr, 0, barTop, w, 60, 11, 11, 11, 0, 220);
+    drawGradientBar(g_sdlRdr, 0, barTop, w, S(60), 11, 11, 11, 0, 220);
     // solid bottom portion
-    SDL_Rect solidRc = {0, barTop + 60, w, CONTROL_BAR_H - 60};
+    SDL_Rect solidRc = {0, barTop + S(60), w, S(CONTROL_BAR_H) - S(60)};
     SDL_SetRenderDrawColor(g_sdlRdr, 11, 11, 11, 240);
     SDL_RenderFillRect(g_sdlRdr, &solidRc);
 
     // --- seekbar (at very top of bar) ---
     if (dur > 0) {
         int tx = sbLeftX(), tw = sbWidth();
-        int ty = barTop + 4;
-        int th = g_ui.seekbarHover ? ui::SEEKBAR_TRACK_H_HOVER : ui::SEEKBAR_TRACK_H;
+        int ty = barTop + S(4);
+        int th = g_ui.seekbarHover ? S(ui::SEEKBAR_TRACK_H_HOVER) : S(ui::SEEKBAR_TRACK_H);
 
         // track background
         SDL_Rect bgRc = {tx, ty, tw, th};
@@ -811,8 +846,8 @@ static void renderOverlay() {
         if (g_ui.seekbarHover || g_ui.seekingDrag) {
             int cx = tx + progW;
             int cy = ty + th / 2;
-            int r = ui::SEEKTHUMB_D / 2;
-            SDL_Rect tRc = {cx - r, cy - r, ui::SEEKTHUMB_D, ui::SEEKTHUMB_D};
+            int r = S(ui::SEEKTHUMB_D) / 2;
+            SDL_Rect tRc = {cx - r, cy - r, S(ui::SEEKTHUMB_D), S(ui::SEEKTHUMB_D)};
             SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 255);
             SDL_RenderFillRect(g_sdlRdr, &tRc);
         }
@@ -820,11 +855,11 @@ static void renderOverlay() {
 
     // --- transport row: centered prev/play/next ---
     {
-        int cy = barTop + 50;
-        svgicon::draw(g_sdlRdr, "prev", w / 2 - 50, cy, 20, 161, 161, 166, 200);
+        int cy = barTop + S(50);
+        svgicon::draw(g_sdlRdr, "prev", w / 2 - S(50), cy, S(20), 161, 161, 166, 200);
         const char* icon = (g_mpv->state() == MpvBackend::State::Paused) ? "play" : "pause";
-        svgicon::draw(g_sdlRdr, icon, w / 2, cy, ui::PLAYBTN_SIZE, 255, 255, 255, 255);
-        svgicon::draw(g_sdlRdr, "next", w / 2 + 50, cy, 20, 161, 161, 166, 200);
+        svgicon::draw(g_sdlRdr, icon, w / 2, cy, S(ui::PLAYBTN_SIZE), 255, 255, 255, 255);
+        svgicon::draw(g_sdlRdr, "next", w / 2 + S(50), cy, S(20), 161, 161, 166, 200);
     }
 
     // --- left side: time + title ---
@@ -833,55 +868,48 @@ static void renderOverlay() {
         formatTime(cur, sizeof(cur), pos);
         formatTime(tot, sizeof(tot), dur);
         std::snprintf(ts, sizeof(ts), "%s / %s", cur, tot);
-        g_text.drawText(20, barTop + 38, ts, 14, 161, 161, 166);
+        g_text.drawText(S(20), barTop + S(38), ts, 14, 161, 161, 166);
     }
     {
         std::string title = g_mpv->title();
         if (title.empty()) title = std::filesystem::path(g_mpv->path()).filename().string();
         if (title.size() > 50) title = title.substr(0, 47) + "...";
-        g_text.drawText(20, barTop + 60, title, 13, 255, 255, 255);
+        g_text.drawText(S(20), barTop + S(60), title, 13, 255, 255, 255);
     }
 
     // --- right side: HW badge + speed + gear + volume + fullscreen ---
+    // 布局基准(自右缘): 全屏@w-S(20) 音量@w-S(54) 齿轮@w-S(88)
+    // 速度文本左锚@w-S(126) HW徽标@w-S(170)；命中区与此一一对应
     {
-        int rx = w - 20;
-        // fullscreen (rightmost)
+        int cyI = barTop + S(50);
         const char* fid = g_ui.fullscreen ? "exitfull" : "full";
-        svgicon::draw(g_sdlRdr, fid, rx, barTop + 50, 20, 161, 161, 166, 200);
-        rx -= 34;
-        // volume
+        svgicon::draw(g_sdlRdr, fid, w - S(20), cyI, S(20), 161, 161, 166, 200);
         const char* vid = g_mpv->muted() ? "mute" : "volume";
-        svgicon::draw(g_sdlRdr, vid, rx, barTop + 50, 20, 161, 161, 166, 200);
-        rx -= 34;
-        // settings gear
-        svgicon::draw(g_sdlRdr, "gear", rx, barTop + 50, 20, 161, 161, 166, 200);
-        rx -= 34;
-        // speed label
+        svgicon::draw(g_sdlRdr, vid, w - S(54), cyI, S(20), 161, 161, 166, 200);
+        svgicon::draw(g_sdlRdr, "gear", w - S(88), cyI, S(20), 161, 161, 166, 200);
         {
             char spd[16];
             float s = g_mpv->speed();
             if (s == (int)s) std::snprintf(spd, sizeof(spd), "%.0fx", s);
             else             std::snprintf(spd, sizeof(spd), "%.1fx", s);
-            g_text.drawText(rx - 16, barTop + 42, spd, 12, 161, 161, 166);
+            g_text.drawText(w - S(126), barTop + S(42), spd, 12, 161, 161, 166);
         }
-        rx -= 40;
-        // HW badge
         if (g_mpv->hwDecodeActive()) {
-            g_text.drawText(rx, barTop + 42, "[HW]", 11, 37, 99, 235);
+            g_text.drawText(w - S(170), barTop + S(42), "[HW]", 11, 37, 99, 235);
         }
     }
 
     // --- buffering indicator ---
     if (g_mpv->bufferFill() < 0.5) {
-        g_text.drawText(w / 2 - 20, barTop + 75, "Buffering...", 12, 161, 161, 166);
+        g_text.drawText(w / 2 - S(30), barTop + S(75), "Buffering...", 12, 161, 161, 166);
     }
 
     // --- speed popup menu ---
     if (g_ui.speedMenuOpen) {
-        int menuW = 80, itemH = 30;
+        int menuW = S(80), itemH = S(30);
         int menuH = SPEED_PRESET_COUNT * itemH;
-        int menuX = w - 150;
-        int menuY = barTop - menuH - 5;
+        int menuX = w - S(150);
+        int menuY = barTop - menuH - S(5);
 
         // background
         SDL_Rect bgRc = {menuX, menuY, menuW, menuH};
@@ -904,17 +932,17 @@ static void renderOverlay() {
             float sp = SPEED_PRESETS[i];
             if (sp == (int)sp) std::snprintf(label, sizeof(label), "%.0fx", sp);
             else               std::snprintf(label, sizeof(label), "%.2fx", sp);
-            g_text.drawText(menuX + 20, iy + 7, label, 13, 255, 255, 255);
+            g_text.drawText(menuX + S(20), iy + S(7), label, 13, 255, 255, 255);
         }
     }
 
     // --- volume slider (appears left of volume icon) ---
     if (g_ui.volumeSliderOpen || g_ui.volumeDragging) {
-        int sliderW = ui::VOLSIDER_W;
-        int sliderH = 4;
-        int volIconX = w - 54;
-        int sliderX = volIconX - sliderW - 10;
-        int sliderY = barTop + 50 - sliderH / 2;
+        int sliderW = S(ui::VOLSIDER_W);
+        int sliderH = S(4);
+        int volIconX = w - S(54);
+        int sliderX = volIconX - sliderW - S(10);
+        int sliderY = barTop + S(50) - sliderH / 2;
 
         // track bg
         SDL_Rect sBg = {sliderX, sliderY, sliderW, sliderH};
@@ -930,7 +958,7 @@ static void renderOverlay() {
         }
         // thumb
         int thumbX = sliderX + fillW;
-        int thumbR = 5;
+        int thumbR = S(5);
         SDL_Rect tRc = {thumbX - thumbR, sliderY + sliderH/2 - thumbR, thumbR*2, thumbR*2};
         SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 255);
         SDL_RenderFillRect(g_sdlRdr, &tRc);
@@ -938,15 +966,15 @@ static void renderOverlay() {
         // volume percentage
         char vStr[16];
         std::snprintf(vStr, sizeof(vStr), "%d%%", (int)(vol * 100));
-        g_text.drawText(sliderX + sliderW/2 - 10, sliderY - 16, vStr, 11, 161, 161, 166);
+        g_text.drawText(sliderX + sliderW/2 - S(12), sliderY - S(18), vStr, 11, 161, 161, 166);
     }
 
     // --- playlist panel (right side) ---
     if (g_ui.playlistOpen) {
-        int panelW = 320;
+        int panelW = S(320);
         int panelX = w - panelW;
-        int panelH = h - ui::TOPBAR_H;
-        int panelY = ui::TOPBAR_H;
+        int panelH = h - S(ui::TOPBAR_H);
+        int panelY = S(ui::TOPBAR_H);
 
         // panel background
         SDL_Rect pRc = {panelX, panelY, panelW, panelH};
@@ -957,22 +985,22 @@ static void renderOverlay() {
         SDL_RenderDrawLine(g_sdlRdr, panelX, panelY, panelX, panelY + panelH);
 
         // title
-        g_text.drawText(panelX + 16, panelY + 14, "Playlist", 15, 255, 255, 255);
+        g_text.drawText(panelX + S(16), panelY + S(14), "Playlist", 15, 255, 255, 255);
 
         // items from playlist queue（含滚动）
-        int itemY = panelY + 45;
-        int itemH = 52;
+        int itemY = panelY + S(45);
+        int itemH = S(52);
         int scroll = g_ui.playlistScroll;
         for (size_t pi = 0; pi < g_playlist.size(); ++pi) {
             int iy = itemY + (int)pi * itemH - scroll;
-            if (iy + itemH < itemY - 40) continue;          // 在视口上方
-            if (iy >= panelY + panelH - 10) break;          // 到达底部
+            if (iy + itemH < itemY - S(40)) continue;          // 在视口上方
+            if (iy >= panelY + panelH - S(10)) break;          // 到达底部
             const std::string& p = g_playlist[pi];
             bool isCurrent = (g_mpv && g_mpv->path() == p);
 
             // item background (if current)
             if (isCurrent) {
-                SDL_Rect hlRc = {panelX + 4, iy - 2, panelW - 8, itemH};
+                SDL_Rect hlRc = {panelX + S(4), iy - S(2), panelW - S(8), itemH};
                 SDL_SetRenderDrawColor(g_sdlRdr, 37, 99, 235, 60);
                 SDL_RenderFillRect(g_sdlRdr, &hlRc);
             }
@@ -980,12 +1008,12 @@ static void renderOverlay() {
             // index number
             char num[8];
             std::snprintf(num, sizeof(num), "%d", (int)(pi + 1));
-            g_text.drawText(panelX + 12, iy + 6, num, 11, 120, 120, 120);
+            g_text.drawText(panelX + S(12), iy + S(6), num, 11, 120, 120, 120);
 
             // file name
             std::string fn = std::filesystem::path(p).filename().string();
             if (fn.size() > 30) fn = fn.substr(0, 27) + "...";
-            g_text.drawText(panelX + 40, iy + 4, fn, 12,
+            g_text.drawText(panelX + S(40), iy + S(4), fn, 12,
                 isCurrent ? 255 : 200, isCurrent ? 255 : 200, isCurrent ? 255 : 200);
 
             // last position
@@ -995,36 +1023,36 @@ static void renderOverlay() {
             if (hpos > 1.0) {
                 char posBuf[16];
                 formatTime(posBuf, sizeof(posBuf), hpos);
-                g_text.drawText(panelX + 40, iy + 24, posBuf, 10, 100, 100, 100);
+                g_text.drawText(panelX + S(40), iy + S(24), posBuf, 10, 100, 100, 100);
             }
 
             // playing indicator
             if (isCurrent) {
                 const char* icon = (g_mpv->state() == MpvBackend::State::Paused) ? "play" : "pause";
-                svgicon::draw(g_sdlRdr, icon, panelX + panelW - 24, iy + 16, 14, 37, 99, 235, 255);
+                svgicon::draw(g_sdlRdr, icon, panelX + panelW - S(24), iy + S(16), S(14), 37, 99, 235, 255);
             }
         }
 
         // scrollbar
         {
             int contentH = (int)g_playlist.size() * itemH;
-            int viewH = panelH - 55;
+            int viewH = panelH - S(55);
             if (contentH > viewH && contentH > 0) {
-                int trackX = panelX + panelW - 5;
-                int trackY = panelY + 45;
+                int trackX = panelX + panelW - S(5);
+                int trackY = panelY + S(45);
                 SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 15);
-                SDL_Rect trk = {trackX, trackY, 3, viewH};
+                SDL_Rect trk = {trackX, trackY, S(3), viewH};
                 SDL_RenderFillRect(g_sdlRdr, &trk);
-                int barH = std::max(30, viewH * viewH / contentH);
+                int barH = std::max(S(30), viewH * viewH / contentH);
                 int barY = trackY + g_ui.playlistScroll * viewH / contentH;
                 SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 70);
-                SDL_Rect br = {trackX, barY, 3, barH};
+                SDL_Rect br = {trackX, barY, S(3), barH};
                 SDL_RenderFillRect(g_sdlRdr, &br);
             }
         }
 
         if (g_playlist.empty()) {
-            g_text.drawText(panelX + 16, itemY + 10, "No files in playlist", 12, 100, 100, 100);
+            g_text.drawText(panelX + S(16), itemY + S(10), "No files in playlist", 12, 100, 100, 100);
         }
     }
 
@@ -1036,7 +1064,7 @@ static void renderOverlay() {
         SDL_RenderFillRect(g_sdlRdr, &fullRc);
 
         // panel
-        int panelW = 380, panelH = 360;
+        int panelW = S(380), panelH = S(360);
         int panelX = (w - panelW) / 2;
         int panelY = (h - panelH) / 2;
         SDL_Rect panelRc = {panelX, panelY, panelW, panelH};
@@ -1047,10 +1075,10 @@ static void renderOverlay() {
         SDL_RenderDrawRect(g_sdlRdr, &panelRc);
 
         // title
-        g_text.drawText(panelX + 20, panelY + 16, "Settings", 16, 255, 255, 255);
+        g_text.drawText(panelX + S(20), panelY + S(16), "Settings", 16, 255, 255, 255);
 
         // close button
-        svgicon::draw(g_sdlRdr, "close", panelX + panelW - 22, panelY + 22, 18, 161, 161, 166, 200);
+        svgicon::draw(g_sdlRdr, "close", panelX + panelW - S(22), panelY + S(22), S(18), 161, 161, 166, 200);
 
         // setting rows
         int toggleVals[5] = {0, 0, g_cfg.resume, 0, g_cfg.subAutoLoad};
@@ -1061,47 +1089,47 @@ static void renderOverlay() {
             "Auto Next",
             "Subtitle Auto-Load",
         };
-        int rowY = panelY + 55;
+        int rowY = panelY + S(55);
         for (int i = 0; i < 5; ++i) {
-            g_text.drawText(panelX + 20, rowY + 4, rowLabels[i], 13, 200, 200, 200);
+            g_text.drawText(panelX + S(20), rowY + S(4), rowLabels[i], 13, 200, 200, 200);
 
             // toggle switch
-            int swX = panelX + panelW - 60;
-            int swW = 40, swH = 20;
+            int swX = panelX + panelW - S(60);
+            int swW = S(40), swH = S(20);
             bool on = (toggleVals[i] != 0);
             SDL_Rect swRc = {swX, rowY, swW, swH};
             SDL_SetRenderDrawColor(g_sdlRdr, on ? 37 : 80, on ? 99 : 80, on ? 235 : 80, 255);
             SDL_RenderFillRect(g_sdlRdr, &swRc);
             // thumb
             int thumbX = on ? swX + swW - swH : swX;
-            SDL_Rect tRc = {thumbX + 2, rowY + 2, swH - 4, swH - 4};
+            SDL_Rect tRc = {thumbX + S(2), rowY + S(2), swH - S(4), swH - S(4)};
             SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 255);
             SDL_RenderFillRect(g_sdlRdr, &tRc);
 
-            rowY += 44;
+            rowY += S(44);
         }
 
         // language row
-        g_text.drawText(panelX + 20, rowY + 4, "Language", 13, 200, 200, 200);
+        g_text.drawText(panelX + S(20), rowY + S(4), "Language", 13, 200, 200, 200);
         const char* langs[] = {"CN", "EN", "JP"};
         for (int i = 0; i < 3; ++i) {
-            int lx = panelX + panelW - 130 + i * 40;
-            SDL_Rect lr = {lx, rowY, 34, 22};
+            int lx = panelX + panelW - S(130) + i * S(40);
+            SDL_Rect lr = {lx, rowY, S(34), S(22)};
             SDL_SetRenderDrawColor(g_sdlRdr, 37, 99, 235, 255);
             SDL_RenderFillRect(g_sdlRdr, &lr);
-            g_text.drawText(lx + 8, rowY + 3, langs[i], 11, 255, 255, 255);
+            g_text.drawText(lx + S(8), rowY + S(3), langs[i], 11, 255, 255, 255);
         }
-        rowY += 36;
+        rowY += S(36);
 
         // theme row
-        g_text.drawText(panelX + 20, rowY + 4, "Theme", 13, 200, 200, 200);
+        g_text.drawText(panelX + S(20), rowY + S(4), "Theme", 13, 200, 200, 200);
         const char* themes[] = {"Dark", "Light"};
         for (int i = 0; i < 2; ++i) {
-            int lx = panelX + panelW - 100 + i * 50;
-            SDL_Rect tr = {lx, rowY, 44, 22};
+            int lx = panelX + panelW - S(100) + i * S(50);
+            SDL_Rect tr = {lx, rowY, S(44), S(22)};
             SDL_SetRenderDrawColor(g_sdlRdr, i == 0 ? 37 : 80, i == 0 ? 99 : 80, i == 0 ? 235 : 80, 255);
             SDL_RenderFillRect(g_sdlRdr, &tr);
-            g_text.drawText(lx + 6, rowY + 3, themes[i], 11, 255, 255, 255);
+            g_text.drawText(lx + S(6), rowY + S(3), themes[i], 11, 255, 255, 255);
         }
     }
 
@@ -1115,7 +1143,7 @@ static void renderOverlay() {
             if (elapsed > ui::TOAST_MS - 300)
                 alpha = 1.0f - (float)(elapsed - (ui::TOAST_MS - 300)) / 300.0f;
             Uint8 a = (Uint8)(alpha * 255);
-            g_text.drawText(w / 2 - 30, 70, g_ui.toastMsg, 13, 255, 255, 255);
+            g_text.drawText(w / 2 - S(40), S(70), g_ui.toastMsg, 13, 255, 255, 255);
         }
     }
 
@@ -1167,11 +1195,20 @@ int main(int argc, char** argv) {
     wc.hbrBackground  = (HBRUSH)GetStockObject(BLACK_BRUSH);
     RegisterClassExW(&wc);
 
+    // 创建窗口前先取主屏 DPI，保证 S(960)xS(540) 按物理像素展开
+    {
+        HDC dc = GetDC(nullptr);
+        g_dpi = GetDeviceCaps(dc, LOGPIXELSX) / 96.0f;
+        ReleaseDC(nullptr, dc);
+        LOG_INFO("MAIN", "initial dpi scale=%.2f", g_dpi);
+    }
     g_parentHwnd = CreateWindowExW(WS_EX_ACCEPTFILES,
         wc.lpszClassName, L"VPlayer", WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, CW_USEDEFAULT, 960, 540,
+        CW_USEDEFAULT, CW_USEDEFAULT, S(960), S(540),
         nullptr, nullptr, wc.hInstance, nullptr);
     if (!g_parentHwnd) { LOG_ERROR("MAIN", "CreateWindow failed"); return 1; }
+    updateDpiForWindow(g_parentHwnd);   // 以窗口所在显示器为准精调
+    LOG_INFO("MAIN", "window dpi scale=%.2f", g_dpi);
 
     MARGINS mg = {0,0,0,0};
     DwmExtendFrameIntoClientArea(g_parentHwnd, &mg);
