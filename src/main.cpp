@@ -101,6 +101,26 @@ static int sbLeftX()   { return SB_MARGIN; }
 static int sbRightX()  { return g_ui.winW - SB_MARGIN; }
 static int sbWidth()   { return sbRightX() - sbLeftX(); }
 
+// ---- topbar icon hit test ----
+static int hitTestTopbarIcon(int mx, int my, int winW) {
+    if (my < 0 || my > ui::TOPBAR_H) return -1;
+    int iconY = ui::TOPBAR_H / 2;
+    int iconHalf = 12;
+    int rx = winW - 20;
+    struct IDef { const char* id; int idIdx; };
+    static const IDef icons[] = {
+        {"close", 0}, {"maximize", 1}, {"minimize", 2},
+        {"list", 3}, {"pip", 4}, {"camera", 5}
+    };
+    for (int i = 0; i < 6; ++i) {
+        if (mx >= rx - iconHalf && mx <= rx + iconHalf &&
+            my >= iconY - iconHalf && my <= iconY + iconHalf)
+            return icons[i].idIdx;
+        rx -= 34;
+    }
+    return -1;
+}
+
 // ---- Win32 WndProc ----
 static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
@@ -180,8 +200,9 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                      g_ui.mouseX >= sbLeftX()   && g_ui.mouseX <= sbRightX());
         g_ui.seekbarHover = onSB;
 
+        bool onTopbar = (g_ui.mouseY >= 0 && g_ui.mouseY <= ui::TOPBAR_H);
         g_ui.visible = true;
-        g_ui.hideAt = SDL_GetTicks() + ui::CTRLBAR_HIDE_MS;
+        g_ui.hideAt = SDL_GetTicks() + (onTopbar ? 4000 : ui::CTRLBAR_HIDE_MS);
 
         TRACKMOUSEEVENT tme = {sizeof(tme), TME_LEAVE, hwnd, 0};
         TrackMouseEvent(&tme);
@@ -196,6 +217,51 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         int mx = (short)LOWORD(lp), my = (short)HIWORD(lp);
         int barTop = sbTopY();
 
+        // --- topbar icon clicks ---
+        if (my >= 0 && my <= ui::TOPBAR_H) {
+            int icon = hitTestTopbarIcon(mx, my, g_ui.winW);
+            switch (icon) {
+            case 0: // close
+                PostMessage(hwnd, WM_CLOSE, 0, 0);
+                return 0;
+            case 1: { // maximize / fullscreen
+                DWORD sty = (DWORD)GetWindowLongPtrW(hwnd, GWL_STYLE);
+                if (sty & WS_OVERLAPPEDWINDOW) {
+                    SetWindowLongPtrW(hwnd, GWL_STYLE, sty & ~WS_OVERLAPPEDWINDOW);
+                    MONITORINFO mi = {sizeof(mi)};
+                    GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mi);
+                    SetWindowPos(hwnd, HWND_TOP,
+                        mi.rcMonitor.left, mi.rcMonitor.top,
+                        mi.rcMonitor.right - mi.rcMonitor.left,
+                        mi.rcMonitor.bottom - mi.rcMonitor.top, SWP_FRAMECHANGED);
+                    g_ui.fullscreen = true;
+                } else {
+                    SetWindowLongPtrW(hwnd, GWL_STYLE, sty | WS_OVERLAPPEDWINDOW);
+                    SetWindowPos(hwnd, nullptr, 100, 100, 960, 540,
+                        SWP_FRAMECHANGED | SWP_NOZORDER);
+                    g_ui.fullscreen = false;
+                }
+                return 0;
+            }
+            case 2: // minimize
+                ShowWindow(hwnd, SW_MINIMIZE);
+                return 0;
+            case 3: // playlist (TODO)
+                return 0;
+            case 4: // PIP (TODO)
+                return 0;
+            case 5: // camera/screenshot (TODO)
+                return 0;
+            default:
+                break;
+            }
+            // no icon hit -> window drag
+            ReleaseCapture();
+            SendMessage(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0);
+            return 0;
+        }
+
+        // --- seekbar ---
         if (g_mpv && my >= barTop - 6 && my <= barTop + 22 &&
             mx >= sbLeftX() && mx <= sbRightX() && g_mpv->duration() > 0) {
             g_ui.seekingDrag = true;
@@ -339,6 +405,28 @@ static void renderOverlay() {
 
     double dur = g_mpv->duration();
     double pos = g_ui.seekingDrag ? g_ui.seekTarget : g_mpv->clock();
+
+    // --- topbar (gradient opaque->transparent from top) ---
+    {
+        drawGradientBar(g_sdlRdr, 0, 0, w, ui::TOPBAR_H, 11, 11, 11, 220, 0);
+
+        // title (left)
+        std::string title = g_mpv->title();
+        if (title.empty()) title = "VPlayer";
+        if (title.size() > 55) title = title.substr(0, 52) + "...";
+        g_text.drawText(20, 14, title, 14, 255, 255, 255);
+
+        // icons (right) - same order as design mockup
+        int iconY = ui::TOPBAR_H / 2;
+        int rx = w - 20;
+        svgicon::draw(g_sdlRdr, "close",    rx, iconY, 20, 255, 255, 255, 200); rx -= 34;
+        svgicon::draw(g_sdlRdr, "maximize", rx, iconY, 20, 161, 161, 166, 200); rx -= 34;
+        svgicon::draw(g_sdlRdr, "minimize", rx, iconY, 20, 161, 161, 166, 200); rx -= 34;
+        svgicon::draw(g_sdlRdr, "list",     rx, iconY, 20, 161, 161, 166, 200); rx -= 34;
+        svgicon::draw(g_sdlRdr, "pip",      rx, iconY, 20, 161, 161, 166, 200); rx -= 34;
+        svgicon::draw(g_sdlRdr, "camera",   rx, iconY, 20, 161, 161, 166, 200);
+    }
+
     int barTop = sbTopY();
 
     // --- gradient background (top transparent -> bottom opaque) ---
