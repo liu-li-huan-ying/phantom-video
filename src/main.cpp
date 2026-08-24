@@ -316,6 +316,56 @@ static std::map<std::string, SDL_Texture*> g_thumbTex;          // 渲染线程�
 static std::atomic<bool> g_thumbQuit{false};
 static std::thread g_thumbThread;
 
+// ---- 缩略图磁盘缓存：exe/cache/thumbs/<fnv1a64>.bin = "VPT1"+w+h+RGB24 ----
+static std::string thumbCacheDir() {
+    return exeDir() + "cache\\thumbs";
+}
+
+static uint64_t fnv1a64(const std::string& s) {
+    uint64_t h = 1469598103934665603ULL;
+    for (unsigned char c : s) { h ^= c; h *= 1099511628211ULL; }
+    return h;
+}
+
+static std::string thumbDiskPath(const std::string& path) {
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "%016llx.bin", (unsigned long long)fnv1a64(path));
+    return thumbCacheDir() + "\\" + buf;
+}
+
+// 命中返回 true 并填充 out；文件损坏则删除
+static bool thumbDiskLoad(const std::string& path, ThumbRgb& out) {
+    FILE* f = fopen(thumbDiskPath(path).c_str(), "rb");
+    if (!f) return false;
+    char magic[4] = {};
+    int w = 0, h = 0;
+    bool ok = false;
+    do {
+        if (fread(magic, 1, 4, f) != 4 || memcmp(magic, "VPT1", 4) != 0) break;
+        if (fread(&w, 4, 1, f) != 1 || fread(&h, 4, 1, f) != 1) break;
+        if (w <= 0 || h <= 0 || w > 4096 || h > 4096) break;
+        size_t need = (size_t)w * h * 3;
+        out.px.resize(need);
+        if (fread(out.px.data(), 1, need, f) != need) { out.px.clear(); break; }
+        out.w = w; out.h = h;
+        ok = true;
+    } while (false);
+    fclose(f);
+    if (!ok) DeleteFileA(thumbDiskPath(path).c_str());   // 损坏即删
+    return ok;
+}
+
+static void thumbDiskSave(const std::string& path, const ThumbRgb& t) {
+    if (t.px.empty()) return;
+    FILE* f = fopen(thumbDiskPath(path).c_str(), "wb");
+    if (!f) return;
+    fwrite("VPT1", 1, 4, f);
+    fwrite(&t.w, 4, 1, f);
+    fwrite(&t.h, 4, 1, f);
+    fwrite(t.px.data(), 1, t.px.size(), f);
+    fclose(f);
+}
+
 static void thumbWorkerMain() {
     ThumbnailExtractor ex;
     while (!g_thumbQuit.load()) {
@@ -331,19 +381,29 @@ static void thumbWorkerMain() {
         }
         if (path.empty()) { Sleep(150); continue; }
 
-        uint8_t* px = nullptr; int w = 0, h = 0;
         ThumbRgb out;
-        if (ex.open(path) && ex.getFrame(3.0, &px, w, h) && px && w > 0 && h > 0) {
-            out.w = w; out.h = h;
-            out.px.assign(px, px + (size_t)w * h * 3);
-            ThumbnailExtractor::freePixels(px);
-            LOG_DBG("MAIN", "thumb ok %dx%d %s", w, h, path.c_str());
-        } else {
-            LOG_DBG("MAIN", "thumb fail %s", path.c_str());
+        bool diskHit = false;
+        if (g_cfg.thumbCache) {
+            diskHit = thumbDiskLoad(path, out);
+            if (diskHit) LOG_DBG("MAIN", "thumb disk hit %s", path.c_str());
         }
-        ex.close();
-        std::lock_guard<std::mutex> lk(g_thumbMtx);
-        g_thumbRgb[path] = std::move(out);   // 失败也记空标记，避免反复重试
+        if (!diskHit) {
+            uint8_t* px = nullptr; int w = 0, h = 0;
+            if (ex.open(path) && ex.getFrame(3.0, &px, w, h) && px && w > 0 && h > 0) {
+                out.w = w; out.h = h;
+                out.px.assign(px, px + (size_t)w * h * 3);
+                ThumbnailExtractor::freePixels(px);
+                if (g_cfg.thumbCache) thumbDiskSave(path, out);
+                LOG_DBG("MAIN", "thumb ok %dx%d %s", w, h, path.c_str());
+            } else {
+                LOG_DBG("MAIN", "thumb fail %s", path.c_str());
+            }
+            ex.close();
+        }
+        {
+            std::lock_guard<std::mutex> lk(g_thumbMtx);
+            g_thumbRgb[path] = std::move(out);   // 失败也记空标记，避免反复重试
+        }
     }
 }
 
@@ -1566,7 +1626,9 @@ int main(int argc, char** argv) {
 
     LOG_INFO("MAIN", "entering main loop (playlist=%d)", (int)g_playlist.size());
 
-    // 缩略图 worker
+    // 缩略图 worker（含磁盘缓存目录）
+    CreateDirectoryA((exeDir() + "cache").c_str(), nullptr);
+    CreateDirectoryA(thumbCacheDir().c_str(), nullptr);
     g_thumbQuit.store(false);
     g_thumbThread = std::thread(thumbWorkerMain);
 
