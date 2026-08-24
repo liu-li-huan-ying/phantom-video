@@ -237,14 +237,14 @@ auto args = utf8Args();
     panel.init(vrender.renderer());
     panel.setPlaylist(&playlist);
 
-    // M33j: 收集历史记录文件名（欢迎页用）
-    std::vector<std::string> historyNames;
+    // M33j: 收集历史记录（欢迎页用）
+    std::vector<std::string> historyPaths;   // 完整路径（点击时用）
+    std::vector<std::string> historyNames;   // 显示名
     for (const auto& kv : cfg.history) {
-        std::filesystem::path p(kv.first);
-        historyNames.push_back(p.stem().string());
+        historyPaths.push_back(kv.first);
+        historyNames.push_back(std::filesystem::path(kv.first).stem().string());
     }
-    // 限制最多 8 个
-    if (historyNames.size() > 8) historyNames.resize(8);
+    if (historyNames.size() > 8) { historyNames.resize(8); historyPaths.resize(8); }
 
     player.setVolume(cfg.volume);
     if (cfg.speed >= 0.25f && cfg.speed <= 4.0f && std::abs(cfg.speed - 1.0f) > 0.01f)
@@ -604,15 +604,11 @@ auto args = utf8Args();
                                 playlist.scanDirectory(folder);
                                 openCurrent();
                             }
-                        } else if (wa >= 2 && wa < 2 + (int)historyNames.size()) {
+                        } else if (wa >= 2 && wa < 2 + (int)historyPaths.size()) {
                             // 点击历史记录
                             int idx = wa - 2;
-                            auto it = cfg.history.begin();
-                            std::advance(it, idx);
-                            if (it != cfg.history.end()) {
-                                playlist.set(it->first);
-                                openCurrent();
-                            }
+                            playlist.set(historyPaths[idx]);
+                            openCurrent();
                         }
                         break;
                     }
@@ -885,6 +881,26 @@ auto args = utf8Args();
                     vrender.showToast("100%");
                     break;
                 default:
+                    // Ctrl+O: 打开文件
+                    if (e.key.keysym.sym == SDLK_o && (e.key.keysym.mod & KMOD_CTRL)) {
+                        HWND hwnd = nullptr;
+                        SDL_SysWMinfo info;
+                        SDL_VERSION(&info.version);
+                        if (SDL_GetWindowWMInfo(win, &info)) hwnd = info.info.win.window;
+                        std::string file = openFileDialog(hwnd);
+                        if (!file.empty()) {
+                            playlist.set(file);
+                            openCurrent();
+                            historyPaths.clear();
+                            historyNames.clear();
+                            for (const auto& kv : cfg.history) {
+                                historyPaths.push_back(kv.first);
+                                historyNames.push_back(std::filesystem::path(kv.first).stem().string());
+                            }
+                            if (historyNames.size() > 8) { historyNames.resize(8); historyPaths.resize(8); }
+                        }
+                        break;
+                    }
                     break;
                 }
                 break;
