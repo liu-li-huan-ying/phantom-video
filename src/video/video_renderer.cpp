@@ -1367,6 +1367,155 @@ void VideoRenderer::clear() {
     }
 }
 
+// ---- M33j: 欢迎页面 ----
+void VideoRenderer::drawWelcome(const std::vector<std::string>& historyNames) {
+    if (!renderer_) return;
+    int winW = 0, winH = 0;
+    SDL_GetWindowSize(window_, &winW, &winH);
+
+    // 背景 #0b0b0b
+    SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(renderer_, 0x0b, 0x0b, 0x0b, 255);
+    SDL_Rect full{ 0, 0, winW, winH };
+    SDL_RenderFillRect(renderer_, &full);
+
+    // 顶栏渐变（与播放时一致）
+    SDL_Color cTop{ 0,0,0,0 }, cBot{ 0,0,0,140 };
+    int playerW = winW - panelWidth_;
+    SDL_Vertex grad[] = {
+        { {0,0}, cTop,{} }, { {(float)playerW,0}, cTop,{} },
+        { {(float)playerW,(float)TOPBAR_H}, cBot,{} },
+        { {0,0}, cTop,{} }, { {(float)playerW,(float)TOPBAR_H}, cBot,{} },
+        { {0,(float)TOPBAR_H}, cBot,{} },
+    };
+    SDL_RenderGeometry(renderer_, nullptr, grad, 6, nullptr, 0);
+    gdi_.drawText(16, (TOPBAR_H - 18) / 2 + 2, "VPlayer", 14, 255, 255, 255);
+
+    // 居中容器
+    const int CW = std::min(720, playerW - 40);
+    int cx = (playerW - CW) / 2;
+    int cy = 80;
+
+    // Logo: ▶ + VPlayer
+    svgicon::draw(renderer_, "play", cx + CW / 2, cy + 20, 36, 0x25, 0x63, 0xeb, 230);
+    gdi_.drawText(cx + CW / 2 - 48, cy + 46, "VPlayer", 22, 255, 255, 255);
+    cy += 80;
+
+    // 副标题
+    gdi_.drawText(cx + CW / 2 - 72, cy, "拖拽视频文件到此处播放", 12, 0xa1, 0xa1, 0xa6);
+    cy += 40;
+
+    // 拖拽区域（drop zone）
+    int dzH = 100;
+    SDL_Rect dzRect{ cx, cy, CW, dzH };
+    Uint8 dzR = welcomeDropHover_ ? 0x25 : 50;
+    Uint8 dzG = welcomeDropHover_ ? 0x63 : 50;
+    Uint8 dzB = welcomeDropHover_ ? 0xeb : 50;
+    Uint8 dzA = welcomeDropHover_ ? 60 : 30;
+    // 虚线边框
+    fillRoundedRect(renderer_, dzRect.x, dzRect.y, dzRect.w, dzRect.h, 10, dzR, dzG, dzB, dzA);
+    // 边框线
+    SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(renderer_, dzR, dzG, dzB, welcomeDropHover_ ? 180 : 80);
+    for (int i = 0; i < dzRect.h; i += 8) {
+        int segLen = std::min(4, dzRect.h - i);
+        // top edge
+        SDL_RenderDrawLine(renderer_, dzRect.x + 6, dzRect.y + i,
+                           dzRect.x + 6 + segLen, dzRect.y + i);
+        SDL_RenderDrawLine(renderer_, dzRect.x + dzRect.w - 6 - segLen, dzRect.y + i,
+                           dzRect.x + dzRect.w - 6, dzRect.y + i);
+    }
+    // 四条边的虚线
+    for (int x = dzRect.x; x < dzRect.x + dzRect.w - 12; x += 12) {
+        SDL_RenderDrawLine(renderer_, x, dzRect.y + 2, x + 6, dzRect.y + 2);
+        SDL_RenderDrawLine(renderer_, x, dzRect.y + dzRect.h - 3, x + 6, dzRect.y + dzRect.h - 3);
+    }
+    for (int y = dzRect.y; y < dzRect.y + dzRect.h - 12; y += 12) {
+        SDL_RenderDrawLine(renderer_, dzRect.x + 2, y, dzRect.x + 2, y + 6);
+        SDL_RenderDrawLine(renderer_, dzRect.x + dzRect.w - 3, y, dzRect.x + dzRect.w - 3, y + 6);
+    }
+    // drop zone 中心图标+文字
+    svgicon::draw(renderer_, "play", cx + CW / 2, cy + dzH / 2 - 8, 20,
+                  dzR, dzG, dzB, welcomeDropHover_ ? 220 : 120);
+    gdi_.drawText(cx + CW / 2 - 50, cy + dzH / 2 + 10, "拖放视频文件", 11,
+                  dzR, dzG, dzB);
+
+    cy += dzH + 20;
+
+    // 按钮行
+    const int btnW = 140, btnH = 38, btnGap = 16;
+    int btnTotalW = btnW * 2 + btnGap;
+    int btnX = cx + (CW - btnTotalW) / 2;
+    // 打开文件
+    welcomeOpenFile_ = SDL_Rect{ btnX, cy, btnW, btnH };
+    fillRoundedRect(renderer_, btnX, cy, btnW, btnH, 8, 0x25, 0x63, 0xeb, 200);
+    gdi_.drawText(btnX + 30, cy + 11, "打开文件", 12, 255, 255, 255);
+    svgicon::draw(renderer_, "play", btnX + 18, cy + 19, 12, 255, 255, 255, 220);
+    // 打开文件夹
+    btnX += btnW + btnGap;
+    welcomeOpenFolder_ = SDL_Rect{ btnX, cy, btnW, btnH };
+    fillRoundedRect(renderer_, btnX, cy, btnW, btnH, 8, 255, 255, 255, 20);
+    gdi_.drawText(btnX + 30, cy + 11, "打开文件夹", 12, 230, 230, 231);
+    svgicon::draw(renderer_, "play", btnX + 18, cy + 19, 12, 230, 230, 231, 180);
+
+    cy += btnH + 30;
+
+    // 最近播放
+    welcomeHistoryCount_ = (int)historyNames.size();
+    if (welcomeHistoryCount_ > 0) {
+        if (welcomeHistoryCount_ > 8) welcomeHistoryCount_ = 8;
+        // 分割线
+        int sepY = cy;
+        SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(renderer_, 255, 255, 255, 26);
+        SDL_RenderDrawLine(renderer_, cx + 40, sepY, cx + CW - 40, sepY);
+        cy += 8;
+        gdi_.drawText(cx + CW / 2 - 30, cy, "最近播放", 11, 0xa1, 0xa1, 0xa6);
+        cy += 24;
+
+        // 网格：4 列
+        const int cols = 4;
+        const int cardW = (CW - (cols - 1) * 12) / cols;
+        const int cardH = 60;
+        for (int i = 0; i < welcomeHistoryCount_; ++i) {
+            int row = i / cols, col = i % cols;
+            int cardX = cx + col * (cardW + 12);
+            int cardY = cy + row * (cardH + 10);
+            welcomeHistory_[i] = SDL_Rect{ cardX, cardY, cardW, cardH };
+            fillRoundedRect(renderer_, cardX, cardY, cardW, cardH, 6, 255, 255, 255, 10);
+            // 文件名（截断）
+            const std::string& name = historyNames[i];
+            std::string display = name;
+            if (display.size() > 18) display = display.substr(0, 16) + "...";
+            svgicon::draw(renderer_, "play", cardX + 16, cardY + cardH / 2, 10,
+                          0xa1, 0xa1, 0xa6, 120);
+            gdi_.drawText(cardX + 30, cardY + cardH / 2 - 6, display.c_str(), 10,
+                          0xd4, 0xd4, 0xd8);
+        }
+        int rows = (welcomeHistoryCount_ + cols - 1) / cols;
+        cy += rows * (cardH + 10) + 10;
+    }
+
+    // 底部快捷键提示
+    cy = winH - 40;
+    const char* tips = "空格 播放/暂停    \xe2\x86\x90 \xe2\x86\x92 快进/快退    F 全屏    Tab 列表    Esc 退出";
+    gdi_.drawText(cx + CW / 2 - 180, cy, tips, 10, 0x71, 0x71, 0x7a);
+}
+
+int VideoRenderer::welcomeClick(int mx, int my) {
+    if (mx >= welcomeOpenFile_.x && mx < welcomeOpenFile_.x + welcomeOpenFile_.w &&
+        my >= welcomeOpenFile_.y && my < welcomeOpenFile_.y + welcomeOpenFile_.h)
+        return 0;
+    if (mx >= welcomeOpenFolder_.x && mx < welcomeOpenFolder_.x + welcomeOpenFolder_.w &&
+        my >= welcomeOpenFolder_.y && my < welcomeOpenFolder_.y + welcomeOpenFolder_.h)
+        return 1;
+    for (int i = 0; i < welcomeHistoryCount_; ++i)
+        if (mx >= welcomeHistory_[i].x && mx < welcomeHistory_[i].x + welcomeHistory_[i].w &&
+            my >= welcomeHistory_[i].y && my < welcomeHistory_[i].y + welcomeHistory_[i].h)
+            return 2 + i;
+    return -1;
+}
+
 // M18-3: Seeking 指示器
 void VideoRenderer::showSeekingOverlay() {
     seekingAlpha_ = 1;

@@ -7,6 +7,8 @@
 #include <windows.h>
 #include <shellapi.h>
 #include <dwmapi.h>
+#include <commdlg.h>
+#include <shlobj.h>
 
 #include <cstdio>
 #include <cstdlib>
@@ -83,6 +85,38 @@ static void loadExternalSubtitle(Player& player, const std::string& video,
             }
         }
     }
+}
+
+// M33j: 文件/文件夹对话框
+static std::string openFileDialog(HWND hwnd) {
+    char file[MAX_PATH] = {};
+    OPENFILENAMEA ofn = {};
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = hwnd;
+    ofn.lpstrFilter =
+        "视频文件\0*.mp4;*.avi;*.mkv;*.mov;*.flv;*.wmv;*.rmvb;*.rm;*.3gp;*.mpg;*.mpeg;*.webm;*.ts;*.m2ts\0"
+        "所有文件\0*.*\0";
+    ofn.lpstrFile = file;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.Flags = OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
+    if (GetOpenFileNameA(&ofn)) return std::string(file);
+    return "";
+}
+
+static std::string openFolderDialog(HWND hwnd) {
+    BROWSEINFOA bi = {};
+    bi.hwndOwner = hwnd;
+    bi.lpszTitle = "选择文件夹";
+    bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
+    LPITEMIDLIST pidl = SHBrowseForFolderA(&bi);
+    if (!pidl) return "";
+    char path[MAX_PATH] = {};
+    if (SHGetPathFromIDListA(pidl, path)) {
+        CoTaskMemFree(pidl);
+        return std::string(path);
+    }
+    CoTaskMemFree(pidl);
+    return "";
 }
 
 int main(int argc, char** argv) {
@@ -202,6 +236,15 @@ auto args = utf8Args();
     PlaylistPanel panel;
     panel.init(vrender.renderer());
     panel.setPlaylist(&playlist);
+
+    // M33j: 收集历史记录文件名（欢迎页用）
+    std::vector<std::string> historyNames;
+    for (const auto& kv : cfg.history) {
+        std::filesystem::path p(kv.first);
+        historyNames.push_back(p.stem().string());
+    }
+    // 限制最多 8 个
+    if (historyNames.size() > 8) historyNames.resize(8);
 
     player.setVolume(cfg.volume);
     if (cfg.speed >= 0.25f && cfg.speed <= 4.0f && std::abs(cfg.speed - 1.0f) > 0.01f)
@@ -346,6 +389,12 @@ auto args = utf8Args();
             case SDL_QUIT:
                 running = false;
                 break;
+              case SDL_DROPBEGIN:
+                  vrender.setWelcomeDropHover(true);
+                  break;
+              case SDL_DROPCOMPLETE:
+                  vrender.setWelcomeDropHover(false);
+                  break;
               case SDL_DROPFILE:
                   if (player.openFile(e.drop.file)) {
                     loadExternalSubtitle(player, e.drop.file, &vrender);
@@ -524,6 +573,47 @@ auto args = utf8Args();
                             vrender.showToast("界面语言切换开发中"); }
                         else if (sa >= 20 && sa < 22) { themeIdx = sa - 20;
                             vrender.showToast("主题切换开发中"); }
+                        break;
+                    }
+                    // M33j: 欢迎页面点击（无媒体时）
+                    if (!player.hasMedia()) {
+                        int wa = vrender.welcomeClick(mx, my);
+                        if (wa == 0) {
+                            // 打开文件
+                            HWND hwnd = nullptr;
+                            SDL_SysWMinfo info;
+                            SDL_VERSION(&info.version);
+                            if (SDL_GetWindowWMInfo(win, &info)) hwnd = info.info.win.window;
+                            std::string file = openFileDialog(hwnd);
+                            if (!file.empty()) {
+                                playlist.set(file);
+                                openCurrent();
+                                historyNames.clear();
+                                for (const auto& kv : cfg.history)
+                                    historyNames.push_back(std::filesystem::path(kv.first).stem().string());
+                                if (historyNames.size() > 8) historyNames.resize(8);
+                            }
+                        } else if (wa == 1) {
+                            // 打开文件夹
+                            HWND hwnd = nullptr;
+                            SDL_SysWMinfo info;
+                            SDL_VERSION(&info.version);
+                            if (SDL_GetWindowWMInfo(win, &info)) hwnd = info.info.win.window;
+                            std::string folder = openFolderDialog(hwnd);
+                            if (!folder.empty()) {
+                                playlist.scanDirectory(folder);
+                                openCurrent();
+                            }
+                        } else if (wa >= 2 && wa < 2 + (int)historyNames.size()) {
+                            // 点击历史记录
+                            int idx = wa - 2;
+                            auto it = cfg.history.begin();
+                            std::advance(it, idx);
+                            if (it != cfg.history.end()) {
+                                playlist.set(it->first);
+                                openCurrent();
+                            }
+                        }
                         break;
                     }
                     // M16: 播放列表面板事件优先处理
@@ -872,11 +962,11 @@ auto args = utf8Args();
                 if (playlist.hasNext()) {
                     nextTrack();
                 } else {
-                    vrender.clear();
+                    vrender.drawWelcome(historyNames);
                 }
             }
         } else {
-            vrender.clear();
+            vrender.drawWelcome(historyNames);
         }
         // 绘制自定义标题栏（每帧，覆盖 SDL 渲染）
         // M32c: 顶栏由 VideoRenderer::drawTopBar 绘制（覆盖式），不再画旧标题栏

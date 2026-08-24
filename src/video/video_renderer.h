@@ -122,6 +122,11 @@ public:
     void hideSeekingOverlay();   // M18: 隐藏
     bool isSeekingOverlayVisible() const { return seekingAlpha_ > 0; }
 
+    // M33j: 欢迎页面
+    void drawWelcome(const std::vector<std::string>& historyNames);
+    int welcomeClick(int mx, int my);   // 0=open file, 1=open folder, 2..9=history, -1=none
+    void setWelcomeDropHover(bool hover) { welcomeDropHover_ = hover; }
+
 private:
     SDL_Window* window_ = nullptr;
     SDL_Renderer* renderer_ = nullptr;
@@ -157,6 +162,11 @@ private:
     SDL_Rect setClose_ = {}, setLang_[3] = {}, setTheme_[2] = {};
     SDL_Rect setSpeed_[6] = {};    // M33i: 速度分段
     SDL_Rect setSubScale_[3] = {}; // M33i: 字幕字号分段
+    // M33j: 欢迎页面
+    SDL_Rect welcomeOpenFile_{}, welcomeOpenFolder_{};
+    SDL_Rect welcomeHistory_[8] = {};
+    int welcomeHistoryCount_ = 0;
+    bool welcomeDropHover_ = false;
     Uint32 toastUntil_ = 0;
     bool speedMenuOpen_ = false;
     SDL_Texture* iconTex_[12] = {};
