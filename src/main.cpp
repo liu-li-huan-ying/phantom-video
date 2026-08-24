@@ -96,6 +96,11 @@ struct UiState {
 
     // settings panel
     bool   settingsOpen = false;
+
+    // playlist panel
+    bool   playlistOpen = false;
+    int    playlistTargetW = 0;  // target window width when playlist open
+    int    playlistAnimW = 0;   // current animation width
 };
 
 // ---- globals ----
@@ -299,7 +304,8 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             case 2: // minimize
                 ShowWindow(hwnd, SW_MINIMIZE);
                 return 0;
-            case 3: // playlist (TODO)
+            case 3: // playlist
+                g_ui.playlistOpen = !g_ui.playlistOpen;
                 return 0;
             case 4: // PIP (TODO)
                 return 0;
@@ -782,6 +788,64 @@ static void renderOverlay() {
         char vStr[16];
         std::snprintf(vStr, sizeof(vStr), "%d%%", (int)(vol * 100));
         g_text.drawText(sliderX + sliderW/2 - 10, sliderY - 16, vStr, 11, 161, 161, 166);
+    }
+
+    // --- playlist panel (right side) ---
+    if (g_ui.playlistOpen) {
+        int panelW = 320;
+        int panelX = w - panelW;
+        int panelH = h - ui::TOPBAR_H;
+        int panelY = ui::TOPBAR_H;
+
+        // panel background
+        SDL_Rect pRc = {panelX, panelY, panelW, panelH};
+        SDL_SetRenderDrawColor(g_sdlRdr, 18, 18, 18, 245);
+        SDL_RenderFillRect(g_sdlRdr, &pRc);
+        // left border
+        SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 20);
+        SDL_RenderDrawLine(g_sdlRdr, panelX, panelY, panelX, panelY + panelH);
+
+        // title
+        g_text.drawText(panelX + 16, panelY + 14, "Playlist", 15, 255, 255, 255);
+
+        // items from config history
+        int itemY = panelY + 45;
+        int itemH = 52;
+        int idx = 0;
+        for (auto it = g_cfg.history.rbegin(); it != g_cfg.history.rend() && itemY < panelY + panelH - 10; ++it, ++idx) {
+            bool isCurrent = (g_mpv && g_mpv->path() == it->first);
+
+            // item background (if current)
+            if (isCurrent) {
+                SDL_Rect hlRc = {panelX + 4, itemY - 2, panelW - 8, itemH};
+                SDL_SetRenderDrawColor(g_sdlRdr, 37, 99, 235, 60);
+                SDL_RenderFillRect(g_sdlRdr, &hlRc);
+            }
+
+            // file name
+            std::string fn = std::filesystem::path(it->first).filename().string();
+            if (fn.size() > 35) fn = fn.substr(0, 32) + "...";
+            g_text.drawText(panelX + 16, itemY + 4, fn, 12, isCurrent ? 255 : 200, isCurrent ? 255 : 200, isCurrent ? 255 : 200);
+
+            // last position
+            if (it->second > 0) {
+                char posBuf[16];
+                formatTime(posBuf, sizeof(posBuf), it->second);
+                g_text.drawText(panelX + 16, itemY + 24, posBuf, 10, 100, 100, 100);
+            }
+
+            // playing indicator
+            if (isCurrent) {
+                const char* icon = (g_mpv->state() == MpvBackend::State::Paused) ? "play" : "pause";
+                svgicon::draw(g_sdlRdr, icon, panelX + panelW - 24, itemY + 16, 14, 37, 99, 235, 255);
+            }
+
+            itemY += itemH;
+        }
+
+        if (g_cfg.history.empty()) {
+            g_text.drawText(panelX + 16, itemY + 10, "No files in history", 12, 100, 100, 100);
+        }
     }
 
     // --- settings modal panel ---
