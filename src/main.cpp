@@ -295,6 +295,74 @@ static int playlistIndexOf(const std::string& path) {
     return -1;
 }
 
+// ---- 缩略图服务：worker 解码出 RGB，渲染线程惰性上传为纹理 ----
+#include "core/thumbnail_extractor.h"
+
+static std::mutex g_thumbMtx;
+static std::vector<std::string> g_thumbWant;                   // 当前可见待提取集合
+struct ThumbRgb { int w = 0, h = 0; std::vector<uint8_t> px; };
+static std::map<std::string, ThumbRgb> g_thumbRgb;              // path -> RGB24(空 px=失败标记)
+static std::map<std::string, SDL_Texture*> g_thumbTex;          // 渲染线程专用
+static std::atomic<bool> g_thumbQuit{false};
+static std::thread g_thumbThread;
+
+static void thumbWorkerMain() {
+    ThumbnailExtractor ex;
+    while (!g_thumbQuit.load()) {
+        std::string path;
+        {
+            std::lock_guard<std::mutex> lk(g_thumbMtx);
+            for (auto& p : g_thumbWant) {
+                if (!g_thumbRgb.count(p)) { path = p; break; }
+            }
+            if (!path.empty())
+                g_thumbWant.erase(std::remove(g_thumbWant.begin(), g_thumbWant.end(), path),
+                                  g_thumbWant.end());
+        }
+        if (path.empty()) { Sleep(150); continue; }
+
+        uint8_t* px = nullptr; int w = 0, h = 0;
+        ThumbRgb out;
+        if (ex.open(path) && ex.getFrame(3.0, &px, w, h) && px && w > 0 && h > 0) {
+            out.w = w; out.h = h;
+            out.px.assign(px, px + (size_t)w * h * 3);
+            ThumbnailExtractor::freePixels(px);
+            LOG_DBG("MAIN", "thumb ok %dx%d %s", w, h, path.c_str());
+        } else {
+            LOG_DBG("MAIN", "thumb fail %s", path.c_str());
+        }
+        ex.close();
+        std::lock_guard<std::mutex> lk(g_thumbMtx);
+        g_thumbRgb[path] = std::move(out);   // 失败也记空标记，避免反复重试
+    }
+}
+
+// 渲染线程调用：把就绪的 RGB 转成纹理
+static void uploadThumbs(SDL_Renderer* r) {
+    std::lock_guard<std::mutex> lk(g_thumbMtx);
+    for (auto it = g_thumbRgb.begin(); it != g_thumbRgb.end(); ) {
+        auto& t = it->second;
+        if (t.px.empty()) { ++it; continue; }                 // 失败标记跳过
+        if (g_thumbTex.count(it->first)) { it = g_thumbRgb.erase(it); continue; }
+        SDL_Surface* surf = SDL_CreateRGBSurfaceWithFormat(0, t.w, t.h, 24, SDL_PIXELFORMAT_RGB24);
+        if (surf) {
+            SDL_LockSurface(surf);
+            for (int y = 0; y < t.h; ++y)
+                memcpy((uint8_t*)surf->pixels + y * surf->pitch,
+                       t.px.data() + (size_t)y * t.w * 3, (size_t)t.w * 3);
+            SDL_UnlockSurface(surf);
+            SDL_Texture* tex = SDL_CreateTextureFromSurface(r, surf);
+            SDL_FreeSurface(surf);
+            if (tex) {
+                g_thumbTex[it->first] = tex;
+                it = g_thumbRgb.erase(it);
+                continue;
+            }
+        }
+        ++it;
+    }
+}
+
 // 统一播放入口：记录待续播位置 + 更新 lastFile
 static double g_pendingResumePos = -1.0;   // >0 表示 FILE_LOADED 后 seek 到此
 static void playPath(const std::string& path) {
@@ -789,6 +857,8 @@ static void drawGradientBar(SDL_Renderer* r, int x, int y, int w, int h,
 static void renderOverlay() {
     if (!g_sdlRdr) return;
 
+    uploadThumbs(g_sdlRdr);   // 惰性上传就绪的缩略图纹理
+
     SDL_SetRenderDrawColor(g_sdlRdr, TRANSPARENT_R, TRANSPARENT_G, TRANSPARENT_B, 255);
     SDL_RenderClear(g_sdlRdr);
 
@@ -1095,33 +1165,44 @@ static void renderOverlay() {
         // title
         g_text.drawText(panelX + S(16), panelY + S(14), "Playlist", 15, 255, 255, 255);
 
-        // items from playlist queue（含滚动）
+        // items from playlist queue（含滚动 + 缩略图）
         int itemY = panelY + S(45);
         int itemH = S(52);
         int scroll = g_ui.playlistScroll;
+        std::vector<std::string> visiblePaths;
         for (size_t pi = 0; pi < g_playlist.size(); ++pi) {
             int iy = itemY + (int)pi * itemH - scroll;
             if (iy + itemH < itemY - S(40)) continue;          // 在视口上方
             if (iy >= panelY + panelH - S(10)) break;          // 到达底部
             const std::string& p = g_playlist[pi];
+            visiblePaths.push_back(p);
             bool isCurrent = (g_mpv && g_mpv->path() == p);
 
-            // item background (if current)
+            // 缩略图占位/图像
+            SDL_Rect thRc = {panelX + S(8), iy + S(5), S(72), S(40)};
+            auto texIt = g_thumbTex.find(p);
+            if (texIt != g_thumbTex.end()) {
+                SDL_RenderCopy(g_sdlRdr, texIt->second, nullptr, &thRc);
+            } else {
+                SDL_SetRenderDrawColor(g_sdlRdr, 30, 30, 32, 255);
+                SDL_RenderFillRect(g_sdlRdr, &thRc);
+            }
+            if (isCurrent) {
+                SDL_SetRenderDrawColor(g_sdlRdr, 37, 99, 235, 255);
+                SDL_RenderDrawRect(g_sdlRdr, &thRc);
+            }
+
+            // 当前项高亮条
             if (isCurrent) {
                 SDL_Rect hlRc = {panelX + S(4), iy - S(2), panelW - S(8), itemH};
                 SDL_SetRenderDrawColor(g_sdlRdr, 37, 99, 235, 60);
                 SDL_RenderFillRect(g_sdlRdr, &hlRc);
             }
 
-            // index number
-            char num[8];
-            std::snprintf(num, sizeof(num), "%d", (int)(pi + 1));
-            g_text.drawText(panelX + S(12), iy + S(6), num, 11, 120, 120, 120);
-
             // file name
             std::string fn = std::filesystem::path(p).filename().string();
-            if (fn.size() > 30) fn = fn.substr(0, 27) + "...";
-            g_text.drawText(panelX + S(40), iy + S(4), fn, 12,
+            if (fn.size() > 26) fn = fn.substr(0, 23) + "...";
+            g_text.drawText(panelX + S(88), iy + S(4), fn, 12,
                 isCurrent ? 255 : 200, isCurrent ? 255 : 200, isCurrent ? 255 : 200);
 
             // last position
@@ -1131,14 +1212,24 @@ static void renderOverlay() {
             if (hpos > 1.0) {
                 char posBuf[16];
                 formatTime(posBuf, sizeof(posBuf), hpos);
-                g_text.drawText(panelX + S(40), iy + S(24), posBuf, 10, 100, 100, 100);
+                g_text.drawText(panelX + S(88), iy + S(24), posBuf, 10, 100, 100, 100);
             }
 
             // playing indicator
             if (isCurrent) {
                 const char* icon = (g_mpv->state() == MpvBackend::State::Paused) ? "play" : "pause";
-                svgicon::draw(g_sdlRdr, icon, panelX + panelW - S(24), iy + S(16), S(14), 37, 99, 235, 255);
+                svgicon::draw(g_sdlRdr, icon, panelX + panelW - S(24), iy + itemH / 2, S(14), 37, 99, 235, 255);
             }
+        }
+
+        // 提交可见集给缩略图 worker（仅缺图的）
+        {
+            std::lock_guard<std::mutex> lk(g_thumbMtx);
+            std::vector<std::string> missing;
+            for (auto& p : visiblePaths)
+                if (!g_thumbRgb.count(p) && !g_thumbTex.count(p))
+                    missing.push_back(p);
+            g_thumbWant.swap(missing);
         }
 
         // scrollbar
@@ -1453,6 +1544,10 @@ int main(int argc, char** argv) {
 
     LOG_INFO("MAIN", "entering main loop (playlist=%d)", (int)g_playlist.size());
 
+    // 缩略图 worker
+    g_thumbQuit.store(false);
+    g_thumbThread = std::thread(thumbWorkerMain);
+
     // ---- main loop ----
     bool running = true;
     Uint32 lastPosSave = 0;
@@ -1493,6 +1588,10 @@ int main(int argc, char** argv) {
         if (!cur.empty() && dur > 0)
             g_cfg.history[cur] = (pos < dur - 2.0) ? pos : 0.0;
     }
+
+    g_thumbQuit.store(true);
+    if (g_thumbThread.joinable()) g_thumbThread.join();
+
     mpv.close();
     saveConfig(configPath(), g_cfg);
     destroyOverlay();

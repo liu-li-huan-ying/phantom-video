@@ -63,6 +63,10 @@ void ThumbnailExtractor::close() {
     videoStreamIdx_ = -1;
 }
 
+void ThumbnailExtractor::freePixels(uint8_t* pixels) {
+    if (pixels) av_free(pixels);
+}
+
 bool ThumbnailExtractor::getFrame(double seconds, uint8_t** outPixels, int& outW, int& outH) {
     if (!ctx_ || !codecCtx_ || !frame_ || videoStreamIdx_ < 0)
         return false;
