@@ -204,6 +204,8 @@ auto args = utf8Args();
     panel.setPlaylist(&playlist);
 
     player.setVolume(cfg.volume);
+    if (cfg.speed >= 0.25f && cfg.speed <= 4.0f && std::abs(cfg.speed - 1.0f) > 0.01f)
+        player.setSpeed(cfg.speed);
 
     // M31k: 自动化测试钩子（仅当环境变量存在时生效，正常用户无感知）
     if (const char* s = std::getenv("VPLAYER_AUTOTEST_SEEK")) {
@@ -219,7 +221,7 @@ auto args = utf8Args();
     }
 
     // M32e: 设置面板业务状态（openCurrent 捕获用）
-    bool subAutoLoad = true;
+    bool subAutoLoad = cfg.subAutoLoad != 0;
     int langIdx = 0, themeIdx = 0;
 
     auto openCurrent = [&]() {
@@ -495,6 +497,25 @@ auto args = utf8Args();
                         } else if (sa == 4) {
                             subAutoLoad = !subAutoLoad;
                             vrender.showToast(subAutoLoad ? "字幕自动加载: 开" : "字幕自动加载: 关");
+                        } else if (sa == 5) {
+                            cfg.thumbCache = cfg.thumbCache ? 0 : 1;
+                            vrender.showToast(cfg.thumbCache ? "缩略图缓存: 开" : "缩略图缓存: 关");
+                        } else if (sa == 6) {
+                            vrender.showToast("起播同步: 已启用");
+                        } else if (sa >= 30 && sa < 36) {
+                            static const float spdVals[6] = { 0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f };
+                            player.setSpeed(spdVals[sa - 30]);
+                            cfg.speed = spdVals[sa - 30];
+                            char msg[32];
+                            std::snprintf(msg, sizeof(msg), "倍速: x%.2g", spdVals[sa - 30]);
+                            vrender.showToast(msg);
+                        } else if (sa >= 40 && sa < 43) {
+                            static const float szVals[3] = { 0.75f, 1.0f, 1.5f };
+                            cfg.subScale = szVals[sa - 40];
+                            const char* szNames[3] = { "小", "中", "大" };
+                            char msg[32];
+                            std::snprintf(msg, sizeof(msg), "字幕字号: %s", szNames[sa - 40]);
+                            vrender.showToast(msg);
                         } else if (sa == 0) {
                             vrender.showToast(player.usingHardware()
                                                   ? "硬件解码已启用（重启应用后可切换）"
@@ -750,6 +771,29 @@ auto args = utf8Args();
                 case SDLK_q:
                     running = false;
                     break;
+                case SDLK_TAB:
+                    applyPlaylistToggle();
+                    break;
+                case SDLK_LEFTBRACKET:
+                    cycleSpeed(-1);
+                    break;
+                case SDLK_RIGHTBRACKET:
+                    cycleSpeed(1);
+                    break;
+                case SDLK_1: case SDLK_2: case SDLK_3: case SDLK_4: case SDLK_5:
+                case SDLK_6: case SDLK_7: case SDLK_8: case SDLK_9: {
+                    int digit = e.key.keysym.sym - SDLK_0;
+                    double t = player.duration() * digit / 10.0;
+                    player.seek(t);
+                    char buf[32];
+                    std::snprintf(buf, sizeof(buf), "%d0%%", digit);
+                    vrender.showToast(buf);
+                    break;
+                }
+                case SDLK_0:
+                    player.seek(player.duration());
+                    vrender.showToast("100%");
+                    break;
                 default:
                     break;
                 }
@@ -787,6 +831,8 @@ auto args = utf8Args();
                 stats.swResume = cfg.resume != 0;
                 stats.swAutoNext = (playlist.mode() != PlayMode::Single);
                 stats.swSub = subAutoLoad;
+                stats.swThumbCache = cfg.thumbCache != 0;
+                stats.subScale = cfg.subScale;
                 stats.langIdx = langIdx;
                 stats.themeIdx = themeIdx;
                 static std::string subtitleBuf;
@@ -863,6 +909,8 @@ auto args = utf8Args();
         cfg.lastFile = playlist.current();
     cfg.playMode = (int)playlist.mode();
     cfg.volume = player.volume();
+    cfg.speed = player.speed();
+    cfg.subAutoLoad = subAutoLoad ? 1 : 0;
     saveConfig(configPath(), cfg);
 
     player.close();

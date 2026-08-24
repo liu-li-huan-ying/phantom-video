@@ -50,6 +50,16 @@ bool loadConfig(const std::string& path, AppConfig& out) {
             if (m >= 0 && m <= 2) out.playMode = m;
         } else if (line.rfind("resume=", 0) == 0) {
             out.resume = std::atoi(line.c_str() + 7) != 0 ? 1 : 0;
+        } else if (line.rfind("speed=", 0) == 0) {
+            float s = (float)std::atof(line.c_str() + 6);
+            if (s >= 0.25f && s <= 4.0f) out.speed = s;
+        } else if (line.rfind("subautoload=", 0) == 0) {
+            out.subAutoLoad = std::atoi(line.c_str() + 12) != 0 ? 1 : 0;
+        } else if (line.rfind("thumbcache=", 0) == 0) {
+            out.thumbCache = std::atoi(line.c_str() + 11) != 0 ? 1 : 0;
+        } else if (line.rfind("subscale=", 0) == 0) {
+            float s = (float)std::atof(line.c_str() + 9);
+            if (s >= 0.5f && s <= 3.0f) out.subScale = s;
         } else if (line.rfind("hist=", 0) == 0) {
             std::size_t tab = line.find('\t', 5);
             if (tab != std::string::npos) {
@@ -67,9 +77,13 @@ bool saveConfig(const std::string& path, const AppConfig& cfg) {
     if (!out) return false;
     out << "# vplayer config (UTF-8)\n";
     out << "volume=" << cfg.volume << "\n";
+    out << "speed=" << cfg.speed << "\n";
     out << "last=" << cfg.lastFile << "\n";
     out << "playmode=" << cfg.playMode << "\n";
     out << "resume=" << cfg.resume << "\n";
+    out << "subautoload=" << cfg.subAutoLoad << "\n";
+    out << "thumbcache=" << cfg.thumbCache << "\n";
+    out << "subscale=" << cfg.subScale << "\n";
     for (const auto& kv : cfg.history) {
         out << "hist=" << kv.first << "\t" << kv.second << "\n";
     }

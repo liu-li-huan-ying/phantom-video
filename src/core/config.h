@@ -4,10 +4,14 @@
 
 struct AppConfig {
     float volume = 0.8f;
+    float speed = 1.0f;
     std::string lastFile;
     std::map<std::string, double> history;
     int playMode = 1;  // PlayMode: 0=Single 1=Loop 2=Shuffle
     int resume = 0;    // 0=打开时从头播放 1=从上次位置续播
+    int subAutoLoad = 1;   // 字幕自动加载
+    int thumbCache = 1;    // 缩略图磁盘缓存
+    float subScale = 1.0f; // 字幕缩放系数
 };
 
 std::string configPath();

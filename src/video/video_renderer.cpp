@@ -478,8 +478,8 @@ void VideoRenderer::drawSettings(const RenderStats& stats) {
 
     const int BW = 420;
     constexpr int PAD = 18;
-    // 行高：开关行40 *5 + 分段行46*2 + 标题30 + 内距
-    const int H = 30 + 40 * 5 + 46 * 2 + PAD + 14;
+    // 7 toggle rows(40*7) + speed seg(46) + subScale seg(46) + lang seg(46) + theme seg(46) + title(30) + pad+14
+    const int H = 30 + 40 * 7 + 46 * 4 + PAD + 14;
     SDL_Rect box{ (w - BW) / 2, (h - H) / 2 - 10, BW, H };
     fillRoundedRect(renderer_, box.x - 4, box.y - 2, BW + 8, H + 6, 16,
                     0, 0, 0, (Uint8)(110));
@@ -501,15 +501,21 @@ void VideoRenderer::drawSettings(const RenderStats& stats) {
                   0xd4, 0xd4, 0xd8, 212);
     cy += 34;
 
-    const char* labels[5] = { "硬件解码（D3D11VA / DXVA2）", "音量标准化（EBU R128）",
-                              "记忆播放位置", "自动播放下一个", "字幕自动加载" };
-    bool vals[5] = { stats.swHw, stats.swNorm, stats.swResume, stats.swAutoNext, stats.swSub };
-    for (int i = 0; i < 5; ++i) {
+    const char* labels[7] = { "硬件解码（D3D11VA / DXVA2）", "音量标准化（EBU R128）",
+                              "记忆播放位置", "自动播放下一个", "字幕自动加载",
+                              "缩略图磁盘缓存", "起播同步优化" };
+    bool vals[7] = { stats.swHw, stats.swNorm, stats.swResume, stats.swAutoNext,
+                     stats.swSub, stats.swThumbCache, true };
+    for (int i = 0; i < 7; ++i) {
         setRows_[i] = SDL_Rect{ box.x + PAD, cy, BW - PAD * 2, 40 };
         gdi_.drawText(box.x + PAD, cy + 11, labels[i], 12, 230, 230, 231);
-        switchDraw(box.x + BW - PAD - 38, cy + 7, vals[i]);
-        // 行分隔线
-        if (i < 4) {
+        if (i == 6) {
+            // 起播同步：只读指示，不可切换
+            gdi_.drawText(box.x + BW - PAD - 40, cy + 12, "ON", 10, 0x25, 0x63, 0xeb);
+        } else {
+            switchDraw(box.x + BW - PAD - 38, cy + 7, vals[i]);
+        }
+        if (i < 6) {
             SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
             SDL_SetRenderDrawColor(renderer_, 255, 255, 255, 26);
             SDL_Rect sep{ box.x + PAD, cy + 39, BW - PAD * 2, 1 };
@@ -517,6 +523,47 @@ void VideoRenderer::drawSettings(const RenderStats& stats) {
         }
         cy += 40;
     }
+
+    // 播放速度 seg
+    cy += 4;
+    setSpeed_[0] = { box.x + PAD, cy, BW - PAD * 2, 38 };
+    gdi_.drawText(box.x + PAD, cy + 11, "播放速度", 12, 230, 230, 231);
+    {
+        const char* spdLabels[6] = { "0.5x", "0.75x", "1.0x", "1.25x", "1.5x", "2.0x" };
+        const float spdVals[6] = { 0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f };
+        int sx = box.x + BW - PAD - 6 * 48;
+        for (int i = 0; i < 6; ++i) {
+            setSpeed_[i] = SDL_Rect{ sx, cy + 4, 46, 24 };
+            bool active = (std::abs(stats.speed - spdVals[i]) < 0.01f);
+            if (active)
+                fillRoundedRect(renderer_, sx + 2, cy + 6, 42, 20, 6,
+                                255, 255, 255, 36);
+            gdi_.drawText(sx + 8, cy + 9, spdLabels[i], 10,
+                          active ? 255 : 161, active ? 255 : 161, active ? 255 : 166);
+            sx += 48;
+        }
+    }
+    cy += 46;
+
+    // 字幕字号 seg
+    setSubScale_[0] = { box.x + PAD, cy, BW - PAD * 2, 38 };
+    gdi_.drawText(box.x + PAD, cy + 11, "字幕字号", 12, 230, 230, 231);
+    {
+        const char* szLabels[3] = { "小", "中", "大" };
+        const float szVals[3] = { 0.75f, 1.0f, 1.5f };
+        int sx = box.x + BW - PAD - 3 * 56;
+        for (int i = 0; i < 3; ++i) {
+            setSubScale_[i] = SDL_Rect{ sx, cy + 4, 54, 24 };
+            bool active = (std::abs(stats.subScale - szVals[i]) < 0.01f);
+            if (active)
+                fillRoundedRect(renderer_, sx + 2, cy + 6, 50, 20, 6,
+                                255, 255, 255, 36);
+            gdi_.drawText(sx + 18, cy + 9, szLabels[i], 11,
+                          active ? 255 : 161, active ? 255 : 161, active ? 255 : 166);
+            sx += 56;
+        }
+    }
+    cy += 46;
 
     // 界面语言 seg
     setLang_[0] = { box.x + PAD, cy, BW - PAD * 2, 38 };
@@ -558,9 +605,15 @@ void VideoRenderer::drawSettings(const RenderStats& stats) {
 
 int VideoRenderer::settingsClick(int mx, int my) {
     if (!settingsOpen_) return -1;
-    for (int i = 0; i < 5; ++i)
+    for (int i = 0; i < 7; ++i)
         if (mx >= setRows_[i].x && mx < setRows_[i].x + setRows_[i].w &&
             my >= setRows_[i].y && my < setRows_[i].y + setRows_[i].h) return i;
+    for (int i = 0; i < 6; ++i)
+        if (setSpeed_[i].w && mx >= setSpeed_[i].x && mx < setSpeed_[i].x + setSpeed_[i].w &&
+            my >= setSpeed_[i].y && my < setSpeed_[i].y + setSpeed_[i].h) return 30 + i;
+    for (int i = 0; i < 3; ++i)
+        if (setSubScale_[i].w && mx >= setSubScale_[i].x && mx < setSubScale_[i].x + setSubScale_[i].w &&
+            my >= setSubScale_[i].y && my < setSubScale_[i].y + setSubScale_[i].h) return 40 + i;
     for (int i = 0; i < 3; ++i)
         if (setLang_[i].w && mx >= setLang_[i].x && mx < setLang_[i].x + setLang_[i].w &&
             my >= setLang_[i].y && my < setLang_[i].y + setLang_[i].h) return 10 + i;

@@ -25,8 +25,10 @@ struct RenderStats {
     bool swResume = true;    // 记忆播放位置
     bool swAutoNext = true;  // 自动播放下一个
     bool swSub = true;       // 字幕自动加载
+    bool swThumbCache = true; // 缩略图缓存
     int langIdx = 0;
     int themeIdx = 0;
+    float subScale = 1.0f;   // 字幕缩放
     float bufferPct = 0.0f;   // video queue fill ratio (0..1) for seekbar
     const char* subtitle = nullptr;
     const char* rawSubtitle = nullptr;  // 原始 ASS Dialogue 行（含 override tags）
@@ -151,8 +153,10 @@ private:
     std::string pendingShotPath_;  // M32c: 待保存截图路径
     // M32e: 设置模态
     bool settingsOpen_ = false;
-    SDL_Rect setRows_[5] = {};     // 五个开关行命中区
+    SDL_Rect setRows_[7] = {};     // M33i: 七个开关行命中区
     SDL_Rect setClose_ = {}, setLang_[3] = {}, setTheme_[2] = {};
+    SDL_Rect setSpeed_[6] = {};    // M33i: 速度分段
+    SDL_Rect setSubScale_[3] = {}; // M33i: 字幕字号分段
     Uint32 toastUntil_ = 0;
     bool speedMenuOpen_ = false;
     SDL_Texture* iconTex_[12] = {};
