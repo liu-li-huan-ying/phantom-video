@@ -1195,3 +1195,20 @@
      MAIN Ended 日志（保留），复现脚本 repro_next.ps1 思路可一键复现。
   - 下一步假设：非 ts 值问题；疑与 openFile 后初始状态下 seek 引发的底层
     AVIO EOF 标志残留有关，需对比手动跳转时的调用差异定位。
+
+---
+
+## M33: 乱跳转修复 + 缓冲进度条实时化
+
+### M33a: 移除 openCurrent seek(0.0) -- 乱跳转根因
+**2026-08-24**
+问题: 拖动进度条/下一首/播放列表选择视频，播放器连锁自动跳转。选择视频A却播放视频B。
+根因: openCurrent()在openFile后立即调用player.seek(0.0)，对AVI/WMV/MKV等格式，
+av_seek_frame(ts=0,BACKWARD)成功后av_read_frame立即返回AVERROR_EOF(-541478725)，
+decodeLoop退出 -> videoQueue_.closed -> pullFrame返回State::Ended -> auto-next链式跳转。
+修复: 彻底移除openCurrent()和SDL_DROPFILE两处player.seek(0.0)。用户已确认无起播假死。
+
+### M33b: 进度条缓冲进度实时化
+问题: bufW硬编码0.42f(42%)，效果图要求实时显示已缓冲内容。
+修复: BlockingQueue加size()/capacity(); Player加bufferFill(); RenderStats加bufferPct;
+主循环每帧填充; drawControls用stats.bufferPct替换硬编码0.42f。

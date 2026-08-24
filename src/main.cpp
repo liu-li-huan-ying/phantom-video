@@ -252,9 +252,10 @@ auto args = utf8Args();
                     vrender.showToast("已从上次位置续播 (按 R 关闭)");
                 }
             }
-            // M32g.3: 无续播时复用 seek 同步门控启动 —— 音画在时钟起点
-            // 一起放行，避免音频先跑导致开头视频被成片丢弃（起播假死）
-            if (!resumed) player.seek(0.0);
+            // M32g.3/M32f.10: seek(0) 已移除——对 AVI/WMV/MKV 等格式
+            // av_seek_frame(ts=0, BACKWARD) 后 av_read_frame 立即返回
+            // AVERROR_EOF → decodeLoop 退出 → State::Ended → 自动连跳。
+            // 用户确认不存在起播假死，此调用无用且有害。
         } else {
             SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "打开失败",
                                      player.error().c_str(), win);
@@ -348,7 +349,7 @@ auto args = utf8Args();
                     loadExternalSubtitle(player, e.drop.file, &vrender);
                     thumbnail.open(e.drop.file);
                     playlist.scanDirectory(e.drop.file);
-                    player.seek(0.0);  // M32g.3: 拖放打开同样走同步启动
+                    // seek(0.0) 已移除——同 openCurrent，会导致 EOF 链式跳转
                     std::string base = e.drop.file;
                     std::size_t slash = base.find_last_of("\\/");
                     if (slash != std::string::npos) base = base.substr(slash + 1);
@@ -763,6 +764,7 @@ auto args = utf8Args();
                 stats.clock = player.clock();
                 stats.uiClock = player.uiClock();
                 stats.duration = player.duration();
+                stats.bufferPct = player.bufferFill();
                 stats.volume = player.muted() ? 0.0f : player.volume();
                 stats.muted = player.muted();
                 stats.fullscreen = fullscreen;

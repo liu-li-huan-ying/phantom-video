@@ -27,6 +27,7 @@ struct RenderStats {
     bool swSub = true;       // 字幕自动加载
     int langIdx = 0;
     int themeIdx = 0;
+    float bufferPct = 0.0f;   // video queue fill ratio (0..1) for seekbar
     const char* subtitle = nullptr;
     const char* rawSubtitle = nullptr;  // 原始 ASS Dialogue 行（含 override tags）
     std::function<void()> onPlayPause;

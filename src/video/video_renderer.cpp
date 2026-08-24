@@ -909,7 +909,7 @@ void VideoRenderer::drawControls(const RenderStats& stats) {
     // track 背景（CSS rgba(255,255,255,.18)）+ buffered(.30) + fill(accent)
     fillRoundedRect(renderer_, progX, trackY, progressW, trackH, 3,
                     255, 255, 255, (Uint8)(46 * a / 255));
-    int bufW = (int)(progressW * 0.42f);
+    int bufW = (int)(progressW * std::max(0.0f, std::min(1.0f, stats.bufferPct)));
     if (bufW > 0) {
         fillRoundedRect(renderer_, progX, trackY, bufW, trackH, 3,
                         255, 255, 255, (Uint8)(77 * a / 255));

@@ -44,6 +44,7 @@ public:
     void clearUiSeeking() { uiSeeking_.store(false, std::memory_order_relaxed); }
     double duration() const { return duration_; }
     bool hasMedia() const { return hasMedia_.load(); }
+    float bufferFill() const { return (float)videoQueue_.size() / (float)videoQueue_.capacity(); }
     std::string path() const { return path_; }
     std::string error() const { return error_; }
     bool usingHardware() const { return hwDecode_.load(); }
