@@ -107,6 +107,6 @@ private:
     void stopWorker();
     void workerFunc();
     void requestVisibleRange(const std::vector<std::string>& paths,
-                             const std::vector<int>& indices);
+                             const std::vector<int>& indices, int center);
     void consumeReadyTexture();
 };

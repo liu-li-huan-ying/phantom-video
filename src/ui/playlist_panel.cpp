@@ -236,6 +236,7 @@ void PlaylistPanel::workerFunc() {
         if (worker_.cancelled.load()) continue;
 
         double seekSec = thumbSeekTime(path);
+        if (worker_.cancelled.load()) continue;
         uint8_t* pixels = nullptr;
         int w = 0, h = 0;
         if (extractor.getFrame(seekSec, &pixels, w, h) && pixels) {
@@ -253,12 +254,28 @@ void PlaylistPanel::workerFunc() {
 }
 
 void PlaylistPanel::requestVisibleRange(const std::vector<std::string>& paths,
-                                        const std::vector<int>& indices) {
+                                        const std::vector<int>& indices, int center) {
+    // 按离视口中心的距离排序，中心优先提取
+    std::vector<int> order(paths.size());
+    for (int i = 0; i < (int)order.size(); ++i) order[i] = i;
+    std::sort(order.begin(), order.end(), [&](int a, int b) {
+        int da = std::abs(indices[a] - center);
+        int db = std::abs(indices[b] - center);
+        return da < db;
+    });
+    std::vector<std::string> sortedPaths;
+    std::vector<int> sortedIndices;
+    sortedPaths.reserve(paths.size());
+    sortedIndices.reserve(indices.size());
+    for (int i : order) {
+        sortedPaths.push_back(paths[i]);
+        sortedIndices.push_back(indices[i]);
+    }
     worker_.cancelled.store(true);
     {
         std::lock_guard<std::mutex> lock(worker_.mutex);
-        worker_.paths = paths;
-        worker_.indices = indices;
+        worker_.paths = std::move(sortedPaths);
+        worker_.indices = std::move(sortedIndices);
     }
     worker_.nextIdx.store(0);
     worker_.cancelled.store(false);
@@ -383,7 +400,7 @@ void PlaylistPanel::draw(int currentIndex, int winW, int winH) {
         std::string filename = std::filesystem::path(playlist_->fileAt(i)).filename().string();
         drawItem(panelX, y, i, filename, isActive, isHover, pw);
     }
-    // M33: 请求可见区域缩略图（只在范围变化时才请求，避免每帧重置nextIdx）
+    // M33: 请求可见区域缩略图（只在范围变化时才请求，按离中心距离优先提取）
     if (playlist_ && playlist_->size() > 0) {
         int visStart = std::max(0, -scrollOffset_ / kItemH);
         int visEnd = std::min(totalItems, (visibleH + scrollOffset_) / kItemH + 1);
@@ -394,13 +411,14 @@ void PlaylistPanel::draw(int currentIndex, int winW, int winH) {
             lastReqStart_ = rangeStart;
             lastReqEnd_ = rangeEnd;
             startWorker();
+            int center = (visStart + visEnd) / 2;
             std::vector<std::string> visPaths;
             std::vector<int> visIndices;
             for (int i = rangeStart; i < rangeEnd; ++i) {
                 visPaths.push_back(playlist_->fileAt(i));
                 visIndices.push_back(i);
             }
-            requestVisibleRange(visPaths, visIndices);
+            requestVisibleRange(visPaths, visIndices, center);
         }
     }
     SDL_RenderSetClipRect(renderer_, nullptr);
