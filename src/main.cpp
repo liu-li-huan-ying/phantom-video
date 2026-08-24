@@ -13,6 +13,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cmath>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -506,7 +507,84 @@ static void renderOverlay() {
 
     int w = g_ui.winW, h = g_ui.winH;
 
-    if (!g_mpv || !g_mpv->hasMedia() || !g_ui.visible) {
+    if (!g_mpv || !g_mpv->hasMedia()) {
+        // --- welcome page ---
+        int w = g_ui.winW, h = g_ui.winH;
+
+        // topbar still visible
+        drawGradientBar(g_sdlRdr, 0, 0, w, ui::TOPBAR_H, 11, 11, 11, 220, 0);
+        // title
+        g_text.drawText(20, 14, "VPlayer", 14, 255, 255, 255);
+        // topbar icons
+        int iconY = ui::TOPBAR_H / 2;
+        int rx = w - 20;
+        svgicon::draw(g_sdlRdr, "close",    rx, iconY, 20, 255, 255, 255, 200); rx -= 34;
+        svgicon::draw(g_sdlRdr, "maximize", rx, iconY, 20, 161, 161, 166, 200); rx -= 34;
+        svgicon::draw(g_sdlRdr, "minimize", rx, iconY, 20, 161, 161, 166, 200);
+
+        // logo
+        svgicon::draw(g_sdlRdr, "play", w / 2, h / 2 - 80, 64, 37, 99, 235, 255);
+        g_text.drawText(w / 2 - 40, h / 2 - 30, "VPlayer", 28, 255, 255, 255);
+
+        // drop zone (dashed border)
+        int dzW = 400, dzH = 120;
+        int dzX = (w - dzW) / 2, dzY = h / 2 + 10;
+        SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 30);
+        // draw dashed border (approximate with segments)
+        int dashLen = 8, gapLen = 5;
+        for (int side = 0; side < 4; ++side) {
+            int x0, y0, x1, y1;
+            if (side == 0) { x0 = dzX; y0 = dzY; x1 = dzX + dzW; y1 = dzY; }
+            else if (side == 1) { x0 = dzX + dzW; y0 = dzY; x1 = dzX + dzW; y1 = dzY + dzH; }
+            else if (side == 2) { x0 = dzX + dzW; y0 = dzY + dzH; x1 = dzX; y1 = dzY + dzH; }
+            else { x0 = dzX; y0 = dzY + dzH; x1 = dzX; y1 = dzY; }
+            int dx = x1 - x0, dy = y1 - y0;
+            float len = std::sqrt((float)(dx*dx + dy*dy));
+            float nx = dx / len, ny = dy / len;
+            float pos = 0;
+            while (pos < len) {
+                float segEnd = std::min(pos + dashLen, len);
+                SDL_RenderDrawLine(g_sdlRdr,
+                    (int)(x0 + nx * pos), (int)(y0 + ny * pos),
+                    (int)(x0 + nx * segEnd), (int)(y0 + ny * segEnd));
+                pos = segEnd + gapLen;
+            }
+        }
+        g_text.drawText(w / 2 - 60, dzY + 30, "Drop video here", 13, 161, 161, 166);
+        g_text.drawText(w / 2 - 55, dzY + 55, "or press Ctrl+O", 12, 100, 100, 100);
+
+        // recent files grid (from config history)
+        if (!g_cfg.history.empty()) {
+            g_text.drawText(w / 2 - 60, dzY + dzH + 30, "Recent Files", 14, 161, 161, 166);
+            int cardW = 140, cardH = 80, gap = 12;
+            int cols = std::min(4, (int)g_cfg.history.size());
+            int gridW = cols * cardW + (cols - 1) * gap;
+            int gridX = (w - gridW) / 2;
+            int gridY = dzY + dzH + 55;
+            int idx = 0;
+            for (auto it = g_cfg.history.rbegin(); it != g_cfg.history.rend() && idx < 8; ++it, ++idx) {
+                int col = idx % cols, row = idx / cols;
+                int cx = gridX + col * (cardW + gap);
+                int cy = gridY + row * (cardH + gap);
+                SDL_Rect cardRc = {cx, cy, cardW, cardH};
+                SDL_SetRenderDrawColor(g_sdlRdr, 21, 21, 21, 255);
+                SDL_RenderFillRect(g_sdlRdr, &cardRc);
+                SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 15);
+                SDL_RenderDrawRect(g_sdlRdr, &cardRc);
+                // file name
+                std::string fn = std::filesystem::path(it->first).filename().string();
+                if (fn.size() > 18) fn = fn.substr(0, 15) + "...";
+                g_text.drawText(cx + 8, cy + 10, fn, 11, 200, 200, 200);
+                // duration hint
+                char timeBuf[16];
+                formatTime(timeBuf, sizeof(timeBuf), it->second);
+                g_text.drawText(cx + 8, cy + 35, timeBuf, 10, 100, 100, 100);
+            }
+        }
+
+        // keyboard hints
+        g_text.drawText(20, h - 30, "Space=Play/Pause  Left/Right=Seek  F=Fullscreen  M=Mute  [/]=Speed", 10, 80, 80, 80);
+
         SDL_RenderPresent(g_sdlRdr);
         return;
     }
