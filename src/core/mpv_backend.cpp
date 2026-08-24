@@ -1,5 +1,6 @@
 #include "core/mpv_backend.h"
 #include "core/logger.h"
+#include "core/config.h"
 #include <cstring>
 #include <cstdlib>
 
@@ -27,6 +28,14 @@ bool MpvBackend::init(HWND hwnd) {
     mpv_set_option_string(mpv_, "no-input-default-bindings", "yes");
     mpv_set_option_string(mpv_, "input-vo-keyboard", "no");
     mpv_set_option_string(mpv_, "cursor-autohide", "0");
+
+    // 截图输出到 exe/screenshots/
+    {
+        std::string dir = exeDir() + "screenshots";
+        CreateDirectoryA(dir.c_str(), nullptr);
+        mpv_set_option_string(mpv_, "screenshot-format", "png");
+        mpv_set_option_string(mpv_, "screenshot-directory", dir.c_str());
+    }
 
     // wid 必须在 mpv_initialize 之前设置
     if (hwnd) {

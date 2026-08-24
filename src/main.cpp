@@ -102,6 +102,7 @@ struct UiState {
     bool   playlistOpen = false;
     int    playlistTargetW = 0;  // target window width when playlist open
     int    playlistAnimW = 0;   // current animation width
+    int    playlistScroll = 0;  // 滚动偏移(px)
 };
 
 // ---- globals ----
@@ -113,6 +114,25 @@ static SDL_Renderer* g_sdlRdr     = nullptr;
 static GdiTextCache  g_text;
 static UiState       g_ui;
 static AppConfig     g_cfg;
+
+// ---- mpv 子窗口鼠标/键盘消息中继 ----
+// overlay(WS_EX_TRANSPARENT) 点击会命中 mpv 的 STATIC 子窗口而非 parent，
+// 导致所有鼠标交互失效；此处把输入类消息转发给 parent 统一处理。
+// mpv 子窗口与 parent 客户区完全重合(0,0)，lParam 客户坐标可直接透传。
+static WNDPROC g_mpvOldProc = nullptr;
+static LRESULT CALLBACK mpvRelayProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    switch (msg) {
+    case WM_MOUSEMOVE:
+        SetFocus(g_parentHwnd);   // 键盘焦点收回 parent
+        [[fallthrough]];
+    case WM_LBUTTONDOWN: case WM_LBUTTONUP: case WM_RBUTTONDOWN:
+    case WM_MOUSEWHEEL:
+    case WM_KEYDOWN: case WM_KEYUP: case WM_SYSKEYDOWN: case WM_SYSKEYUP:
+    case WM_CHAR:
+        return SendMessageW(g_parentHwnd, msg, wp, lp);
+    }
+    return CallWindowProcW(g_mpvOldProc, hwnd, msg, wp, lp);
+}
 
 // ---- seekbar geometry ----
 static const int SB_MARGIN = 20;
@@ -370,8 +390,16 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 return 0;
             case 4: // PIP (TODO)
                 return 0;
-            case 5: // camera/screenshot (TODO)
+            case 5: { // camera/screenshot
+                if (g_mpv && g_mpv->mpv()) {
+                    const char* cmd[] = { "screenshot", NULL };
+                    int r = mpv_command(g_mpv->mpv(), cmd);
+                    LOG_INFO("MAIN", "screenshot ret=%d (%s)", r,
+                             r < 0 ? mpv_error_string(r) : "ok");
+                    showToast(r < 0 ? "Screenshot failed" : "Screenshot saved");
+                }
                 return 0;
+            }
             default:
                 break;
             }
@@ -465,11 +493,10 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         else if (g_ui.playlistOpen && mx >= g_ui.winW - 320) {
             int panelY = ui::TOPBAR_H;
             int itemH = 52;
-            int rel = my - (panelY + 45);
+            int rel = my - (panelY + 45) + g_ui.playlistScroll;
             if (rel >= 0) {
                 int itemIdx = rel / itemH;
-                int visibleMax = (g_ui.winH - panelY - 55) / itemH;
-                if (itemIdx < visibleMax && itemIdx < (int)g_playlist.size())
+                if (itemIdx < (int)g_playlist.size())
                     playIndex(itemIdx);
             }
         }
@@ -494,8 +521,23 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
 
     case WM_MOUSEWHEEL: {
-        if (g_mpv) {
-            short d = GET_WHEEL_DELTA_WPARAM(wp);
+        POINT pt = { (short)LOWORD(lp), (short)HIWORD(lp) };
+        RECT rc; GetClientRect(hwnd, &rc);
+        ScreenToClient(hwnd, &pt);
+        short d = GET_WHEEL_DELTA_WPARAM(wp);
+
+        // 播放列表面板区域：滚动列表
+        if (g_ui.playlistOpen && pt.x >= g_ui.winW - 320) {
+            int panelH = g_ui.winH - ui::TOPBAR_H;
+            int contentH = (int)g_playlist.size() * 52;
+            int viewH = panelH - 55;
+            g_ui.playlistScroll -= (d > 0 ? 52 : -52) * 2;
+            if (g_ui.playlistScroll < 0) g_ui.playlistScroll = 0;
+            if (contentH > viewH && g_ui.playlistScroll > contentH - viewH)
+                g_ui.playlistScroll = contentH - viewH;
+            else if (contentH <= viewH) g_ui.playlistScroll = 0;
+        }
+        else if (g_mpv) {
             g_mpv->setVolume(g_mpv->volume() + (d > 0 ? 0.05f : -0.05f));
         }
         g_ui.visible = true;
@@ -917,17 +959,20 @@ static void renderOverlay() {
         // title
         g_text.drawText(panelX + 16, panelY + 14, "Playlist", 15, 255, 255, 255);
 
-        // items from playlist queue
+        // items from playlist queue（含滚动）
         int itemY = panelY + 45;
         int itemH = 52;
+        int scroll = g_ui.playlistScroll;
         for (size_t pi = 0; pi < g_playlist.size(); ++pi) {
-            if (itemY >= panelY + panelH - 10) break;
+            int iy = itemY + (int)pi * itemH - scroll;
+            if (iy + itemH < itemY - 40) continue;          // 在视口上方
+            if (iy >= panelY + panelH - 10) break;          // 到达底部
             const std::string& p = g_playlist[pi];
             bool isCurrent = (g_mpv && g_mpv->path() == p);
 
             // item background (if current)
             if (isCurrent) {
-                SDL_Rect hlRc = {panelX + 4, itemY - 2, panelW - 8, itemH};
+                SDL_Rect hlRc = {panelX + 4, iy - 2, panelW - 8, itemH};
                 SDL_SetRenderDrawColor(g_sdlRdr, 37, 99, 235, 60);
                 SDL_RenderFillRect(g_sdlRdr, &hlRc);
             }
@@ -935,12 +980,12 @@ static void renderOverlay() {
             // index number
             char num[8];
             std::snprintf(num, sizeof(num), "%d", (int)(pi + 1));
-            g_text.drawText(panelX + 12, itemY + 6, num, 11, 120, 120, 120);
+            g_text.drawText(panelX + 12, iy + 6, num, 11, 120, 120, 120);
 
             // file name
             std::string fn = std::filesystem::path(p).filename().string();
             if (fn.size() > 30) fn = fn.substr(0, 27) + "...";
-            g_text.drawText(panelX + 40, itemY + 4, fn, 12,
+            g_text.drawText(panelX + 40, iy + 4, fn, 12,
                 isCurrent ? 255 : 200, isCurrent ? 255 : 200, isCurrent ? 255 : 200);
 
             // last position
@@ -950,16 +995,32 @@ static void renderOverlay() {
             if (hpos > 1.0) {
                 char posBuf[16];
                 formatTime(posBuf, sizeof(posBuf), hpos);
-                g_text.drawText(panelX + 40, itemY + 24, posBuf, 10, 100, 100, 100);
+                g_text.drawText(panelX + 40, iy + 24, posBuf, 10, 100, 100, 100);
             }
 
             // playing indicator
             if (isCurrent) {
                 const char* icon = (g_mpv->state() == MpvBackend::State::Paused) ? "play" : "pause";
-                svgicon::draw(g_sdlRdr, icon, panelX + panelW - 24, itemY + 16, 14, 37, 99, 235, 255);
+                svgicon::draw(g_sdlRdr, icon, panelX + panelW - 24, iy + 16, 14, 37, 99, 235, 255);
             }
+        }
 
-            itemY += itemH;
+        // scrollbar
+        {
+            int contentH = (int)g_playlist.size() * itemH;
+            int viewH = panelH - 55;
+            if (contentH > viewH && contentH > 0) {
+                int trackX = panelX + panelW - 5;
+                int trackY = panelY + 45;
+                SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 15);
+                SDL_Rect trk = {trackX, trackY, 3, viewH};
+                SDL_RenderFillRect(g_sdlRdr, &trk);
+                int barH = std::max(30, viewH * viewH / contentH);
+                int barY = trackY + g_ui.playlistScroll * viewH / contentH;
+                SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 70);
+                SDL_Rect br = {trackX, barY, 3, barH};
+                SDL_RenderFillRect(g_sdlRdr, &br);
+            }
         }
 
         if (g_playlist.empty()) {
@@ -1061,8 +1122,24 @@ static void renderOverlay() {
     SDL_RenderPresent(g_sdlRdr);
 }
 
+// ---- DPI awareness ----
+// 125%+ 缩放下非 aware 进程坐标被虚拟化: 鼠标命中/截图测试全部错位,
+// 且渲染被拉伸模糊。PER_MONITOR_AWARE_V2 让所有坐标统一为物理像素。
+static void enableDpiAwareness() {
+    HMODULE u32 = GetModuleHandleW(L"user32.dll");
+    if (u32) {
+        using FnCtx = BOOL(WINAPI*)(HANDLE);
+        auto fCtx = (FnCtx)(void*)GetProcAddress(u32, "SetProcessDpiAwarenessContext");
+        if (fCtx && fCtx((HANDLE)-4)) return;   // PER_MONITOR_AWARE_V2
+        using Fn = BOOL(WINAPI*)(void);
+        auto fAware = (Fn)(void*)GetProcAddress(u32, "SetProcessDPIAware");
+        if (fAware && fAware()) return;
+    }
+}
+
 // ---- main ----
 int main(int argc, char** argv) {
+    enableDpiAwareness();
     (void)argc; (void)argv;
 
     Logger::instance().init("vplayer", 7);
@@ -1118,6 +1195,9 @@ int main(int argc, char** argv) {
     g_mpvHwnd = CreateWindowExW(0, L"STATIC", nullptr,
         WS_CHILD | WS_VISIBLE, 0, 0, rc.right, rc.bottom,
         g_parentHwnd, nullptr, wc.hInstance, nullptr);
+    // 安装输入中继（见 mpvRelayProc 注释）
+    g_mpvOldProc = (WNDPROC)SetWindowLongPtrW(g_mpvHwnd, GWLP_WNDPROC,
+                                              (LONG_PTR)mpvRelayProc);
 
     MpvBackend mpv;
     g_mpv = &mpv;
