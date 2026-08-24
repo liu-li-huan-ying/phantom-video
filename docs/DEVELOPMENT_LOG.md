@@ -1368,3 +1368,34 @@ decodeLoop退出 -> videoQueue_.closed -> pullFrame返回State::Ended -> auto-ne
 3. 当前播放高亮：蓝色背景 + 播放/暂停图标
 4. 文件名截断 35 字符 + 上次播放位置
 5. 顶部栏 list 图标切换面板
+
+---
+
+## M34a Phase 2h: UI overlay 整合（2026-08-24）
+
+任务：用户反馈"UI 和窗口没有整合到一起，现在是两个东西"——overlay 独立顶层窗口
+在任务栏和 Alt+Tab 中各占一个条目。
+
+尝试与失败：
+1. **WS_EX_LAYERED 子窗口方案**：创建 STATIC 子窗口 + LWA_COLORKEY，
+   SDL_CreateWindowFrom 包装 —— CreateWindowEx 返回 NULL 且 err=87
+   （ERROR_INVALID_PARAMETER）。换自定义类同样 err=0 失败。
+   结论：本机不支持分层子窗口（尽管文档称 Win8+ 支持）。
+2. **子类化 STATIC**：同样在创建阶段失败，未走到这一步。
+
+最终方案：**owned 顶层窗口**
+- `SetWindowLongPtrW(ov, GWLP_HWNDPARENT, parent)` 建立 owner 关系
+- `WS_EX_TOOLWINDOW` 从任务栏和 Alt+Tab 消失
+- owner z 序联动：始终浮于父之上；父最小化/销毁时联动
+- WM_MOVE / WM_SIZE 中 ClientToScreen + SDL_SetWindowPosition/Size 像素级同步
+- SIZE_MINIMIZED 跳过重排
+
+验证（Win32 枚举）：
+- overlay ExStyle 含 LAYERED(0x80000)+TOOLWIN(0x80)，Owner=parent HWND ✓
+- overlay Rect 与父客户区像素级对齐 ✓
+- 日志 "overlay created (944x501, owned)"，文件加载、283 秒播放后优雅退出 ✓
+
+其他修复：
+- 渲染器创建失败时回退软件渲染（分层窗口上 D3D 可能失败）
+- 教训：`Stop-Process -Force` 不执行析构 → Logger 不 flush → 日志空文件。
+  测试时必须用 WM_CLOSE 优雅关闭才能看到日志。
