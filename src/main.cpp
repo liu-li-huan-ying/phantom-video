@@ -155,6 +155,7 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
 
     case WM_SIZE: {
+        if (wp == SIZE_MINIMIZED) return 0;
         RECT rc; GetClientRect(hwnd, &rc);
         g_ui.winW = rc.right; g_ui.winH = rc.bottom;
         if (g_mpvHwnd) MoveWindow(g_mpvHwnd, 0, 0, rc.right, rc.bottom, TRUE);
@@ -434,6 +435,8 @@ static const Uint8 TRANSPARENT_G = 0;
 static const Uint8 TRANSPARENT_B = 255;
 
 static bool createOverlay(HWND parent, int w, int h) {
+    // 顶层无边框窗口（本系统不支持 WS_EX_LAYERED 子窗口，实测 err=87）
+    // 通过 OWNER 关联 + TOOLWINDOW 融入主窗口：不进任务栏/Alt+Tab，随主窗口关闭
     g_sdlWin = SDL_CreateWindow("VPlayer UI",
         SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, w, h,
         SDL_WINDOW_SHOWN | SDL_WINDOW_BORDERLESS);
@@ -448,16 +451,24 @@ static bool createOverlay(HWND parent, int w, int h) {
         LOG_ERROR("MAIN", "SDL_GetWindowWMInfo failed");
         return false;
     }
-    HWND sdlHwnd = info.info.win.window;
+    HWND ov = info.info.win.window;
 
-    LONG ex = (LONG)GetWindowLongPtrW(sdlHwnd, GWL_EXSTYLE);
-    SetWindowLongPtrW(sdlHwnd, GWL_EXSTYLE,
-        ex | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST);
-    SetLayeredWindowAttributes(sdlHwnd, RGB(TRANSPARENT_R, TRANSPARENT_G, TRANSPARENT_B),
-                               0, LWA_COLORKEY);
+    LONG_PTR ex = GetWindowLongPtrW(ov, GWL_EXSTYLE);
+    SetWindowLongPtrW(ov, GWL_EXSTYLE,
+        ex | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW);
+    SetLayeredWindowAttributes(ov,
+        RGB(TRANSPARENT_R, TRANSPARENT_G, TRANSPARENT_B), 0, LWA_COLORKEY);
+
+    // 设为 parent 的 Owned 窗口：置顶于父、父最小化时联动、无独立任务栏项
+    SetWindowLongPtrW(ov, GWLP_HWNDPARENT, (LONG_PTR)parent);
+    SetWindowPos(ov, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 
     g_sdlRdr = SDL_CreateRenderer(g_sdlWin, -1,
         SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    if (!g_sdlRdr) {
+        LOG_WARN("MAIN", "accelerated renderer failed (%s), trying software", SDL_GetError());
+        g_sdlRdr = SDL_CreateRenderer(g_sdlWin, -1, 0);
+    }
     if (!g_sdlRdr) {
         LOG_ERROR("MAIN", "SDL_CreateRenderer: %s", SDL_GetError());
         return false;
@@ -467,10 +478,9 @@ static bool createOverlay(HWND parent, int w, int h) {
     g_text.init(g_sdlRdr);
 
     POINT pt = {0,0}; ClientToScreen(parent, &pt);
-    SDL_SetWindowPosition(g_sdlWin, pt.x, pt.y);
-    SDL_SetWindowSize(g_sdlWin, w, h);
+    SetWindowPos(ov, nullptr, pt.x, pt.y, w, h, SWP_NOACTIVATE);
 
-    LOG_INFO("MAIN", "overlay created (%dx%d)", w, h);
+    LOG_INFO("MAIN", "overlay created (%dx%d, owned)", w, h);
     return true;
 }
 
@@ -478,7 +488,7 @@ static void destroyOverlay() {
     g_text.shutdown();
     svgicon::shutdown();
     if (g_sdlRdr) { SDL_DestroyRenderer(g_sdlRdr); g_sdlRdr = nullptr; }
-    if (g_sdlWin) { SDL_DestroyWindow(g_sdlWin);   g_sdlWin = nullptr; }
+    if (g_sdlWin) { SDL_DestroyWindow(g_sdlWin);   g_sdlWin = nullptr; }  // 连同 HWND 一起销毁
 }
 
 // ---- dithered gradient helper ----
@@ -1009,7 +1019,7 @@ int main(int argc, char** argv) {
 
     if (!mpv.init(g_mpvHwnd)) { LOG_ERROR("MAIN", "mpv init failed"); return 1; }
 
-    // ---- SDL2 overlay ----
+    // ---- SDL2 overlay（owned 顶层窗口，不进任务栏） ----
     if (!createOverlay(g_parentHwnd, rc.right, rc.bottom)) { return 1; }
 
     ShowWindow(g_parentHwnd, SW_SHOW);
