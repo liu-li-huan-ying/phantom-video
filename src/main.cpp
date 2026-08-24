@@ -108,6 +108,10 @@ struct UiState {
     bool   miniMode  = false;
     RECT   savedRect  = {};     // 还原用窗口 rect
     DWORD  savedStyle = 0;      // 还原用 style
+
+    // OSD 信息叠加
+    bool   osdActive = false;
+    Uint32 osdStart  = 0;
 };
 
 // ---- globals ----
@@ -177,6 +181,25 @@ static void showToast(const char* msg) {
     std::snprintf(g_ui.toastMsg, sizeof(g_ui.toastMsg), "%s", msg);
     g_ui.toastActive = true;
     g_ui.toastStart = SDL_GetTicks();
+}
+
+// ---- OSD：mpv 属性查询 ----
+static std::string mpvStr(const char* prop) {
+    if (!g_mpv || !g_mpv->mpv()) return {};
+    char* s = mpv_get_property_string(g_mpv->mpv(), prop);
+    if (!s) return {};
+    std::string r(s);
+    mpv_free(s);
+    return r;
+}
+
+static std::string formatBitrate(const std::string& bpsStr) {
+    long long bps = std::atoll(bpsStr.c_str());
+    if (bps <= 0) return "";
+    char buf[32];
+    if (bps >= 1000000) std::snprintf(buf, sizeof(buf), "%.1f Mbps", bps / 1000000.0);
+    else                std::snprintf(buf, sizeof(buf), "%d kbps", (int)(bps / 1000));
+    return buf;
 }
 
 // ---- overlay z 序 ----
@@ -400,6 +423,11 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 showToast(msg);
                 break;
             }
+            case 'I':
+                g_ui.osdActive = !g_ui.osdActive;
+                g_ui.osdStart = SDL_GetTicks();
+                LOG_DBG("MAIN", "osd -> %d", g_ui.osdActive ? 1 : 0);
+                break;
             case VK_ESCAPE:
                 if (g_ui.speedMenuOpen) g_ui.speedMenuOpen = false;
                 else if (g_ui.volumeSliderOpen) g_ui.volumeSliderOpen = false;
@@ -1224,6 +1252,57 @@ static void renderOverlay() {
                 alpha = 1.0f - (float)(elapsed - (ui::TOAST_MS - 300)) / 300.0f;
             Uint8 a = (Uint8)(alpha * 255);
             g_text.drawText(w / 2 - S(40), S(70), g_ui.toastMsg, 13, 255, 255, 255);
+        }
+    }
+
+    // --- OSD 信息叠加（按 I 切换，8 秒自动消失） ---
+    if (g_ui.osdActive) {
+        if (SDL_GetTicks() - g_ui.osdStart > 8000) {
+            g_ui.osdActive = false;
+        } else {
+            std::string vfmt   = mpvStr("video-format");
+            std::string vfps   = mpvStr("container-fps");
+            if (vfps.empty()) vfps = mpvStr("estimated-vf-fps");
+            std::string vbr    = formatBitrate(mpvStr("video-bitrate"));
+            std::string afmt   = mpvStr("audio-codec-name");
+            std::string asr    = mpvStr("audio-params/samplerate");
+            std::string ach    = mpvStr("audio-params/channel-count");
+            int vw = g_mpv->videoWidth(), vh = g_mpv->videoHeight();
+
+            char line1[128] = {}, line2[64] = {}, line3[96] = {};
+            if (!vfmt.empty())
+                std::snprintf(line1, sizeof(line1), "%s  %dx%d%s%s",
+                    vfmt.c_str(), vw, vh,
+                    vfps.empty() ? "" : " @ ", vfps.c_str());
+            if (!vbr.empty()) std::snprintf(line2, sizeof(line2), "%s", vbr.c_str());
+            if (!afmt.empty()) {
+                int sr = std::atoi(asr.c_str());
+                std::snprintf(line3, sizeof(line3), "%s %s Hz %sch",
+                    afmt.c_str(),
+                    sr > 0 ? asr.c_str() : "?",
+                    ach.empty() ? "?" : ach.c_str());
+            }
+
+            // 面板尺寸随内容
+            int lines = 0;
+            if (line1[0]) ++lines;
+            if (line2[0]) ++lines;
+            if (line3[0]) ++lines;
+            if (lines > 0) {
+                int padX = S(14), padY = S(10), lineH = S(22);
+                int boxW = S(340), boxH = padY * 2 + lines * lineH;
+                int boxX = S(16), boxY = S(ui::TOPBAR_H) + S(12);
+                SDL_Rect bg = {boxX, boxY, boxW, boxH};
+                SDL_SetRenderDrawColor(g_sdlRdr, 11, 11, 11, 200);
+                SDL_RenderFillRect(g_sdlRdr, &bg);
+                SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 30);
+                SDL_RenderDrawRect(g_sdlRdr, &bg);
+
+                int ty = boxY + padY;
+                if (line1[0]) { g_text.drawText(boxX + padX, ty, line1, 12, 255, 255, 255); ty += lineH; }
+                if (line2[0]) { g_text.drawText(boxX + padX, ty, line2, 12, 161, 161, 166); ty += lineH; }
+                if (line3[0]) { g_text.drawText(boxX + padX, ty, line3, 12, 161, 161, 166); }
+            }
         }
     }
 
