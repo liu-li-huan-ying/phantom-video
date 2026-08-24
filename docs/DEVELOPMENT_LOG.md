@@ -1427,3 +1427,45 @@ decodeLoop退出 -> videoQueue_.closed -> pullFrame返回State::Ended -> auto-ne
 - 播放 ~23s 后 ini 落盘 hist=21.28 ✓
 - resume=1 重启日志出现 "resume at 5.8s" ✓
 - 注意：resume 默认关闭（ini: resume=0），属设计行为
+
+---
+
+## M34a Phase 2j: 列表滚动+截图+两项关键底层修复（2026-08-24）
+
+新功能：
+1. 播放列表面板滚轮滚动 + 右侧滚动条（52px/格 ×2 步进，边界钳制）
+2. camera 图标截图：mpv `screenshot` 命令 → PNG 存 `exe/screenshots/`，
+   返回值记日志（`screenshot ret=0 (ok)`）
+
+### 关键修复 1：鼠标交互自 mpv 重写以来从未生效（重大）
+
+**现象**：自动化点击 close 有效、点 camera 无效——排查中发现更严重的问题。
+
+**根因**：overlay 是 `WS_EX_TRANSPARENT` 的顶层窗口，点击穿透后命中的是
+**mpv 的 STATIC 子窗口**（覆盖整个客户区），STATIC 默认窗口过程把鼠标/键盘
+消息全部吞掉，parentProc 从未收到过任何真实输入。此前所有"能用"的验证
+都是键盘路径或巧合。
+
+**修复**：子类化 mpvHwnd 安装 mpvRelayProc——
+- 转发 WM_LBUTTON*/MOUSEMOVE/MOUSEWHEEL/KEY*/CHAR 到 parent
+- WM_MOUSEMOVE 时 SetFocus(parent) 收回键盘焦点
+- 子窗口与父客户区完全重合(0,0)，lParam 坐标直接透传
+
+### 关键修复 2：125% DPI 缩放坐标错位 + 渲染模糊
+
+**现象**：动态定位后点击精确对准仍无反应；注册表 AppliedDPI=120（125%）。
+非 aware 进程的 ClientToScreen/GetClientRect 返回虚拟化(逻辑)坐标，
+SetCursorPos 用物理像素 → 全部错位；渲染同时被系统拉伸模糊。
+
+**修复**：main() 入口 enableDpiAwareness()——动态加载
+`SetProcessDpiAwarenessContext(PER_MONITOR_AWARE_V2)`，回退
+`SetProcessDPIAware`。坐标统一物理像素。
+
+**遗留 TODO**：DPI aware 后 UI 字号/布局未按 scale 缩放，高分屏下显小；
+后续需处理 WM_DPICHANGED 按比例调整 METRICS/FONTS。
+
+验证：
+- 真实鼠标事件点击 camera → 日志 `screenshot ret=0 (ok)` +
+  `mpv-shot0001.png`(4.9MB) ✓
+- 教训：PS5.1 测试脚本含中文注释时 UTF-8 无 BOM 会破坏解析；
+  FindWindow 在此环境不可用，统一用 EnumWindows(by pid)。
