@@ -80,13 +80,13 @@ private:
         std::thread thread;
         std::atomic<bool> running{ false };
         std::atomic<bool> cancelled{ false };
-        std::atomic<int> nextItem{ -1 };
         std::atomic<int> itemCount{ 0 };
         std::mutex mutex;
-        std::string filePath;
+        std::vector<std::string> paths;      // 可见项的文件路径快照
+        std::atomic<int> nextIdx{ 0 };       // 下一个要提取的 paths[] 下标
         uint8_t* pendingPixels = nullptr;
         int pendingW = 0, pendingH = 0;
-        int pendingIdx = -1;
+        int pendingTargetIdx = -1;           // 对应的播放列表索引
         bool ready = false;
     };
     ThumbWorker worker_;
@@ -95,7 +95,7 @@ private:
     void startWorker();
     void stopWorker();
     void workerFunc();
-    void requestVisibleRange(int start, int end, int total,
-                             const std::string& filePath);
+    void requestVisibleRange(const std::vector<std::string>& paths,
+                             const std::vector<int>& indices);
     void consumeReadyTexture();
 };

@@ -163,7 +163,7 @@ void PlaylistPanel::startWorker() {
     if (worker_.running.load()) return;
     worker_.running.store(true);
     worker_.cancelled.store(false);
-    worker_.nextItem.store(-1);
+    worker_.nextIdx.store(0);
     worker_.thread = std::thread(&PlaylistPanel::workerFunc, this);
 }
 
@@ -176,43 +176,46 @@ void PlaylistPanel::stopWorker() {
 
 void PlaylistPanel::workerFunc() {
     ThumbnailExtractor extractor;
-    int currentItem = -1;
+    std::string lastPath;
 
     while (worker_.running.load()) {
         if (worker_.cancelled.load()) {
             extractor.close();
-            currentItem = -1;
+            lastPath.clear();
             worker_.cancelled.store(false);
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
             continue;
         }
 
-        int start = worker_.nextItem.load();
-        int total = worker_.itemCount.load();
-        if (start < 0 || start >= total) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
-            continue;
-        }
-
-        std::string path;
+        int cur = worker_.nextIdx.load();
+        std::vector<std::string> paths;
         {
             std::lock_guard<std::mutex> lock(worker_.mutex);
-            path = worker_.filePath;
+            paths = worker_.paths;
         }
-        if (path.empty()) {
+
+        if (cur < 0 || cur >= (int)paths.size()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
             continue;
         }
 
-        if (currentItem != start) {
+        const std::string& path = paths[cur];
+        if (path.empty()) {
+            worker_.nextIdx.store(cur + 1);
+            continue;
+        }
+
+        if (worker_.cancelled.load()) continue;
+
+        if (path != lastPath) {
             extractor.close();
             if (!extractor.open(path)) {
-                LOG_WARN("THUMB", "worker: open fail idx=%d", start);
-                worker_.nextItem.store(start + 1);
-                currentItem = start;
+                LOG_WARN("THUMB", "worker: open fail idx=%d path=%s", cur, path.c_str());
+                worker_.nextIdx.store(cur + 1);
+                lastPath = path;
                 continue;
             }
-            currentItem = start;
+            lastPath = path;
         }
 
         if (worker_.cancelled.load()) continue;
@@ -226,19 +229,22 @@ void PlaylistPanel::workerFunc() {
             worker_.pendingPixels = pixels;
             worker_.pendingW = w;
             worker_.pendingH = h;
-            worker_.pendingIdx = start;
+            worker_.pendingTargetIdx = cur;
             worker_.ready = true;
         }
-        worker_.nextItem.store(start + 1);
+        worker_.nextIdx.store(cur + 1);
     }
     extractor.close();
 }
 
-void PlaylistPanel::requestVisibleRange(int start, int end, int total,
-                                        const std::string& filePath) {
-    worker_.itemCount.store(total);
-    worker_.filePath = filePath;
-    worker_.nextItem.store(start);
+void PlaylistPanel::requestVisibleRange(const std::vector<std::string>& paths,
+                                        const std::vector<int>& indices) {
+    worker_.cancelled.store(true);
+    {
+        std::lock_guard<std::mutex> lock(worker_.mutex);
+        worker_.paths = paths;
+    }
+    worker_.nextIdx.store(0);
     worker_.cancelled.store(false);
 }
 
@@ -246,8 +252,8 @@ void PlaylistPanel::consumeReadyTexture() {
     std::lock_guard<std::mutex> lock(worker_.mutex);
     if (!worker_.ready || !worker_.pendingPixels) return;
 
-    int idx = worker_.pendingIdx;
-    if (idx >= 0 && thumbTextures_.count(idx) == 0) {
+    int targetIdx = worker_.pendingTargetIdx;
+    if (targetIdx >= 0 && thumbTextures_.count(targetIdx) == 0) {
         SDL_Texture* tex = SDL_CreateTexture(
             renderer_, SDL_PIXELFORMAT_RGB24,
             SDL_TEXTUREACCESS_STREAMING,
@@ -262,7 +268,7 @@ void PlaylistPanel::consumeReadyTexture() {
                            worker_.pendingW * 3);
                 SDL_UnlockTexture(tex);
                 SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
-                thumbTextures_[idx] = tex;
+                thumbTextures_[targetIdx] = tex;
             } else {
                 SDL_DestroyTexture(tex);
             }
@@ -277,7 +283,7 @@ void PlaylistPanel::clearThumbnailCache() {
     for (auto& [k, v] : thumbTextures_)
         if (v) SDL_DestroyTexture(v);
     thumbTextures_.clear();
-    worker_.nextItem.store(-1);
+    worker_.nextIdx.store(0);
 }
 
 void PlaylistPanel::draw(int currentIndex, int winW, int winH) {
@@ -334,8 +340,13 @@ void PlaylistPanel::draw(int currentIndex, int winW, int winH) {
         int visEnd = std::min(totalItems, (visibleH + scrollOffset_) / kItemH + 1);
         if (visStart < visEnd) {
             startWorker();
-            requestVisibleRange(visStart, visEnd, totalItems,
-                                playlist_->fileAt(currentIndex >= 0 ? currentIndex : 0));
+            std::vector<std::string> visPaths;
+            std::vector<int> visIndices;
+            for (int i = visStart; i < visEnd; ++i) {
+                visPaths.push_back(playlist_->fileAt(i));
+                visIndices.push_back(i);
+            }
+            requestVisibleRange(visPaths, visIndices);
         }
     }
     SDL_RenderSetClipRect(renderer_, nullptr);
