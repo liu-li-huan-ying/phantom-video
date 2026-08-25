@@ -1552,3 +1552,22 @@ SetCursorPos 用物理像素 → 全部错位；渲染同时被系统拉伸模�
 - worker 三重校验读盘（魔数/尺寸范围/字节数），损坏即删
 - 解码失败仅内存标记不落盘，下次可重试；thumbcache=0 可整体关闭
 - 验证：首轮 decoded=7 写盘 7 → 二轮 disk-hit=7 decoded=0
+
+---
+
+## M34a Phase 4c: 设置项实际生效接线（2026-08-24）
+
+任务：设置面板此前是纯展示假开关，全部接通真实逻辑。
+
+实现：
+1. config 新增 hwDecode/volNorm；启动时按配置下发 mpv：
+   hwdec / sub-auto / audio-filters(loudnorm)
+2. settingsGeom() 几何助手——渲染与命中测试共用一套坐标
+3. 面板交互：5 行开关翻转即运行时 set_property_string + saveConfig；
+   播放模式 Single/Loop/Shuffle 三态 chips 替换假 Language/Theme 行
+4. onPlaybackEnded 接入 playMode：Single 停住 / Loop 循环 / Shuffle 随机
+
+验证：注入点击 gear→HW开关→Loop chip，
+日志 `setting hw -> 0` + `set hwdec=no ret=0` + `playmode -> 1`，ini 落盘 ✓
+
+遗留：Language/Theme 为诚实砍掉（i18n 与主题系统是独立工程）
