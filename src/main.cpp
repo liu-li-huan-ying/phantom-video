@@ -125,11 +125,12 @@ struct UiState {
     // settings panel
     bool   settingsOpen = false;
 
-    // playlist panel
+    // playlist panel（右侧独立区域: 打开时窗口扩展, 视频不被遮挡）
     bool   playlistOpen = false;
     int    playlistTargetW = 0;  // target window width when playlist open
     int    playlistAnimW = 0;   // current animation width
     int    playlistScroll = 0;  // 滚动偏移(px)
+    int    totalW = 960;        // 整个客户区宽(含列表区); winW 仅视频区
 
     // 单击暂停延迟判定（双击全屏互斥）
     bool   pendingPause = false;
@@ -336,6 +337,16 @@ static void raiseOverlayAbove() {
                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
+// 播放列表开/关 -> 主窗口宽度增减 S(320)（右侧独立区域，不遮挡视频）
+static void applyPlaylistWindow(HWND hwnd) {
+    RECT wr;
+    GetWindowRect(hwnd, &wr);
+    int newW = (wr.right - wr.left) + (g_ui.playlistOpen ? S(320) : -S(320));
+    SetWindowPos(hwnd, nullptr, 0, 0, newW, wr.bottom - wr.top,
+                 SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    // WM_SIZE 中按 playlistOpen 分配视频区/列表区
+}
+
 // ---- 全屏切换（F 键 / maximize 按钮 / pip 共用） ----
 static void toggleFullscreen(HWND hwnd) {
     DWORD sty = (DWORD)GetWindowLongPtrW(hwnd, GWL_STYLE);
@@ -395,7 +406,39 @@ static const char* kVideoExts[] = {
 };
 static const size_t PLAYLIST_MAX = 2000;
 
-// 以 file 所在目录扫描视频文件构建播放队列（按文件名排序）
+// 自然排序: 数字段按数值比较(V2<V10), 非数字段按码点; 行为对齐资源管理器
+static bool naturalLess(const std::wstring& a, const std::wstring& b) {
+    size_t i = 0, j = 0;
+    while (i < a.size() && j < b.size()) {
+        wchar_t ca = a[i], cb = b[j];
+        bool da = (ca >= L'0' && ca <= L'9');
+        bool db = (cb >= L'0' && cb <= L'9');
+        if (da && db) {
+            size_t ie = i, je = j;
+            while (ie < a.size() && a[ie] >= L'0' && a[ie] <= L'9') ++ie;
+            while (je < b.size() && b[je] >= L'0' && b[je] <= L'9') ++je;
+            size_t zi = i, zj = j;                       // 跳前导零
+            while (zi + 1 < ie && a[zi] == L'0') ++zi;
+            while (zj + 1 < je && b[zj] == L'0') ++zj;
+            if (ie - zi != je - zj) return ie - zi < je - zj;   // 数值长度
+            int c = a.compare(zi, ie - zi, b, zj, je - zj);
+            if (c != 0) return c < 0;
+            // 数值相等: 前导零少者在前(01<001)
+            if (ie - i != je - j) return ie - i < je - j;
+            i = ie; j = je;
+        } else {
+            wchar_t la = ca, lb = cb;
+            if (la >= L'A' && la <= L'Z') la += 32;
+            if (lb >= L'A' && lb <= L'Z') lb += 32;
+            if (la != lb) return la < lb;
+            if (ca != cb) return ca < cb;                // 大小写稳定序
+            ++i; ++j;
+        }
+    }
+    return a.size() - i < b.size() - j;
+}
+
+// 以 file 所在目录扫描视频文件构建播放队列（自然顺序）
 static void buildPlaylistAround(const std::string& file) {
     namespace fs = std::filesystem;
     g_playlist.clear();
@@ -413,8 +456,20 @@ static void buildPlaylistAround(const std::string& file) {
         }
     }
     if (found.empty()) { g_playlist.push_back(file); return; }
-    std::sort(found.begin(), found.end());
+    std::sort(found.begin(), found.end(), [](const fs::path& x, const fs::path& y) {
+        return naturalLess(x.filename().wstring(), y.filename().wstring());
+    });
     for (auto& f : found) g_playlist.push_back(WideToUtf8(f.wstring()));   // 宽->UTF-8
+    if (!g_playlist.empty()) {
+        auto nameOf = [](const std::string& p) {
+            size_t s = p.find_last_of("\\/");
+            return (s == std::string::npos) ? p : p.substr(s + 1);
+        };
+        LOG_INFO("MAIN", "sorted[0..2]: %s | %s | %s",
+                 nameOf(g_playlist[0]).c_str(),
+                 nameOf(g_playlist.size() > 1 ? g_playlist[1] : "").c_str(),
+                 nameOf(g_playlist.size() > 2 ? g_playlist[2] : "").c_str());
+    }
 }
 
 static int playlistIndexOf(const std::string& path) {
@@ -648,9 +703,14 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_SIZE: {
         if (wp == SIZE_MINIMIZED) return 0;
         RECT rc; GetClientRect(hwnd, &rc);
-        g_ui.winW = rc.right; g_ui.winH = rc.bottom;
-        if (g_mpvHwnd) MoveWindow(g_mpvHwnd, 0, 0, rc.right, rc.bottom, TRUE);
+        g_ui.totalW = rc.right;
+        // 列表面板打开(非全屏)时: 右侧独立区域, mpv/overlay 只占视频区
+        int panelExtra = (g_ui.playlistOpen && !g_ui.fullscreen) ? S(320) : 0;
+        g_ui.winW = rc.right - panelExtra;
+        g_ui.winH = rc.bottom;
+        if (g_mpvHwnd) MoveWindow(g_mpvHwnd, 0, 0, g_ui.winW, rc.bottom, TRUE);
         if (g_sdlWin) {
+            // overlay 覆盖整个客户区(含右侧列表区); 视频区布局由 winW 约束
             POINT pt = {0,0}; ClientToScreen(hwnd, &pt);
             SDL_SetWindowPosition(g_sdlWin, pt.x, pt.y);
             SDL_SetWindowSize(g_sdlWin, rc.right, rc.bottom);
@@ -832,8 +892,10 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             case 2: // minimize
                 ShowWindow(hwnd, SW_MINIMIZE);
                 return 0;
-            case 3: // playlist
+            case 3: // playlist（右侧独立区域：窗口扩展）
                 g_ui.playlistOpen = !g_ui.playlistOpen;
+                if (!g_ui.fullscreen) applyPlaylistWindow(hwnd);
+                else g_dirty.store(true);
                 return 0;
             case 4: { // PIP 置顶迷你小窗
                 if (g_mpv && g_mpv->hasMedia()) {
@@ -1005,7 +1067,7 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             // 其余空隙不处理
         }
         // --- 播放列表面板区域：按下记候选（拖拽排序 / 松手播放） ---
-        else if (g_ui.playlistOpen && mx >= g_ui.winW - S(320)) {
+        else if (g_ui.playlistOpen && mx >= g_ui.winW) {
             int panelY = S(ui::TOPBAR_H);
             int itemH = S(52);
             int rel = my - (panelY + S(45)) + g_ui.playlistScroll;
@@ -1094,7 +1156,7 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         short d = GET_WHEEL_DELTA_WPARAM(wp);
 
         // 播放列表面板区域：滚动列表
-        if (g_ui.playlistOpen && pt.x >= g_ui.winW - S(320)) {
+        if (g_ui.playlistOpen && pt.x >= g_ui.winW) {
             int panelH = g_ui.winH - S(ui::TOPBAR_H);
             int contentH = (int)g_playlist.size() * S(52);
             int viewH = panelH - S(55);
@@ -1281,11 +1343,11 @@ static void renderOverlay() {
     SDL_SetRenderDrawColor(g_sdlRdr, TRANSPARENT_R, TRANSPARENT_G, TRANSPARENT_B, 255);
     SDL_RenderClear(g_sdlRdr);
 
-    int w = g_ui.winW, h = g_ui.winH;
+    int w = g_ui.winW, h = g_ui.winH, totalW = g_ui.totalW;
 
     if (!g_mpv || !g_mpv->hasMedia()) {
         // --- welcome page ---
-        int w = g_ui.winW, h = g_ui.winH;
+        int w = g_ui.winW, h = g_ui.winH, totalW = g_ui.totalW;
 
         // topbar still visible
         drawGradientBar(g_sdlRdr, 0, 0, 0, w, S(ui::TOPBAR_H), 11, 11, 11, 220, 0);
@@ -1566,19 +1628,26 @@ static void renderOverlay() {
         g_text.drawText(sliderX + sliderW/2 - S(12), sliderY - S(18), vStr, 11, 161, 161, 166);
     }
 
-    // --- playlist panel (right side) ---
+    // --- playlist panel (右侧独立区域) ---
     if (g_ui.playlistOpen) {
-        int panelW = S(320);
-        int panelX = w - panelW;
+        int panelW, panelX;
+        if (!g_ui.fullscreen) {
+            panelW = totalW - w;                 // 窗口扩展出的独立区域
+            panelX = w;
+        } else {                                  // 全屏无法扩窗: 覆盖式
+            panelW = S(320);
+            panelX = w - panelW;
+        }
+        if (panelW < S(200)) { panelW = S(200); panelX = w - panelW; }   // 兜底
         int panelH = h - S(ui::TOPBAR_H);
         int panelY = S(ui::TOPBAR_H);
 
-        // panel background
+        // panel background（独立区域不透明）
         SDL_Rect pRc = {panelX, panelY, panelW, panelH};
-        SDL_SetRenderDrawColor(g_sdlRdr, 18, 18, 18, 245);
+        SDL_SetRenderDrawColor(g_sdlRdr, 16, 16, 17, 255);
         SDL_RenderFillRect(g_sdlRdr, &pRc);
         // left border
-        SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 20);
+        SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 25);
         SDL_RenderDrawLine(g_sdlRdr, panelX, panelY, panelX, panelY + panelH);
 
         // title

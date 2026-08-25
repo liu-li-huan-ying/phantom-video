@@ -75,6 +75,10 @@ bool MpvBackend::init(HWND hwnd) {
         }
     }
 
+    // 桥接 mpv 内部日志(warn+) 到统一 Logger —— 否则解码/加载失败静默
+    mpv_request_log_messages(mpv_, "warn");
+    mpv_set_property_string(mpv_, "terminal", "no");
+
     mpv_observe_property(mpv_, 1, "pause", MPV_FORMAT_FLAG);
     mpv_observe_property(mpv_, 2, "time-pos", MPV_FORMAT_DOUBLE);
     mpv_observe_property(mpv_, 3, "duration", MPV_FORMAT_DOUBLE);
@@ -85,6 +89,8 @@ bool MpvBackend::init(HWND hwnd) {
     mpv_observe_property(mpv_, 8, "height", MPV_FORMAT_INT64);
     mpv_observe_property(mpv_, 9, "mute", MPV_FORMAT_FLAG);
     mpv_observe_property(mpv_, 10, "paused-for-cache", MPV_FORMAT_FLAG);
+    // keep-open=yes 时播完不发 END_FILE, 必须观察 eof-reached 才能触发连播
+    mpv_observe_property(mpv_, 11, "eof-reached", MPV_FORMAT_FLAG);
 
     running_.store(true);
     eventThread_ = std::thread(&MpvBackend::eventLoop, this);
@@ -117,9 +123,15 @@ bool MpvBackend::loadFile(const std::string& path) {
         return false;
     }
 
+    // stop 不重置 pause —— 暂停中拖入/切歌会继承暂停态(画面静止像没播),
+    // 显式恢复播放
+    int unpaused = 0;
+    mpv_set_property(mpv_, "pause", MPV_FORMAT_FLAG, &unpaused);
+
     path_ = path;
     hasMedia_.store(true);
     state_.store(State::Playing);
+    eofFired_.store(false);
     LOG_INFO("MPV", "loaded: %s", path.c_str());
     return true;
 }
@@ -287,12 +299,25 @@ void MpvBackend::eventLoop() {
             break;
         }
 
+        case MPV_EVENT_LOG_MESSAGE: {
+            auto* lm = (mpv_event_log_message*)event->data;
+            if (lm->log_level >= MPV_LOG_LEVEL_WARN)
+                LOG_WARN("MPV", "[%s] %s", lm->prefix ? lm->prefix : "?",
+                         lm->text ? lm->text : "");
+            break;
+        }
+
         case MPV_EVENT_END_FILE: {
             auto* end = (mpv_event_end_file*)event->data;
             if (end->reason == MPV_END_FILE_REASON_EOF) {
                 state_.store(State::Ended);
                 if (onPlaybackEnded) onPlaybackEnded();
                 LOG_INFO("MPV", "playback ended (EOF)");
+            } else if (end->reason == MPV_END_FILE_REASON_ERROR) {
+                const char* es = mpv_error_string(end->error);
+                LOG_ERROR("MPV", "playback FAILED: %s (%d)", es ? es : "?", end->error);
+                state_.store(State::Ended);
+                if (onPlaybackEnded) onPlaybackEnded();
             } else if (end->reason == MPV_END_FILE_REASON_STOP) {
                 LOG_DBG("MPV", "playback stopped");
             }
@@ -349,5 +374,16 @@ void MpvBackend::handlePropertyChange(const char* name, mpv_event_property* prop
     }
     else if (std::strcmp(name, "paused-for-cache") == 0 && prop->format == MPV_FORMAT_FLAG) {
         cachedBufferFill_ = *(int*)prop->data ? 0.0 : 1.0;
+    }
+    else if (std::strcmp(name, "eof-reached") == 0 && prop->format == MPV_FORMAT_FLAG) {
+        // keep-open 下播完的唯一信号; 去重: 仅从未触发态进入
+        if (*(int*)prop->data && !eofFired_) {
+            eofFired_ = true;
+            state_.store(State::Ended);
+            LOG_INFO("MPV", "playback ended (eof-reached)");
+            if (onPlaybackEnded) onPlaybackEnded();
+        } else if (!*(int*)prop->data) {
+            eofFired_ = false;   // 新文件加载后复位
+        }
     }
 }

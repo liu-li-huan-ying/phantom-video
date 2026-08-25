@@ -78,4 +78,5 @@ private:
     double cachedDuration_ = 0.0;
     double cachedClock_ = 0.0;
     double cachedBufferFill_ = 0.0;
+    std::atomic<bool> eofFired_{ false };   // eof-reached 去重(事件线程读/loadFile 写)
 };
