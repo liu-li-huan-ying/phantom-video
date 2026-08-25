@@ -1649,6 +1649,34 @@ lParam。测试脚本必须与目标进程 DPI 上下文一致（此前 click/ke
 ### 音质结论（评估后未改动项及理由）
 - WASAPI 独占：绕过混音器但独占设备影响其他应用，不适合默认
 - 重采样质量：mpv/swresample 默认已高质量；loudnorm 已覆盖响度场景
+
+---
+
+## M34a Phase 7a-7b: 音画选项包 + 按需渲染（2026-08-25）
+
+### Phase 7a (0e3d44d): 五项音画能力
+| 开关 | mpv 效果 |
+|------|----------|
+| Night Mode | `af=@night:acompressor=threshold=-25dB:ratio=6` 动态压缩, 晚场对白清晰 |
+| Exclusive Audio | `audio-exclusive` WASAPI 独占(耳机党) |
+| Motion Interp | `video-sync=display-resample + interpolation=yes + tscale=oversample` 去 judder |
+| tone-mapping | `bt.2446a` 显式(HDR 高光) |
+| af 链 | rebuildAudioFilters() loudnorm+acompressor 组合构建 |
+
+**崩溃修复**：SettingsGeom.rowY[5] 未随 SET_ROW_COUNT 扩到 8 →
+settingsGeom 写 rowY[5..7] 越界踩栈，点击 gear 即崩。
+教训：数组尺寸与循环上界分离时必然失同步，改字面量一致或用 std::array。
+
+### Phase 7b (ff50587): UI 按需渲染
+- 原子 g_dirty；parentProc 入口统一置脏（消息=潜在视觉变化）
+- 主循环：进度秒变/state 轮询 + 定时迁移置脏 → dirty 才渲染；
+  MsgWaitForMultipleObjectsEx(QS_ALLINPUT) 替代 Sleep(1)
+- **实测：暂停静止 3.85% → 0.52% CPU (-86%)**；播放中 1.88%（mpv 主导）
+
+排查插曲：曾测得欢迎页 18.75%——127k 条/秒消息风暴
+（MOUSEMOVE/PAINT/0xC0F4），系物理鼠标悬停窗口引发系统重绘投递，
+非自身循环问题（render 恒 6-8/s）。移开鼠标即恢复。
+另修 wait=0 加速分支造成的忙转窗口。
 - gapless-audio 默认 weak 已满足本地播放
 
 ---
