@@ -937,6 +937,64 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 g_ui.osdStart = SDL_GetTicks();
                 LOG_DBG("MAIN", "osd -> %d", g_ui.osdActive ? 1 : 0);
                 break;
+            case 'A': {  // AB 循环: 第一次设 A, 第二次设 B, 第三次清除
+                if (!g_mpv->looping()) {
+                    g_mpv->setLoopA();
+                    showToast("Loop A set");
+                } else if (g_mpv->loopA() >= 0 && g_mpv->loopB() < 0) {
+                    g_mpv->setLoopB();
+                    showToast("AB loop active");
+                } else {
+                    g_mpv->clearLoop();
+                    showToast("Loop cleared");
+                }
+                break;
+            }
+            case 'G': {  // 章节跳转: 跳到下一章
+                auto chs = g_mpv->chapters();
+                if (!chs.empty()) {
+                    int cur = g_mpv->currentChapter();
+                    int next = (cur + 1) % (int)chs.size();
+                    g_mpv->seekToChapter(next);
+                    char msg[64];
+                    std::snprintf(msg, sizeof(msg), "Chapter %d/%d: %s",
+                                 next + 1, (int)chs.size(),
+                                 chs[next].title.empty() ? "Untitled" : chs[next].title.c_str());
+                    showToast(msg);
+                }
+                break;
+            }
+            case 'V': {  // 音轨切换: 循环下一音轨
+                auto tracks = g_mpv->audioTracks();
+                if (tracks.size() > 1) {
+                    int cur = g_mpv->currentAudioTrack();
+                    int nextIdx = 0;
+                    for (int i = 0; i < (int)tracks.size(); ++i) {
+                        if (tracks[i].id == cur && i + 1 < (int)tracks.size()) {
+                            nextIdx = i + 1; break;
+                        }
+                    }
+                    g_mpv->setAudioTrack(tracks[nextIdx].id);
+                    char msg[64];
+                    std::snprintf(msg, sizeof(msg), "Audio: %s",
+                                 tracks[nextIdx].desc.empty() ? "Default" : tracks[nextIdx].desc.c_str());
+                    showToast(msg);
+                } else {
+                    showToast("Single audio track");
+                }
+                break;
+            }
+            case 'B': {  // 字幕位置: 循环底部/居中/顶部
+                static int subPosIdx = 0;
+                int positions[] = {100, 50, 10};
+                const char* names[] = {"Bottom", "Center", "Top"};
+                subPosIdx = (subPosIdx + 1) % 3;
+                g_mpv->setSubPos(positions[subPosIdx]);
+                char msg[32];
+                std::snprintf(msg, sizeof(msg), "Sub: %s", names[subPosIdx]);
+                showToast(msg);
+                break;
+            }
             case VK_ESCAPE:
                 if (g_ui.speedMenuOpen) g_ui.speedMenuOpen = false;
                 else if (g_ui.volumeSliderOpen) g_ui.volumeSliderOpen = false;
@@ -2692,6 +2750,14 @@ wc.style         = CS_DBLCLKS;   // 接收 WM_LBUTTONDBLCLK
         if (g_ui.volumeSliderOpen) upd(g_ui.volHoverAt + 1200);
         if (g_ui.toastActive)      upd(g_ui.toastStart + ui::TOAST_MS + 60);
         if (g_ui.osdActive)        upd(g_ui.osdStart + 8050);
+        // AB 循环检测: 播放到 B 点时跳回 A 点
+        if (g_mpv && g_mpv->looping() && !g_ui.seekingDrag) {
+            double cur = g_mpv->clock();
+            if (cur >= g_mpv->loopB()) {
+                g_mpv->seek(g_mpv->loopA());
+                g_dirty.store(true);
+            }
+        }
         // 进度保存(3s 周期)由 200ms 兜底轮询覆盖, 无需专门加速
 
         MsgWaitForMultipleObjectsEx(0, nullptr, wait, QS_ALLINPUT, MWMO_INPUTAVAILABLE);

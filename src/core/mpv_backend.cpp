@@ -262,6 +262,145 @@ double MpvBackend::subDelay() const {
     return v;
 }
 
+// ---- 字幕样式 ----
+void MpvBackend::setSubFontSize(int size) {
+    if (!mpv_) return;
+    // mpv sub-font-size: 0=script, 1-7 对应不同大小
+    const char* sizes[] = {"50","75","100","150","200","300","400"};
+    if (size >= 0 && size < 7) {
+        mpv_set_option_string(mpv_, "sub-font-size", sizes[size]);
+    }
+}
+
+int MpvBackend::subFontSize() const {
+    if (!mpv_) return 2;
+    char* v = mpv_get_property_string(mpv_, "sub-font-size");
+    if (!v) return 2;
+    static const char* sizes[] = {"50","75","100","150","200","300","400"};
+    int r = 2;
+    for (int i = 0; i < 7; ++i) {
+        if (std::strcmp(v, sizes[i]) == 0) { r = i; break; }
+    }
+    mpv_free(v);
+    return r;
+}
+
+void MpvBackend::setSubColor(int r, int g, int b) {
+    if (!mpv_) return;
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "#%02X%02X%02X", r, g, b);
+    mpv_set_option_string(mpv_, "sub-color", buf);
+}
+
+void MpvBackend::setSubPos(int pos) {
+    if (!mpv_) return;
+    // mpv sub-pos: 0=顶, 100=底(默认100)
+    if (pos < 0) pos = 0; if (pos > 100) pos = 100;
+    int64_t v = pos;
+    mpv_set_property(mpv_, "sub-pos", MPV_FORMAT_INT64, &v);
+}
+
+// ---- 音轨 ----
+std::vector<MpvBackend::TrackInfo> MpvBackend::audioTracks() const {
+    std::vector<TrackInfo> result;
+    if (!mpv_) return result;
+    mpv_node list;
+    if (mpv_get_property(mpv_, "track-list", MPV_FORMAT_NODE, &list) < 0) return result;
+    if (list.format != MPV_FORMAT_NODE_ARRAY) { mpv_free_node_contents(&list); return result; }
+    for (int i = 0; i < list.u.list->num; ++i) {
+        mpv_node* node = &list.u.list->values[i];
+        if (node->format != MPV_FORMAT_NODE_MAP) continue;
+        const char* type = nullptr;
+        int id = 0;
+        const char* desc = "";
+        for (int j = 0; j < node->u.list->num; ++j) {
+            const char* key = node->u.list->keys[j];
+            mpv_node* val = &node->u.list->values[j];
+            if (std::strcmp(key, "type") == 0 && val->format == MPV_FORMAT_STRING)
+                type = val->u.string;
+            else if (std::strcmp(key, "id") == 0 && val->format == MPV_FORMAT_INT64)
+                id = (int)val->u.int64;
+            else if (std::strcmp(key, "desc") == 0 && val->format == MPV_FORMAT_STRING)
+                desc = val->u.string;
+        }
+        if (type && std::strcmp(type, "audio") == 0)
+            result.push_back({id, desc ? desc : ""});
+    }
+    mpv_free_node_contents(&list);
+    return result;
+}
+
+int MpvBackend::currentAudioTrack() const {
+    if (!mpv_) return -1;
+    int64_t v = -1;
+    mpv_get_property(mpv_, "aid", MPV_FORMAT_INT64, &v);
+    return (int)v;
+}
+
+void MpvBackend::setAudioTrack(int id) {
+    if (!mpv_) return;
+    int64_t v = id;
+    mpv_set_property(mpv_, "aid", MPV_FORMAT_INT64, &v);
+}
+
+// ---- 章节 ----
+std::vector<MpvBackend::ChapterInfo> MpvBackend::chapters() const {
+    std::vector<ChapterInfo> result;
+    if (!mpv_) return result;
+    mpv_node list;
+    if (mpv_get_property(mpv_, "chapter-list", MPV_FORMAT_NODE, &list) < 0) return result;
+    if (list.format != MPV_FORMAT_NODE_ARRAY) { mpv_free_node_contents(&list); return result; }
+    for (int i = 0; i < list.u.list->num; ++i) {
+        mpv_node* node = &list.u.list->values[i];
+        if (node->format != MPV_FORMAT_NODE_MAP) continue;
+        double time = 0;
+        const char* title = "";
+        for (int j = 0; j < node->u.list->num; ++j) {
+            const char* key = node->u.list->keys[j];
+            mpv_node* val = &node->u.list->values[j];
+            if (std::strcmp(key, "time") == 0 && val->format == MPV_FORMAT_DOUBLE)
+                time = val->u.double_;
+            else if (std::strcmp(key, "title") == 0 && val->format == MPV_FORMAT_STRING)
+                title = val->u.string;
+        }
+        result.push_back({i, time, title ? title : ""});
+    }
+    mpv_free_node_contents(&list);
+    return result;
+}
+
+int MpvBackend::currentChapter() const {
+    if (!mpv_) return -1;
+    int64_t v = -1;
+    mpv_get_property(mpv_, "chapter", MPV_FORMAT_INT64, &v);
+    return (int)v;
+}
+
+void MpvBackend::seekToChapter(int idx) {
+    if (!mpv_) return;
+    int64_t v = idx;
+    mpv_set_property(mpv_, "chapter", MPV_FORMAT_INT64, &v);
+}
+
+// ---- AB 循环 ----
+void MpvBackend::setLoopA() {
+    loopA_ = clock();
+    loopB_ = -1.0;
+    LOG_INFO("MPV", "AB loop A=%.2f", loopA_);
+}
+
+void MpvBackend::setLoopB() {
+    if (loopA_ < 0) return;
+    loopB_ = clock();
+    if (loopB_ <= loopA_) { loopA_ = loopB_ = -1.0; return; }
+    LOG_INFO("MPV", "AB loop B=%.2f (range %.2f..%.2f)", loopB_, loopA_, loopB_);
+}
+
+void MpvBackend::clearLoop() {
+    loopA_ = loopB_ = -1.0;
+    LOG_INFO("MPV", "AB loop cleared");
+}
+
 double MpvBackend::clock() const {
     if (!mpv_) return 0.0;
     std::lock_guard<std::mutex> lock(propMutex_);

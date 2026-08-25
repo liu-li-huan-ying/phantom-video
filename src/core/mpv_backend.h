@@ -39,6 +39,32 @@ public:
     void addSubDelay(double delta);        // 秒
     double subDelay() const;
 
+    // ---- 字幕样式 ----
+    void setSubFontSize(int size);         // 字号(0-7)
+    int  subFontSize() const;
+    void setSubColor(int r, int g, int b); // 字幕颜色
+    void setSubPos(int pos);               // 垂直位置(0-100, 底部=100)
+
+    // ---- 音轨 ----
+    struct TrackInfo { int id; std::string desc; };
+    std::vector<TrackInfo> audioTracks() const;
+    int  currentAudioTrack() const;
+    void setAudioTrack(int id);
+
+    // ---- 章节 ----
+    struct ChapterInfo { int index; double time; std::string title; };
+    std::vector<ChapterInfo> chapters() const;
+    int  currentChapter() const;
+    void seekToChapter(int idx);
+
+    // ---- AB 循环 ----
+    void setLoopA();                       // 设置 A 点(当前时间), 返回 A 点时间
+    void setLoopB();                       // 设置 B 点, 开始循环
+    void clearLoop();                      // 清除循环
+    double loopA() const { return loopA_; }
+    double loopB() const { return loopB_; }
+    bool   looping() const { return loopB_ > 0; }
+
     State state() const { return state_.load(); }
     double clock() const;
     double duration() const;
@@ -82,4 +108,6 @@ private:
     double cachedBufferFill_ = 0.0;
     std::atomic<bool> eofFired_{ false };   // eof-reached 去重(事件线程读/loadFile 写)
     uint32_t seekbarFreezeEnd_ = 0;         // 速度切换后冻结进度条显示(ms)
+    double loopA_ = -1.0;                   // AB 循环 A 点
+    double loopB_ = -1.0;                   // AB 循环 B 点
 };
