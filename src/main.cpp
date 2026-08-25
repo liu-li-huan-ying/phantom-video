@@ -232,20 +232,38 @@ static void mpvSetOpt(const char* prop, const char* val) {
     LOG_DBG("MAIN", "set %s=%s ret=%d", prop, val, r);
 }
 
+// 按 volNorm/nightMode 重建 af 滤镜链
+static void rebuildAudioFilters() {
+    std::string af;
+    if (g_cfg.volNorm) af += "loudnorm";
+    if (g_cfg.nightMode) {
+        if (!af.empty()) af += ",";
+        af += "@night:acompressor=threshold=-25dB:ratio=6";
+    }
+    mpvSetOpt("af", af.c_str());
+}
+
+// 运动插值：display-resample 时钟 + oversample（低开销去 judder）
+static void applyMotionInterp(bool on) {
+    mpvSetOpt("video-sync", on ? "display-resample" : "audio");
+    mpvSetOpt("interpolation", on ? "yes" : "no");
+    if (on) mpvSetOpt("tscale", "oversample");
+}
+
 // ---- 设置面板：几何与行定义（渲染/命中共用） ----
 struct SettingsGeom {
     int panelX, panelY, panelW, panelH;
     int closeCx, closeCy, closeR;
     int swX, swW, swH;          // 开关
-    int rowY[5];                // 5 个开关行
+    int rowY[8];                // 8 个开关行
     int modeRowY;               // 播放模式行
     int chipY, chipH, chipW;    // 模式 chips
 };
-static const int SET_ROW_COUNT = 5;
+static const int SET_ROW_COUNT = 8;
 
 static SettingsGeom settingsGeom(int w, int h) {
     SettingsGeom g;
-    g.panelW = S(380); g.panelH = S(400);
+    g.panelW = S(400); g.panelH = S(470);
     g.panelX = (w - g.panelW) / 2;
     g.panelY = (h - g.panelH) / 2;
     g.closeCx = g.panelX + g.panelW - S(22);
@@ -254,8 +272,8 @@ static SettingsGeom settingsGeom(int w, int h) {
     g.swX = g.panelX + g.panelW - S(60);
     g.swW = S(40); g.swH = S(20);
     for (int i = 0; i < SET_ROW_COUNT; ++i)
-        g.rowY[i] = g.panelY + S(55) + i * S(44);
-    g.modeRowY = g.rowY[4] + S(44);
+        g.rowY[i] = g.panelY + S(55) + i * S(40);
+    g.modeRowY = g.rowY[7] + S(44);
     g.chipY = g.modeRowY;
     g.chipH = S(24); g.chipW = S(56);
     return g;
@@ -263,9 +281,12 @@ static SettingsGeom settingsGeom(int w, int h) {
 
 // 应用设置变更到 mpv（开关翻转时调用）
 static void applySetting(const char* key, int value) {
-    if (std::strcmp(key, "hw") == 0)        mpvSetOpt("hwdec", value ? "auto-safe" : "no");
-    else if (std::strcmp(key, "vol") == 0)  mpvSetOpt("audio-filters", value ? "loudnorm" : "");
-    else if (std::strcmp(key, "sub") == 0)  mpvSetOpt("sub-auto", value ? "fuzzy" : "no");
+    if      (std::strcmp(key, "hw") == 0)      mpvSetOpt("hwdec", value ? "auto-safe" : "no");
+    else if (std::strcmp(key, "sub") == 0)     mpvSetOpt("sub-auto", value ? "fuzzy" : "no");
+    else if (std::strcmp(key, "excl") == 0)    mpvSetOpt("audio-exclusive", value ? "yes" : "no");
+    else if (std::strcmp(key, "vol") == 0 ||
+             std::strcmp(key, "night") == 0)   rebuildAudioFilters();
+    else if (std::strcmp(key, "interp") == 0)  applyMotionInterp(value != 0);
     // thumbCache/resume 纯本地，无需通知 mpv
 }
 
@@ -866,20 +887,20 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             }
             else {
                 int* vals[SET_ROW_COUNT] = { &g_cfg.hwDecode, &g_cfg.volNorm,
-                    &g_cfg.resume, &g_cfg.subAutoLoad, &g_cfg.thumbCache };
-                const char* keys[SET_ROW_COUNT] = { "hw", "vol", "resume", "sub", "thumb" };
+                    &g_cfg.subAutoLoad, &g_cfg.thumbCache, &g_cfg.resume,
+                    &g_cfg.nightMode, &g_cfg.audioExclusive, &g_cfg.motionInterp };
+                const char* keys[SET_ROW_COUNT] = { "hw", "vol", "sub", "thumb",
+                    "resume", "night", "excl", "interp" };
                 const char* names[SET_ROW_COUNT] = { "Hardware Decode", "Volume Norm",
-                    "Resume", "Sub Auto-Load", "Thumb Cache" };
+                    "Sub Auto-Load", "Thumb Cache", "Resume",
+                    "Night Mode", "Exclusive Audio", "Motion Interp" };
                 bool handled = false;
                 for (int i = 0; i < SET_ROW_COUNT && !handled; ++i) {
-                    if (my >= sg.rowY[i] - S(6) && my <= sg.rowY[i] + sg.swH + S(6) &&
+                    if (my >= sg.rowY[i] - S(5) && my <= sg.rowY[i] + sg.swH + S(5) &&
                         mx >= sg.panelX + S(12)) {
                         *vals[i] = *vals[i] ? 0 : 1;
                         applySetting(keys[i], *vals[i]);
-                        showToast(names[std::strcmp(keys[i],"hw")==0 ? 0 :
-                                        std::strcmp(keys[i],"vol")==0 ? 1 :
-                                        std::strcmp(keys[i],"resume")==0 ? 2 :
-                                        std::strcmp(keys[i],"sub")==0 ? 3 : 4]);
+                        showToast(names[i]);
                         LOG_INFO("MAIN", "setting %s -> %d", keys[i], *vals[i]);
                         handled = true;
                     }
@@ -1651,13 +1672,17 @@ static void renderOverlay() {
 
         // toggle rows
         int toggleVals[SET_ROW_COUNT] = { g_cfg.hwDecode, g_cfg.volNorm,
-            g_cfg.resume, g_cfg.subAutoLoad, g_cfg.thumbCache };
+            g_cfg.subAutoLoad, g_cfg.thumbCache, g_cfg.resume,
+            g_cfg.nightMode, g_cfg.audioExclusive, g_cfg.motionInterp };
         const char* rowLabels[SET_ROW_COUNT] = {
             "Hardware Decode",
             "Volume Normalization",
-            "Resume Playback",
             "Subtitle Auto-Load",
             "Thumbnail Disk Cache",
+            "Resume Playback",
+            "Night Mode (Compressor)",
+            "Exclusive Audio (WASAPI)",
+            "Motion Interpolation",
         };
         for (int i = 0; i < SET_ROW_COUNT; ++i) {
             int ry = sg.rowY[i];
@@ -1897,7 +1922,9 @@ wc.style         = CS_DBLCLKS;   // 接收 WM_LBUTTONDBLCLK
     // 按配置应用运行时选项
     mpvSetOpt("hwdec", g_cfg.hwDecode ? "auto-safe" : "no");
     mpvSetOpt("sub-auto", g_cfg.subAutoLoad ? "fuzzy" : "no");
-    mpvSetOpt("audio-filters", g_cfg.volNorm ? "loudnorm" : "");
+    mpvSetOpt("audio-exclusive", g_cfg.audioExclusive ? "yes" : "no");
+    rebuildAudioFilters();
+    if (g_cfg.motionInterp) applyMotionInterp(true);
 
     // ---- SDL2 overlay（owned 顶层窗口，不进任务栏） ----
     if (!createOverlay(g_parentHwnd, rc.right, rc.bottom)) { return 1; }

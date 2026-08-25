@@ -14,6 +14,9 @@ struct AppConfig {
     float subScale = 1.0f; // 字幕缩放系数
     int hwDecode = 1;      // 硬件解码
     int volNorm = 0;       // 音量标准化(loudnorm)
+    int nightMode = 0;     // 夜间模式(acompressor 动态压缩)
+    int audioExclusive = 0;// WASAPI 独占输出
+    int motionInterp = 0;  // 运动插值(display-resample + oversample)
     // 窗口位置（物理像素；x==INVALID_POS 表示未记忆）
     static const int INVALID_POS = -32001;
     int posX = INVALID_POS, posY = INVALID_POS;

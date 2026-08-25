@@ -61,6 +61,12 @@ bool loadConfig(const std::string& path, AppConfig& out) {
             out.hwDecode = std::atoi(line.c_str() + 9) != 0 ? 1 : 0;
         } else if (line.rfind("volnorm=", 0) == 0) {
             out.volNorm = std::atoi(line.c_str() + 8) != 0 ? 1 : 0;
+        } else if (line.rfind("nightmode=", 0) == 0) {
+            out.nightMode = std::atoi(line.c_str() + 10) != 0 ? 1 : 0;
+        } else if (line.rfind("audioexcl=", 0) == 0) {
+            out.audioExclusive = std::atoi(line.c_str() + 10) != 0 ? 1 : 0;
+        } else if (line.rfind("motioninterp=", 0) == 0) {
+            out.motionInterp = std::atoi(line.c_str() + 13) != 0 ? 1 : 0;
         } else if (line.rfind("subscale=", 0) == 0) {
             float s = (float)std::atof(line.c_str() + 9);
             if (s >= 0.5f && s <= 3.0f) out.subScale = s;
@@ -96,6 +102,9 @@ bool saveConfig(const std::string& path, const AppConfig& cfg) {
     out << "thumbcache=" << cfg.thumbCache << "\n";
     out << "hwdecode=" << cfg.hwDecode << "\n";
     out << "volnorm=" << cfg.volNorm << "\n";
+    out << "nightmode=" << cfg.nightMode << "\n";
+    out << "audioexcl=" << cfg.audioExclusive << "\n";
+    out << "motioninterp=" << cfg.motionInterp << "\n";
     out << "subscale=" << cfg.subScale << "\n";
     if (cfg.posX != AppConfig::INVALID_POS && cfg.posW > 0)
         out << "pos=" << cfg.posX << "," << cfg.posY << "," << cfg.posW << "," << cfg.posH << "\n";
