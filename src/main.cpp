@@ -94,7 +94,7 @@ static std::string fileNameOf(const std::string& utf8path) {
 }
 
 // ---- UI state ----
-static const int CONTROL_BAR_H = 100;
+static const int CONTROL_BAR_H = 80;
 
 struct UiState {
     bool   visible   = true;
