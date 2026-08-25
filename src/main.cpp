@@ -976,7 +976,7 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             {
                 g_mpv->setSpeed(g_mpv->speed() - 0.25f);
                 char msg[32];
-                std::snprintf(msg, sizeof(msg), "Speed: %.2fx", g_mpv->speed());
+                std::snprintf(msg, sizeof(msg), "%s: %.2fx", T("倍速", "Speed"), g_mpv->speed());
                 showToast(msg);
                 break;
             }
@@ -985,7 +985,7 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             {
                 g_mpv->setSpeed(g_mpv->speed() + 0.25f);
                 char msg[32];
-                std::snprintf(msg, sizeof(msg), "Speed: %.2fx", g_mpv->speed());
+                std::snprintf(msg, sizeof(msg), "%s: %.2fx", T("倍速", "Speed"), g_mpv->speed());
                 showToast(msg);
                 break;
             }
@@ -1388,7 +1388,7 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     if (idx >= 0 && idx < SPEED_PRESET_COUNT) {
                         g_mpv->setSpeed(SPEED_PRESETS[idx]);
                         char msg[32];
-                        std::snprintf(msg, sizeof(msg), "Speed: %.2fx", SPEED_PRESETS[idx]);
+                        std::snprintf(msg, sizeof(msg), "%s: %.2fx", T("倍速", "Speed"), SPEED_PRESETS[idx]);
                         showToast(msg);
                     }
                 }
@@ -1699,7 +1699,7 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         else if (g_mpv) {
             g_mpv->setVolume(g_mpv->volume() + (d > 0 ? 0.05f : -0.05f));
             char msg[24];
-            std::snprintf(msg, sizeof(msg), "Volume %d%%", (int)(g_mpv->volume() * 100 + 0.5f));
+            std::snprintf(msg, sizeof(msg), "%s %d%%", T("音量", "Volume"), (int)(g_mpv->volume() * 100 + 0.5f));
             showToast(msg);
         }
         g_ui.visible = true;
@@ -2027,7 +2027,7 @@ static void renderOverlay() {
     // 控件淡出: 控制栏随 alpha 滑出屏底
     int barTop = sbTopY() + (int)((1.0f - fa) * S(CONTROL_BAR_H) + 0.5f);
 
-    // --- 暂停压暗遮罩 + 中央圆形播放钮 (M32g.5 效果, 用户确认保留) ---
+    // --- 暂停压暗遮罩 + 中央播放图标 (无圆形背景) ---
     if (fa > 0.01f && g_mpv->state() == MpvBackend::State::Paused) {
         int top = S(ui::TOPBAR_H);
         SDL_Rect dim = {0, top, w, (barTop > top ? barTop - top : 0)};
@@ -2036,11 +2036,9 @@ static void renderOverlay() {
         SDL_SetRenderDrawColor(g_sdlRdr, 0, 0, 0, (Uint8)(100 * fa));
         SDL_RenderFillRect(g_sdlRdr, &dim);
         int ccx = w / 2, ccy = top + (barTop - top) / 2;
-        // 效果图 .center-play: 白描边圆(white.75) + 黑底(blur 近似) + play 右偏
-        fillCircle(g_sdlRdr, ccx, ccy, S(37), 191, 191, 196, (Uint8)(fa * 255));
-        fillCircle(g_sdlRdr, ccx, ccy, S(35), 22, 22, 25, (Uint8)(fa * 255));
-        svgicon::draw(g_sdlRdr, "play", ccx + S(3), ccy, S(30),
-                      255, 255, 255, (Uint8)(235 * fa));
+        // 仅播放图标, 无圆形背景
+        svgicon::draw(g_sdlRdr, "play", ccx, ccy, S(30),
+                      255, 255, 255, (Uint8)(200 * fa));
     }
 
     // --- gradient background (效果图: 单层渐变 底部62%不透明 → 顶部全透) ---
@@ -2392,8 +2390,8 @@ static void renderOverlay() {
             panelX = w - panelW;
         }
         if (panelW < S(200)) { panelW = S(200); panelX = w - panelW; }   // 兜底
-        int panelH = h - S(ui::TOPBAR_H);
-        int panelY = S(ui::TOPBAR_H);
+        int panelH = h;
+        int panelY = 0;
 
         // panel background（独立区域不透明）
         SDL_Rect pRc = {panelX, panelY, panelW, panelH};
