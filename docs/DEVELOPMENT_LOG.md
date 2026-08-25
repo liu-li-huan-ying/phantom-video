@@ -1593,3 +1593,11 @@ SetCursorPos 用物理像素 → 全部错位；渲染同时被系统拉伸模�
 | 内存 / CPU | 580MB / 正常(mpv 解码主导) |
 
 工具链：inject_wheel.ps1（PostMessage WM_MOUSEWHEEL，屏幕坐标 lParam）
+
+---
+
+## M34a Phase 4e: 列表当前项自动跟随（2026-08-24）
+
+- playPath() 中面板打开时重算 playlistScroll 使当前项居中
+- 覆盖场景：点击列表项 / prev-next / Loop 回绕 / Shuffle 跳选后的定位
+- 验证：滚轮下移后点 next → V_0003 加载且面板回滚 ✓
