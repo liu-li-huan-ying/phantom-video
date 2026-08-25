@@ -1,14 +1,15 @@
 #include "ui/gdi_text.h"
 #include <windows.h>
 #include <cstring>
+#include <vector>
 
 void GdiTextCache::init(SDL_Renderer* renderer) {
     renderer_ = renderer;
 }
 
 void GdiTextCache::shutdown() {
-    for (auto& e : cache_) {
-        if (e.tex) SDL_DestroyTexture(e.tex);
+    for (auto& kv : cache_) {
+        if (kv.second.tex) SDL_DestroyTexture(kv.second.tex);
     }
     cache_.clear();
 }
@@ -98,15 +99,14 @@ SDL_Texture* GdiTextCache::renderText(const std::string& utf8, int ptSize,
 
 void GdiTextCache::drawText(int x, int y, const std::string& utf8, int ptSize,
                              int r, int g, int b) {
-    // 查找缓存
+    // 查缓存（哈希表 O(1)；旧实现 vector 线性扫描每帧数千次字符串比较）
     std::string key = utf8 + "|" + std::to_string(ptSize) + "|" +
                       std::to_string(r) + "," + std::to_string(g) + "," + std::to_string(b);
-    for (auto& e : cache_) {
-        if (e.key == key && e.tex) {
-            SDL_Rect dst{ x, y, e.w, e.h };
-            SDL_RenderCopy(renderer_, e.tex, nullptr, &dst);
-            return;
-        }
+    auto it = cache_.find(key);
+    if (it != cache_.end()) {
+        SDL_Rect dst{ x, y, it->second.w, it->second.h };
+        SDL_RenderCopy(renderer_, it->second.tex, nullptr, &dst);
+        return;
     }
 
     // 渲染新文本
@@ -114,11 +114,14 @@ void GdiTextCache::drawText(int x, int y, const std::string& utf8, int ptSize,
     SDL_Texture* tex = renderText(utf8, ptSize, r, g, b, w, h);
     if (!tex) return;
 
-    cache_.push_back({ tex, w, h, key });
-    // 限制缓存大小
-    if (cache_.size() > 200) {
-        SDL_DestroyTexture(cache_.front().tex);
-        cache_.erase(cache_.begin());
+    cache_[key] = { tex, w, h };
+    // 超限：仅保留刚插入的条目，其余整体释放（UI 实际条目远低于阈值，极少触发）
+    if (cache_.size() > 400) {
+        CacheEntry keep = cache_[key];
+        for (auto& kv : cache_)
+            if (kv.second.tex != keep.tex) SDL_DestroyTexture(kv.second.tex);
+        cache_.clear();
+        cache_[key] = keep;
     }
 
     SDL_Rect dst{ x, y, w, h };

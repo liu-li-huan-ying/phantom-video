@@ -1,6 +1,6 @@
 #pragma once
 #include <string>
-#include <vector>
+#include <unordered_map>
 #include <SDL.h>
 
 class GdiTextCache {
@@ -18,7 +18,6 @@ private:
     struct CacheEntry {
         SDL_Texture* tex = nullptr;
         int w = 0, h = 0;
-        std::string key;
     };
-    std::vector<CacheEntry> cache_;
+    std::unordered_map<std::string, CacheEntry> cache_;   // key = "text|pt|r,g,b"
 };

@@ -380,6 +380,31 @@ static std::string thumbCacheDir() {
     return exeDir() + "cache\\thumbs";
 }
 
+// 启动时清理超过 keepDays 天的缓存文件
+static void thumbCacheCleanup(int keepDays) {
+    if (keepDays <= 0) keepDays = 7;
+    std::string dir = thumbCacheDir();
+    WIN32_FIND_DATAA fd;
+    std::string pattern = dir + "\\*.bin";
+    HANDLE h = FindFirstFileA(pattern.c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE) return;
+    FILETIME now;
+    GetSystemTimeAsFileTime(&now);
+    ULARGE_INTEGER ulNow = {{now.dwLowDateTime, now.dwHighDateTime}};
+    int removed = 0;
+    do {
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+        ULARGE_INTEGER ulFile = {{fd.ftLastWriteTime.dwLowDateTime, fd.ftLastWriteTime.dwHighDateTime}};
+        long long ageDays = (long long)(ulNow.QuadPart - ulFile.QuadPart) / (10000000LL * 86400);
+        if (ageDays > keepDays) {
+            DeleteFileA((dir + "\\" + fd.cFileName).c_str());
+            ++removed;
+        }
+    } while (FindNextFileA(h, &fd));
+    FindClose(h);
+    if (removed) LOG_INFO("MAIN", "thumb cache cleanup: removed %d files", removed);
+}
+
 static uint64_t fnv1a64(const std::string& s) {
     uint64_t h = 1469598103934665603ULL;
     for (unsigned char c : s) { h ^= c; h *= 1099511628211ULL; }
@@ -1021,6 +1046,9 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
         else if (g_mpv) {
             g_mpv->setVolume(g_mpv->volume() + (d > 0 ? 0.05f : -0.05f));
+            char msg[24];
+            std::snprintf(msg, sizeof(msg), "Volume %d%%", (int)(g_mpv->volume() * 100 + 0.5f));
+            showToast(msg);
         }
         g_ui.visible = true;
         g_ui.hideAt = SDL_GetTicks() + 2000;
@@ -1106,16 +1134,37 @@ static bool createOverlay(HWND parent, int w, int h) {
     return true;
 }
 
+static void destroyGradCache();   // 定义于 drawGradientBar（渐变纹理缓存）
+
 static void destroyOverlay() {
     g_text.shutdown();
     svgicon::shutdown();
+    destroyGradCache();
     if (g_sdlRdr) { SDL_DestroyRenderer(g_sdlRdr); g_sdlRdr = nullptr; }
     if (g_sdlWin) { SDL_DestroyWindow(g_sdlWin);   g_sdlWin = nullptr; }  // 连同 HWND 一起销毁
     g_overlayHwnd = nullptr;
 }
 
 // ---- dithered gradient helper ----
-static void drawGradientBar(SDL_Renderer* r, int x, int y, int w, int h,
+// 渐变条逐像素绘制代价 ~13 万次 FillRect/帧; 缓存为纹理后每帧一次 RenderCopy。
+// 透明区(alpha<阈值)写入 0 —— 与品红 colorkey 兼容, 视频照常穿透。
+struct GradKey {
+    int w = 0, h = 0;
+    Uint8 cr = 0, cg = 0, cb = 0, aTop = 0, aBot = 0;
+    bool operator==(const GradKey& o) const {
+        return w == o.w && h == o.h && cr == o.cr && cg == o.cg &&
+               cb == o.cb && aTop == o.aTop && aBot == o.aBot;
+    }
+};
+static SDL_Texture* g_gradTex[2]   = { nullptr, nullptr };
+static GradKey       g_gradKey[2]  = {};
+
+static void destroyGradCache() {
+    for (auto& t : g_gradTex)
+        if (t) { SDL_DestroyTexture(t); t = nullptr; }
+}
+
+static void drawGradientBar(SDL_Renderer* r, int slot, int x, int y, int w, int h,
                              Uint8 cr, Uint8 cg, Uint8 cb, Uint8 aTop, Uint8 aBot) {
     static const int bayer[4][4] = {
         {  0, 136,  34, 170},
@@ -1123,18 +1172,35 @@ static void drawGradientBar(SDL_Renderer* r, int x, int y, int w, int h,
         { 51, 187,  17, 153},
         {255, 119, 221,  85}
     };
-    for (int dy = 0; dy < h; ++dy) {
-        int a = aTop + (aBot - aTop) * dy / h;
-        int by = dy % 4;
-        for (int dx = 0; dx < w; ++dx) {
-            int bx = dx % 4;
-            if (a > bayer[by][bx]) {
-                SDL_SetRenderDrawColor(r, cr, cg, cb, 255);
-                SDL_Rect px = {x + dx, y + dy, 1, 1};
-                SDL_RenderFillRect(r, &px);
+    if (w <= 0 || h <= 0) return;
+    GradKey key{ w, h, cr, cg, cb, aTop, aBot };
+
+    if (!g_gradTex[slot] || !(g_gradKey[slot] == key)) {
+        if (g_gradTex[slot]) { SDL_DestroyTexture(g_gradTex[slot]); g_gradTex[slot] = nullptr; }
+        SDL_Texture* tex = SDL_CreateTexture(r, SDL_PIXELFORMAT_ARGB8888,
+                                             SDL_TEXTUREACCESS_STREAMING, w, h);
+        if (!tex) return;
+        SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
+        Uint32* pixels = nullptr; int pitch = 0;
+        if (SDL_LockTexture(tex, nullptr, (void**)&pixels, &pitch) == 0) {
+            Uint32 rgb = ((Uint32)cr << 16) | ((Uint32)cg << 8) | cb;
+            for (int dy = 0; dy < h; ++dy) {
+                int a = aTop + ((int)(aBot - aTop)) * dy / h;
+                int by = dy % 4;
+                Uint32* row = (Uint32*)((Uint8*)pixels + dy * pitch);
+                for (int dx = 0; dx < w; ++dx) {
+                    row[dx] = (a > bayer[by][dx % 4])
+                            ? (0xFF000000u | rgb)
+                            : 0x00000000u;   // 透明键兼容
+                }
             }
+            SDL_UnlockTexture(tex);
         }
+        g_gradTex[slot] = tex;
+        g_gradKey[slot] = key;
     }
+    SDL_Rect dst = { x, y, w, h };
+    SDL_RenderCopy(r, g_gradTex[slot], nullptr, &dst);
 }
 
 // ---- rendering ----
@@ -1153,7 +1219,7 @@ static void renderOverlay() {
         int w = g_ui.winW, h = g_ui.winH;
 
         // topbar still visible
-        drawGradientBar(g_sdlRdr, 0, 0, w, S(ui::TOPBAR_H), 11, 11, 11, 220, 0);
+        drawGradientBar(g_sdlRdr, 0, 0, 0, w, S(ui::TOPBAR_H), 11, 11, 11, 220, 0);
         // title
         g_text.drawText(S(20), S(14), "VPlayer", 14, 255, 255, 255);
         // topbar icons
@@ -1241,7 +1307,7 @@ static void renderOverlay() {
 
     // --- topbar (gradient opaque->transparent from top) ---
     {
-        drawGradientBar(g_sdlRdr, 0, 0, w, S(ui::TOPBAR_H), 11, 11, 11, 220, 0);
+        drawGradientBar(g_sdlRdr, 0, 0, 0, w, S(ui::TOPBAR_H), 11, 11, 11, 220, 0);
 
         // title (left)
         std::string title = g_mpv->title();
@@ -1265,7 +1331,7 @@ static void renderOverlay() {
     int barTop = sbTopY();
 
     // --- gradient background (top transparent -> bottom opaque) ---
-    drawGradientBar(g_sdlRdr, 0, barTop, w, S(60), 11, 11, 11, 0, 220);
+    drawGradientBar(g_sdlRdr, 1, 0, barTop, w, S(60), 11, 11, 11, 0, 220);
     // solid bottom portion
     SDL_Rect solidRc = {0, barTop + S(60), w, S(CONTROL_BAR_H) - S(60)};
     SDL_SetRenderDrawColor(g_sdlRdr, 11, 11, 11, 240);
@@ -1864,6 +1930,7 @@ wc.style         = CS_DBLCLKS;   // 接收 WM_LBUTTONDBLCLK
     // 缩略图 worker（含磁盘缓存目录）
     CreateDirectoryA((exeDir() + "cache").c_str(), nullptr);
     CreateDirectoryA(thumbCacheDir().c_str(), nullptr);
+    thumbCacheCleanup(7);
     g_thumbQuit.store(false);
     g_thumbThread = std::thread(thumbWorkerMain);
 

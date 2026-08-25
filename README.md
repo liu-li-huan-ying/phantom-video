@@ -1,120 +1,110 @@
-# VPlayer - 自研 C++ 视频播放器
+# VPlayer
 
-基于 **C++17 + FFmpeg + SDL2** 的自研桌面视频播放器，从零实现解封装、解码、音视频同步与播放控制。
+自研 Windows 视频播放器 —— **libmpv 解码渲染（D3D11VA 零拷贝硬解）+ SDL2 UI 叠加层**，C++17 / Win32。
 
-## 技术栈
+![架构](docs/architecture.txt)
 
-| 组件 | 技术 | 说明 |
-|---|---|---|
-| 语言 | C++17 | g++ 15.2.0 (w64devkit) |
-| 构建 | CMake 3.16+ | pkg-config 定位 SDL2，FFmpeg 显式链接 .lib |
-| 解封装/解码 | FFmpeg 9.0.1 (gyan.dev stable) | libavformat / libavcodec / libavutil / libswresample |
-| 窗口/渲染/音频 | SDL2 2.32.10 | SDL_Renderer + SDL_OpenAudioDevice |
-| 平台 | Windows x64 | MinGW-w64 |
+## 特性
 
-## 目录结构
-
-```
-F:\vedioplayer\
-├── CMakeLists.txt          # 构建脚本
-├── AGENTS.md               # 开发约束与已知问题备忘
-├── docs\
-│   ├── DESIGN.md           # 详细设计文档
-│   └── DEVELOPMENT_LOG.md  # 阶段开发日志（困难与解决）
-├── src\
-│   ├── main.cpp            # 入口 + SDL 事件循环 + 快捷键
-│   ├── core\               # 播放内核（与 UI 无关）
-│   │   ├── blocking_queue.h    # 线程安全有界队列（支持 close/reopen/clear）
-│   │   ├── types.h             # FramePtr/PacketPtr 工厂（makeFramePtr 等）
-│   │   ├── demuxer.h/.cpp      # 解封装
-│   │   ├── decoder.h/.cpp      # 音视频解码器封装
-│   │   └── player.h/.cpp       # 播放器总控（解码线程 + 时钟 + seek）
-│   ├── audio\audio_output.h/.cpp   # SDL 音频输出 + 重采样 + 音频时钟
-│   ├── video\video_renderer.h/.cpp # SDL 视频渲染（YUV 纹理）
-│   └── ui\osd.h/.cpp            # 进度条/时间/音量 OSD 绘制
-├── testdata\               # 冒烟测试素材（多格式/损坏文件）
-└── build\                  # 构建产物（gitignore）
-```
+- **零拷贝硬件解码**：mpv `gpu-next` + `d3d11` 上下文，`hwdec=auto-safe`
+- **文件夹播放队列**：打开/拖入任意视频自动扫描同目录（14 种扩展名、按名排序、上限 2000）
+- **进度记忆与续播**：每 3 秒落盘观看位置；`resume=1` 时重开自动跳转
+- **三种播放模式**：Single / Loop / Shuffle
+- **PIP 置顶迷你窗**：一键悬浮小窗，状态天然同步
+- **字幕控制**：cc 图标开关 + C/X/Z 快捷键（显示/延迟 ±0.5s）
+- **OSD 信息面板**：I 键查看 codec/分辨率/帧率/码率/音轨
+- **列表缩略图**：后台逐项提取 + 磁盘缓存（7 天过期），二次打开零解码
+- **拖拽排序**：列表面板内直接拖动调整顺序
+- **完整 DPI 支持**：Per-Monitor V2，125%+ 缩放下像素精确、文字锐利
 
 ## 构建
 
-```powershell
-# 环境变量（依赖位于 F:\dev；FFmpeg 不走 pkg-config，由 CMake 直接链接）
-$env:PKG_CONFIG_PATH = "F:\dev\sdl2\x86_64-w64-mingw32\lib\pkgconfig"
+环境要求：
+- [w64devkit](https://github.com/skeeto/w64devkit)（g++ MinGW），本机位于 `D:\w64devkit`
+- CMake ≥ 3.16
+- 依赖已随仓库置于 `dev/`：SDL2 / SDL2_image / SDL2_ttf / FFmpeg 9.0.1 shared / libmpv / Sonic
 
+```powershell
+# w64devkit 的 sh.exe 会干扰 MinGW Makefiles 生成器，构建前临时改名
+Rename-Item D:\w64devkit\bin\sh.exe sh.exe.bak
 cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
 cmake --build build
+Rename-Item D:\w64devkit\bin\sh.exe.bak sh.exe
 ```
 
-产物：`build\vplayer.exe`
-
-## 运行
+运行时 DLL 由 CMake 自动拷贝至 `build/`：
 
 ```powershell
-# DLL 已由 CMake 自动拷贝到 build 目录，直接运行即可
-.\build\vplayer.exe "视频文件.mp4"
+build\vplayer.exe <视频路径> [--debug]
 ```
 
-## 功能（M5/M6 已通过 API 自动化测试 + GUI 事件自动化验证 + 压力测试）
+## 使用
 
-- [x] 播放本地视频（H.264/H.265/MPEG4/VP9 等任意 FFmpeg 支持的格式）
-- [x] 音视频同步（音频为主时钟，纯视频用系统时钟）
-- [x] 播放 / 暂停 / 停止
-- [x] 进度拖动（精确到关键帧），音量调节 / 静音
-- [x] 拖拽文件到窗口直接打开
-- [x] 全屏切换
-- [x] OSD：进度条、时间显示、音量提示
-- [x] 异常文件容错（截断/损坏文件打开失败不崩溃）
-- [x] 播放列表（命令行多文件 / N / P / 播完自动下一曲）+ 记忆播放位置（vplayer.ini）
-- [x] 自动播放列表（打开文件自动扫描同目录视频，单独/循环/随机三种播放模式）
-- [x] 播放速度（S/L 0.25x~3.0x，atempo 保调变速，控件栏显示倍速）
-- [x] 硬件解码（D3D11VA/DXVA2，H.264/MPEG-2 硬解，不支持自动回退软解）
-- [x] 字幕（外挂 SRT/ASS 自动加载 + 内嵌字幕流解码，底部 GDI 渲染）
-- [x] 关键帧预览（进度条 hover 显示视频缩略图，独立 FFmpeg 解码）
-- [x] 播放列表自然排序（"1,2,...,10" 而非 "1,10,2"）
-- [x] SWF/MKV/FLV 等格式适配（duration 推算、seek 兼容）
-- [x] 音量标准化（峰值检测 + 软限幅，A 键切换）
-- [x] 播放列表面板（右侧可切换面板，格式彩色图标，点击选曲，宽度可调）
-- [x] 视频区域单击暂停/继续
+| 操作 | 说明 |
+|------|------|
+| 拖入文件 | 播放并扫描同目录入队 |
+| 双击视频区 | 全屏切换 |
+| 单击视频区 | 暂停/继续 |
+| 滚轮 | 音量 ±5%（Toast 反馈） |
 
 ### 快捷键
 
-| 按键 | 功能 |
-|---|---|
-| 空格 | 播放 / 暂停 |
-| ← / → | 后退 / 前进 5 秒 |
-| Ctrl+← / Ctrl+→ | 后退 / 前进 30 秒 |
-| ↑ / ↓ | 音量 +10% / -10% |
-| M | 静音 |
-| F | 全屏 |
-| N / P | 下一曲 / 上一曲 |
-| X | 播放模式：单独 → 循环 → 随机 |
-| S / L | 减速 / 加速（0.5x~2.0x 循环） |
-| Esc / Q | 退出 |
-| 拖拽文件 | 打开并播放 |
+| 键 | 功能 | 键 | 功能 |
+|----|------|----|------|
+| Space | 播放/暂停 | M | 静音 |
+| ←/→ | seek ∓/±5s | N/P | seek ±10s |
+| ↑/↓ | 音量 | F | 全屏 |
+| `[` / `]` | 倍速 -/+0.25x | Ctrl+O | 打开文件 |
+| C | 字幕开关 | I | OSD 信息 |
+| X/Z | 字幕延迟 -/+0.5s | Esc | 关闭弹层 |
 
-## 开发计划（Roadmap）
+### 配置（vplayer.ini）
 
-- [x] M1 环境搭建（FFmpeg 9.0.1 + SDL2 2.32.10 安装验证）
-- [x] M2 骨架：构建系统 + 文档
-- [x] M3 播放内核：解封装 → 解码 → 渲染 + 音频（期间定位跨堆 free 崩溃）
-- [x] M4 替换稳定版 FFmpeg 9.0.1 + 根因修复（shared_ptr 跨堆 free 0xC0000374）
-- [x] M5 全功能验证：API 自动化测试 20/20、多格式冒烟、修复 BlockingQueue 永久 closed bug
-- [x] M6 GUI 交互验证（全屏/拖拽/快捷键）+ 120 秒随机事件压力测试
-- [x] M7 硬解（DXVA2 / D3D11VA）
-- [x] M8 字幕（外挂 SRT/ASS + 内嵌字幕流）
-- [x] M9 播放列表与记忆播放位置
-- [x] M10 倍速播放 ✅（S/L 0.25x~3.0x，atempo 保调变速）
-- [x] M11 现代化 UI 外观 ✅ v0.3 正式版（矢量图标 / 圆角渐变控件栏 / 进度条 hover / 音量弹层拖动 / 淡入淡出自动隐藏）
-- [x] M12 自动播放列表 ✅（打开文件自动扫描同目录视频建列表，X 键切换单独/循环/随机播放模式，标题栏显示序号）
-- [x] M13 长视频 seek 卡顿修复 ✅（解码线程 tryPush 轮询防 seek 饿死、seek 后音频时钟同步目标 + 画面首帧立即恢复、close 死锁修复；3.5 小时/1.4GB 视频 seek 8~300ms 恢复，3198 文件目录 140ms 扫描）
-- [x] M14 YouTube 样式界面 ✅（DWM 窗口阴影+圆角、自定义标题栏 vplay.bmp logo + 滚动字幕、深色主题背景、控件 hover 动画/发光进度条）
-- [x] M15 关键帧预览 ✅ + 音量标准化 ✅（进度条 hover 缩略图、多格式 seek 兼容、自然排序、峰值检测+软限幅音量标准化，A 键切换）
-- [x] M16 播放列表面板 ✅（右侧可切换面板，22种格式彩色图标，GDI文字渲染，点击选曲，宽度可调）
-- [x] M17 Seek 性能优化 ✅（150ms debounce、轮询1ms、seek期间逐帧显示到目标帧）
-- [x] M18 音频同步 + 可靠性 ✅（audioSeeking_竞态修复、Seeking指示器三点动画）
-- [x] M19 倍速保调变速 ✅（Sonic TSM 库，零分配单缓冲，变速不变调，CPU 接近 1x）
-- [x] M20 音频状态原子化 ✅（变速/seek 延迟到 fill() 内原子处理，消除跨线程竞态，高频切倍速无失声/不同步）
-- [x] M21 时钟语义修正 ✅（speed 只属于 Sonic 内容拉伸，不属于时钟/视频同步，彻底消除变速音画不同步）
-- [x] M22 seek 音画同步 ✅（seek 后立即初始化音频时钟，消除视频超前导致的音画延迟）
-- [x] M23 全面竞态审计 ✅（首块重锚、doSeek 原子化、旧PTS丢弃、原子变量、dropUntil 修复）
+```ini
+volume=0.8        # 音量
+speed=1           # 倍速
+resume=0          # 1=启动续播上次进度
+playmode=1        # 0=Single 1=Loop 2=Shuffle
+subautoload=1     # 同名字幕自动加载 (fuzzy)
+thumbcache=1      # 缩略图磁盘缓存
+hwdecode=1        # 硬件解码
+volnorm=0         # loudnorm 音量标准化
+pos=x,y,w,h       # 窗口位置记忆
+hist=<path>\t<秒>  # 每文件观看位置
+```
+
+设置面板内改动实时生效并立即持久化。
+
+## 架构
+
+```
+VPlayer 进程
+├─ Win32 parent（输入处理 WndProc）
+│   └─ mpv 子窗口 STATIC (--wid → D3D11VA)
+│       └─ mpvRelayProc: 输入中继转发给 parent
+└─ SDL2 overlay（owned 顶层窗, WS_EX_LAYERED+COLORKEY+TOOLWINDOW）
+    ├─ 品红透明键穿透显示视频
+    ├─ GdiTextCache 文字 / svgicon 光栅化图标
+    └─ ThumbWorker(FFmpeg) ──mutex──> 渲染线程惰性上传纹理
+```
+
+要点：
+- overlay 是 owned 顶层窗口（非子窗口）——本机不支持 WS_EX_LAYERED 子窗口（err=87）
+- 所有鼠标消息经 mpvRelayProc 转发给 parent 统一处理
+- 像素度量经 `S()` 按 DPI 缩放；文字 pt 由 GDI 内部换算，二者不可叠加
+
+详细开发史与踩坑记录见 [docs/DEVELOPMENT_LOG.md](docs/DEVELOPMENT_LOG.md)。
+
+## 测试工具链（PowerShell, Temp/opencode）
+
+| 脚本 | 用途 |
+|------|------|
+| inject_click.ps1 | PostMessage 注入单击（client 坐标） |
+| inject_key.ps1 | 注入键盘 VK |
+| inject_wheel.ps1 | 注入滚轮（屏幕坐标） |
+| inject_drag.ps1 | 注入按下-移动-松手序列 |
+| inject_move.ps1 | 注入鼠标移动 |
+| win_style.ps1 | 枚举窗口 style/exstyle/rect |
+| close_vplayer.ps1 | WM_CLOSE 优雅关闭（触发日志 flush） |
+
+注意：所有注入脚本必须 `SetProcessDPIAware()`，否则坐标被系统缩放错位。

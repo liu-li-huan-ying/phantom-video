@@ -37,6 +37,18 @@ bool MpvBackend::init(HWND hwnd) {
         mpv_set_option_string(mpv_, "screenshot-directory", dir.c_str());
     }
 
+    // ---- 画质链路 ----
+    // 上采样 spline36(锐利少振铃) / 下采样 mitchell(mpv 官方推荐) /
+    // 色度上采样 spline36(4:2:0 源色度修复) / deband 去 8bit 色带
+    mpv_set_option_string(mpv_, "scale",  "spline36");
+    mpv_set_option_string(mpv_, "dscale", "mitchell");
+    mpv_set_option_string(mpv_, "cscale", "spline36");
+    mpv_set_option_string(mpv_, "deband", "yes");
+    // HDR 片源在 HDR 显示器上的色彩空间提示(gpu-next, SDR 屏自动忽略)
+    mpv_set_option_string(mpv_, "target-colorspace-hint", "yes");
+    // 抖动防梯度断裂(默认 auto, 显式声明意图)
+    mpv_set_option_string(mpv_, "dither-depth", "auto");
+
     // wid 必须在 mpv_initialize 之前设置
     if (hwnd) {
         char widStr[64];
@@ -49,6 +61,17 @@ bool MpvBackend::init(HWND hwnd) {
         mpv_destroy(mpv_);
         mpv_ = nullptr;
         return false;
+    }
+
+    // 回读画质关键项确认生效
+    {
+        const char* props[] = { "scale", "dscale", "cscale", "deband",
+                                "target-colorspace-hint" };
+        for (auto* p : props) {
+            char* v = mpv_get_property_string(mpv_, p);
+            LOG_INFO("MPV", "quality %s=%s", p, v ? v : "?");
+            mpv_free(v);
+        }
     }
 
     mpv_observe_property(mpv_, 1, "pause", MPV_FORMAT_FLAG);
