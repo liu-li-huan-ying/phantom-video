@@ -2330,7 +2330,8 @@ wc.style         = CS_DBLCLKS;   // 接收 WM_LBUTTONDBLCLK
         LOG_INFO("MAIN", "restore window pos (%d,%d) %dx%d", winX, winY, winW, winH);
     }
     g_parentHwnd = CreateWindowExW(WS_EX_ACCEPTFILES,
-        wc.lpszClassName, L"VPlayer", WS_OVERLAPPEDWINDOW,
+        wc.lpszClassName, L"VPlayer",
+        WS_POPUP | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX,
         winX, winY, winW, winH,
         nullptr, nullptr, wc.hInstance, nullptr);
     if (!g_parentHwnd) { LOG_ERROR("MAIN", "CreateWindow failed"); return 1; }
