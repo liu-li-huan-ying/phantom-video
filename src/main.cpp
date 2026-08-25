@@ -477,7 +477,7 @@ static void uploadThumbs(SDL_Renderer* r) {
     }
 }
 
-// 统一播放入口：记录待续播位置 + 更新 lastFile
+// 统一播放入口：记录待续播位置 + 更新 lastFile + 面板跟随当前项
 static double g_pendingResumePos = -1.0;   // >0 表示 FILE_LOADED 后 seek 到此
 static void playPath(const std::string& path) {
     if (!g_mpv || path.empty()) return;
@@ -487,6 +487,20 @@ static void playPath(const std::string& path) {
         g_pendingResumePos = it->second;
     g_mpv->loadFile(path);
     g_cfg.lastFile = path;
+
+    // 播放列表面板打开时，滚动到当前项附近
+    if (g_ui.playlistOpen) {
+        int idx = playlistIndexOf(path);
+        if (idx >= 0) {
+            int itemH = S(52);
+            int viewH = g_ui.winH - S(ui::TOPBAR_H) - S(55);
+            int target = idx * itemH - viewH / 2 + itemH / 2;
+            int contentH = (int)g_playlist.size() * itemH;
+            if (target < 0) target = 0;
+            if (contentH > viewH && target > contentH - viewH) target = contentH - viewH;
+            g_ui.playlistScroll = target;
+        }
+    }
 }
 
 static void playIndex(int idx, bool relative = false) {
