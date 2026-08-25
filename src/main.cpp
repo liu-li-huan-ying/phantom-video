@@ -117,6 +117,10 @@ struct UiState {
     bool   qualityMenuOpen = false;
     int    qualityPreset = 1;   // 0=省电 1=标准 2=至臻
 
+    // EQ popup
+    bool   eqMenuOpen = false;
+    int    eqDraggingBand = -1; // 正在拖动的频段, -1=无
+
     // volume slider
     bool   volumeSliderOpen = false;
     bool   volumeDragging   = false;
@@ -1005,14 +1009,14 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 showToast(msg);
                 break;
             }
-            case 'E': {  // 音频均衡器: ON/OFF 切换
-                bool on = !g_mpv->eqEnabled();
-                g_mpv->setEQEnabled(on);
-                showToast(on ? "EQ: ON (flat)" : "EQ: OFF");
+            case 'E': {  // 音频均衡器: 打开/关闭弹窗
+                g_ui.eqMenuOpen = !g_ui.eqMenuOpen;
+                g_ui.eqDraggingBand = -1;
                 break;
             }
             case VK_ESCAPE:
                 if (g_ui.speedMenuOpen) g_ui.speedMenuOpen = false;
+                else if (g_ui.eqMenuOpen) g_ui.eqMenuOpen = false;
                 else if (g_ui.volumeSliderOpen) g_ui.volumeSliderOpen = false;
                 break;
             case 'F':
@@ -1104,6 +1108,22 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             float ratio = (float)(g_ui.mouseX - L.volSliderX) / S(70);
             if (ratio < 0) ratio = 0; if (ratio > 1) ratio = 1;
             g_mpv->setVolume(ratio);
+        }
+
+        // EQ slider drag
+        if (g_ui.eqDraggingBand >= 0 && g_mpv) {
+            int menuW = S(200);
+            int itemH = S(36);
+            int menuH = S(32) + 6 * itemH + S(40);
+            int menuX = g_ui.winW / 2 - menuW / 2;
+            int menuY = g_ui.winH / 2 - menuH / 2;
+            int trackX = menuX + S(60);
+            int trackW = S(100);
+            float norm = (float)(g_ui.mouseX - trackX) / trackW;
+            if (norm < 0.0f) norm = 0.0f; if (norm > 1.0f) norm = 1.0f;
+            float gain = norm * 24.0f - 12.0f;
+            g_mpv->setEQBand(g_ui.eqDraggingBand, gain);
+            g_dirty.store(true);
         }
 
         TRACKMOUSEEVENT tme = {sizeof(tme), TME_LEAVE, hwnd, 0};
@@ -1321,6 +1341,48 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     }
                 }
             }
+            else if (g_ui.eqMenuOpen) {
+                // EQ 菜单: 居中弹出
+                int menuW = S(200);
+                int itemH = S(36);
+                int menuH = S(32) + 6 * itemH + S(40);
+                int menuX = g_ui.winW / 2 - menuW / 2;
+                int menuY = g_ui.winH / 2 - menuH / 2;
+                int trackX = menuX + S(60);
+                int trackW = S(100);
+                int baseY = menuY + S(32);
+                // 检测是否在菜单区域内
+                if (mx >= menuX && mx <= menuX + menuW && my >= menuY && my <= menuY + menuH) {
+                    // 检测滑块点击
+                    for (int i = 0; i < 6; ++i) {
+                        int iy = baseY + i * itemH;
+                        if (mx >= trackX - S(8) && mx <= trackX + trackW + S(8) &&
+                            my >= iy && my <= iy + itemH) {
+                            float norm = (float)(mx - trackX) / trackW;
+                            if (norm < 0.0f) norm = 0.0f; if (norm > 1.0f) norm = 1.0f;
+                            float gain = norm * 24.0f - 12.0f;
+                            g_mpv->setEQBand(i, gain);
+                            g_ui.eqDraggingBand = i;
+                            g_ui.visible = true;
+                            g_ui.hideAt = SDL_GetTicks() + ui::CTRLBAR_HIDE_MS;
+                            return 0;
+                        }
+                    }
+                    // Reset 按钮
+                    int resetY = baseY + 6 * itemH + S(4);
+                    if (mx >= menuX + menuW / 2 - S(30) && mx <= menuX + menuW / 2 + S(30) &&
+                        my >= resetY && my <= resetY + S(26)) {
+                        for (int i = 0; i < 6; ++i) g_mpv->setEQBand(i, 0.0f);
+                        showToast("EQ reset");
+                    }
+                    // 点击在菜单内其他位置: 不关闭
+                    g_ui.visible = true;
+                    g_ui.hideAt = SDL_GetTicks() + ui::CTRLBAR_HIDE_MS;
+                    return 0;
+                }
+                // 点击在菜单外: 关闭
+                g_ui.eqMenuOpen = false;
+            }
             else {
                 goto videoAreaClick;
             }
@@ -1495,6 +1557,9 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
         if (g_ui.volumeDragging) {
             g_ui.volumeDragging = false;
+        }
+        if (g_ui.eqDraggingBand >= 0) {
+            g_ui.eqDraggingBand = -1;
         }
         if (g_ui.sbDragging) {
             g_ui.sbDragging = false;
@@ -2165,6 +2230,70 @@ static void renderOverlay() {
                 g_text.drawText(menuX + menuW - S(24), iy + S(8), "✓", 13, 59, 130, 246);
             }
         }
+    }
+    // --- EQ popup menu (6频段均衡器) ---
+    if (g_ui.eqMenuOpen) {
+        Row1Layout L;
+        layoutRow1(w, h, g_ui.volumeSliderOpen || g_ui.volumeDragging, L);
+        static const char* bandNames[] = {"60Hz","170Hz","310Hz","600Hz","3kHz","12kHz"};
+        int sliderW = S(100);
+        int itemH = S(36);
+        int menuW = S(200);
+        int menuH = S(32) + 6 * itemH + S(40);  // title + 6 bands + reset button
+        int menuX = w / 2 - menuW / 2;           // 居中显示
+        int menuY = h / 2 - menuH / 2;
+
+        // 背景
+        int cr = S(8);
+        SDL_SetRenderDrawColor(g_sdlRdr, 24, 24, 26, 255);
+        SDL_Rect bgRc = {menuX + cr, menuY, menuW - cr * 2, menuH};
+        SDL_RenderFillRect(g_sdlRdr, &bgRc);
+        SDL_Rect midH = {menuX, menuY + cr, menuW, menuH - cr * 2};
+        SDL_RenderFillRect(g_sdlRdr, &midH);
+        fillCircle(g_sdlRdr, menuX + cr, menuY + cr, cr, 24, 24, 26, 255);
+        fillCircle(g_sdlRdr, menuX + menuW - cr, menuY + cr, cr, 24, 24, 26, 255);
+        fillCircle(g_sdlRdr, menuX + cr, menuY + menuH - cr, cr, 24, 24, 26, 255);
+        fillCircle(g_sdlRdr, menuX + menuW - cr, menuY + menuH - cr, cr, 24, 24, 26, 255);
+        // 标题
+        g_text.drawText(menuX + S(10), menuY + S(10), "Equalizer", 13, 255, 255, 255);
+        // 开关状态
+        const char* st = g_mpv->eqEnabled() ? "ON" : "OFF";
+        Uint8 sr = g_mpv->eqEnabled() ? 59 : 161, sg = g_mpv->eqEnabled() ? 130 : 161, sb = g_mpv->eqEnabled() ? 246 : 166;
+        g_text.drawText(menuX + menuW - S(40), menuY + S(10), st, 12, sr, sg, sb);
+
+        // 6 频段滑块
+        int baseY = menuY + S(32);
+        int trackX = menuX + S(60);
+        int trackW = sliderW;
+        for (int i = 0; i < 6; ++i) {
+            int iy = baseY + i * itemH;
+            g_text.drawText(menuX + S(10), iy + S(8), bandNames[i], 11, 161, 161, 166);
+            // 轨道
+            SDL_SetRenderDrawColor(g_sdlRdr, 58, 58, 62, 255);
+            SDL_Rect trk = {trackX, iy + S(14), trackW, S(4)};
+            SDL_RenderFillRect(g_sdlRdr, &trk);
+            // 滑块位置: gain -12..+12 → 0..1
+            float gain = g_mpv->eqGain(i);
+            float norm = (gain + 12.0f) / 24.0f;
+            if (norm < 0.0f) norm = 0.0f; if (norm > 1.0f) norm = 1.0f;
+            int thumbX = trackX + (int)(norm * trackW);
+            // 滑块 thumb
+            fillCircle(g_sdlRdr, thumbX, iy + S(16), S(6), 59, 130, 246, 255);
+            // 数值
+            char val[16];
+            std::snprintf(val, sizeof(val), "%+.0f", gain);
+            g_text.drawText(trackX + trackW + S(8), iy + S(8), val, 11, 228, 228, 231);
+            // 存储滑块区域用于点击
+            static SDL_Rect s_bandRects[6];
+            s_bandRects[i] = {trackX - S(8), iy, trackW + S(16), itemH};
+            // (hit-test 在后面处理)
+        }
+        // Reset 按钮
+        int resetY = baseY + 6 * itemH + S(4);
+        SDL_Rect resetRc = {menuX + menuW / 2 - S(30), resetY, S(60), S(26)};
+        SDL_SetRenderDrawColor(g_sdlRdr, 58, 58, 62, 255);
+        SDL_RenderFillRect(g_sdlRdr, &resetRc);
+        g_text.drawText(resetRc.x + S(14), resetRc.y + S(5), "Reset", 11, 228, 228, 231);
     }
     if (g_ui.playlistOpen) {
         int panelW, panelX;
