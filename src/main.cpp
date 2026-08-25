@@ -1316,9 +1316,11 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 }
 
 // ---- SDL2 overlay ----
-static const Uint8 TRANSPARENT_R = 255;
+// 透明键 = 纯黑(0,0,0)。UI 为亮字暗底风格且不含纯黑;
+// 半透明色叠加在黑底上 = 自然变暗, 无品红(colorkey 方案旧缺陷)染色
+static const Uint8 TRANSPARENT_R = 0;
 static const Uint8 TRANSPARENT_G = 0;
-static const Uint8 TRANSPARENT_B = 255;
+static const Uint8 TRANSPARENT_B = 0;
 
 static bool createOverlay(HWND parent, int w, int h) {
     // 顶层无边框窗口（本系统不支持 WS_EX_LAYERED 子窗口，实测 err=87）
@@ -1590,7 +1592,8 @@ static void renderOverlay() {
     if (fa > 0.01f && g_mpv->state() == MpvBackend::State::Paused) {
         int top = S(ui::TOPBAR_H);
         SDL_Rect dim = {0, top, w, (barTop > top ? barTop - top : 0)};
-        SDL_SetRenderDrawColor(g_sdlRdr, 0, 0, 0, 130);
+        // 注意: 不可用纯黑+alpha —— 黑 key 下会混合成穿透色; 用不透明近黑
+        SDL_SetRenderDrawColor(g_sdlRdr, 5, 5, 7, 255);
         SDL_RenderFillRect(g_sdlRdr, &dim);
         int ccx = w / 2, ccy = top + (barTop - top) / 2;
         fillCircle(g_sdlRdr, ccx, ccy, S(44), 15, 15, 17, 210);
@@ -1601,7 +1604,7 @@ static void renderOverlay() {
     drawGradientBar(g_sdlRdr, 1, 0, barTop, w, S(60), 11, 11, 11, 0, 220);
     // solid bottom portion
     SDL_Rect solidRc = {0, barTop + S(60), w, S(CONTROL_BAR_H) - S(60)};
-    SDL_SetRenderDrawColor(g_sdlRdr, 11, 11, 11, 240);
+    SDL_SetRenderDrawColor(g_sdlRdr, 11, 11, 11, 255);
     SDL_RenderFillRect(g_sdlRdr, &solidRc);
 
     // --- seekbar (at very top of bar) ---
@@ -1727,7 +1730,7 @@ static void renderOverlay() {
 
         // background
         SDL_Rect bgRc = {menuX, menuY, menuW, menuH};
-        SDL_SetRenderDrawColor(g_sdlRdr, 21, 21, 21, 245);
+        SDL_SetRenderDrawColor(g_sdlRdr, 21, 21, 21, 255);
         SDL_RenderFillRect(g_sdlRdr, &bgRc);
         // border
         SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 25);
@@ -1936,8 +1939,8 @@ static void renderOverlay() {
     if (g_ui.settingsOpen) {
         SettingsGeom sg = settingsGeom(w, h);
 
-        // semi-transparent backdrop
-        SDL_SetRenderDrawColor(g_sdlRdr, 0, 0, 0, 180);
+        // backdrop（黑 key 下不能用纯黑+alpha, 用不透明深灰压暗观感）
+        SDL_SetRenderDrawColor(g_sdlRdr, 14, 14, 16, 255);
         SDL_Rect fullRc = {0, 0, w, h};
         SDL_RenderFillRect(g_sdlRdr, &fullRc);
 
