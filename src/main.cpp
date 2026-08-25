@@ -135,6 +135,9 @@ struct UiState {
     // 单击暂停延迟判定（双击全屏互斥）
     bool   pendingPause = false;
 
+    // 控件淡入淡出（M30 缓动恢复: alpha 0..1, 控制栏滑出/顶栏滑升）
+    float  ctrlAlpha = 1.0f;
+
     // 音量滑条 hover 自动展开/收起
     Uint32 volHoverAt = 0;
 
@@ -347,23 +350,25 @@ static void applyPlaylistWindow(HWND hwnd) {
     // WM_SIZE 中按 playlistOpen 分配视频区/列表区
 }
 
-// ---- 全屏切换（F 键 / maximize 按钮 / pip 共用） ----
+// ---- 全屏切换（无边框窗口：仅移动窗口至显示器尺寸，不改样式） ----
 static void toggleFullscreen(HWND hwnd) {
-    DWORD sty = (DWORD)GetWindowLongPtrW(hwnd, GWL_STYLE);
-    if (sty & WS_OVERLAPPEDWINDOW) {
-        SetWindowLongPtrW(hwnd, GWL_STYLE, sty & ~WS_OVERLAPPEDWINDOW);
+    if (!g_ui.fullscreen) {
+        GetWindowRect(hwnd, &g_ui.savedRect);
         MONITORINFO mi = {sizeof(mi)};
         GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mi);
         SetWindowPos(hwnd, HWND_TOP,
             mi.rcMonitor.left, mi.rcMonitor.top,
             mi.rcMonitor.right - mi.rcMonitor.left,
-            mi.rcMonitor.bottom - mi.rcMonitor.top, SWP_FRAMECHANGED);
+            mi.rcMonitor.bottom - mi.rcMonitor.top,
+            SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
         g_ui.fullscreen = true;
         LOG_INFO("MAIN", "fullscreen ON");
     } else {
-        SetWindowLongPtrW(hwnd, GWL_STYLE, sty | WS_OVERLAPPEDWINDOW);
-        SetWindowPos(hwnd, nullptr, 100, 100, S(960), S(540),
-            SWP_FRAMECHANGED | SWP_NOZORDER);
+        SetWindowPos(hwnd, nullptr,
+            g_ui.savedRect.left, g_ui.savedRect.top,
+            g_ui.savedRect.right - g_ui.savedRect.left,
+            g_ui.savedRect.bottom - g_ui.savedRect.top,
+            SWP_NOZORDER | SWP_FRAMECHANGED);
         g_ui.fullscreen = false;
         LOG_INFO("MAIN", "fullscreen OFF");
     }
@@ -373,24 +378,20 @@ static void toggleFullscreen(HWND hwnd) {
 static void toggleMini(HWND hwnd) {
     if (!g_ui.miniMode) {
         GetWindowRect(hwnd, &g_ui.savedRect);
-        g_ui.savedStyle = (DWORD)GetWindowLongPtrW(hwnd, GWL_STYLE);
-        SetWindowLongPtrW(hwnd, GWL_STYLE,
-            (g_ui.savedStyle & ~WS_OVERLAPPEDWINDOW) | WS_POPUP);
         int w = S(480), h = S(270);
         RECT wa; SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0);
         SetWindowPos(hwnd, HWND_TOPMOST,
             wa.right - w - S(20), wa.bottom - h - S(20), w, h,
-            SWP_FRAMECHANGED | SWP_NOACTIVATE);
+            SWP_NOZORDER | SWP_NOACTIVATE);
         g_ui.miniMode = true;
         LOG_INFO("MAIN", "pip mini ON (%dx%d)", w, h);
         showToast("Picture-in-picture: ON");
     } else {
-        SetWindowLongPtrW(hwnd, GWL_STYLE, g_ui.savedStyle);
         SetWindowPos(hwnd, HWND_NOTOPMOST,
             g_ui.savedRect.left, g_ui.savedRect.top,
             g_ui.savedRect.right  - g_ui.savedRect.left,
             g_ui.savedRect.bottom - g_ui.savedRect.top,
-            SWP_FRAMECHANGED | SWP_NOACTIVATE);
+            SWP_NOZORDER | SWP_NOACTIVATE);
         g_ui.miniMode = false;
         LOG_INFO("MAIN", "pip mini OFF");
         showToast("Picture-in-picture: OFF");
@@ -874,6 +875,49 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         g_ui.mouseX = g_ui.mouseY = -1;
         return 0;
 
+    case WM_NCCALCSIZE: {
+        // 无边框自绘：客户区=整个窗口(移除系统标题栏)，保留 DWM 阴影
+        if (!wp) break;
+        auto* params = (NCCALCSIZE_PARAMS*)lp;
+        if (IsZoomed(hwnd)) {   // 最大化时收进屏幕边框厚度
+#ifndef SM_CXPADDEDBORDER
+#define SM_CXPADDEDBORDER 92
+#endif
+            int fx = GetSystemMetrics(SM_CXSIZEFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
+            int fy = GetSystemMetrics(SM_CYSIZEFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
+            params->rgrc[0].left   += fx;
+            params->rgrc[0].right  -= fx;
+            params->rgrc[0].top    += fy;
+            params->rgrc[0].bottom -= fy;
+        }
+        return 0;
+    }
+    case WM_NCHITTEST: {
+        POINT pt = { (short)LOWORD(lp), (short)HIWORD(lp) };
+        ScreenToClient(hwnd, &pt);
+        RECT rc; GetClientRect(hwnd, &rc);
+        // 边缘缩放区（非全屏/迷你）
+        if (!g_ui.fullscreen && !g_ui.miniMode) {
+            const int m = S(6);
+            bool L = pt.x < m, R = pt.x >= rc.right - m;
+            bool T = pt.y < m, B = pt.y >= rc.bottom - m;
+            if (T && L) return HTTOPLEFT;
+            if (T && R) return HTTOPRIGHT;
+            if (B && L) return HTBOTTOMLEFT;
+            if (B && R) return HTBOTTOMRIGHT;
+            if (L) return HTLEFT;
+            if (R) return HTRIGHT;
+            if (T) return HTTOP;
+            if (B) return HTBOTTOM;
+        }
+        // 顶栏：非图标区作为拖拽把手
+        if (pt.y >= 0 && pt.y <= S(ui::TOPBAR_H)) {
+            if (hitTestTopbarIcon(pt.x, pt.y, g_ui.winW) < 0)
+                return HTCAPTION;
+        }
+        return HTCLIENT;
+    }
+
     case WM_LBUTTONDOWN: {
         int mx = (short)LOWORD(lp), my = (short)HIWORD(lp);
         int barTop = sbTopY();
@@ -1265,6 +1309,17 @@ static bool createOverlay(HWND parent, int w, int h) {
     return true;
 }
 
+// 实心圆(扫描线近似; 用于暂停中央按钮底)
+static void fillCircle(SDL_Renderer* r, int cx, int cy, int rad,
+                       Uint8 cr, Uint8 cg, Uint8 cb, Uint8 ca) {
+    if (rad <= 0) return;
+    SDL_SetRenderDrawColor(r, cr, cg, cb, ca);
+    for (int dy = -rad; dy <= rad; ++dy) {
+        int dx = (int)std::sqrt((float)rad * rad - (float)dy * dy);
+        SDL_RenderDrawLine(r, cx - dx, cy + dy, cx + dx, cy + dy);
+    }
+}
+
 static void destroyGradCache();   // 定义于 drawGradientBar（渐变纹理缓存）
 
 static void destroyOverlay() {
@@ -1436,30 +1491,49 @@ static void renderOverlay() {
     double dur = g_mpv->duration();
     double pos = g_ui.seekingDrag ? g_ui.seekTarget : g_mpv->clock();
 
-    // --- topbar (gradient opaque->transparent from top) ---
+    // 控件淡出动画: alpha=0 时控制栏滑出屏、顶栏滑出屏顶
+    float fa = g_ui.ctrlAlpha;
+    Uint8 fade = (Uint8)(fa * 255.0f);
+    int topOff = -(int)((1.0f - fa) * S(ui::TOPBAR_H) + 0.5f);
+
+    // --- topbar (gradient opaque->transparent from top; 淡出时整体上滑) ---
     {
-        drawGradientBar(g_sdlRdr, 0, 0, 0, w, S(ui::TOPBAR_H), 11, 11, 11, 220, 0);
+        drawGradientBar(g_sdlRdr, 0, 0, topOff, w, S(ui::TOPBAR_H), 11, 11, 11,
+                        (Uint8)(220 * fa), 0);
 
         // title (left)
         std::string title = g_mpv->title();
         if (title.empty()) title = "VPlayer";
         if (title.size() > 55) title = title.substr(0, 52) + "...";
-        g_text.drawText(S(20), S(14), title, 14, 255, 255, 255);
+        g_text.drawText(S(20), S(14) + topOff, title, 14, 255, 255, 255);
 
         // icons (right) - same order as design mockup
-        int iconY = S(ui::TOPBAR_H) / 2;
+        int iconY = S(ui::TOPBAR_H) / 2 + topOff;
+        auto A = [&](Uint8 base) { return (Uint8)(base * fa); };
         int rx = w - S(20);
-        svgicon::draw(g_sdlRdr, "close",    rx, iconY, S(20), 255, 255, 255, 200); rx -= S(34);
-        svgicon::draw(g_sdlRdr, "maximize", rx, iconY, S(20), 161, 161, 166, 200); rx -= S(34);
-        svgicon::draw(g_sdlRdr, "minimize", rx, iconY, S(20), 161, 161, 166, 200); rx -= S(34);
-        svgicon::draw(g_sdlRdr, "list",     rx, iconY, S(20), 161, 161, 166, 200); rx -= S(34);
+        svgicon::draw(g_sdlRdr, "close",    rx, iconY, S(20), 255, 255, 255, A(200)); rx -= S(34);
+        svgicon::draw(g_sdlRdr, "maximize", rx, iconY, S(20), 161, 161, 166, A(200)); rx -= S(34);
+        svgicon::draw(g_sdlRdr, "minimize", rx, iconY, S(20), 161, 161, 166, A(200)); rx -= S(34);
+        svgicon::draw(g_sdlRdr, "list",     rx, iconY, S(20), 161, 161, 166, A(200)); rx -= S(34);
         svgicon::draw(g_sdlRdr, "pip",      rx, iconY, S(20),
             g_ui.miniMode ? 37 : 161, g_ui.miniMode ? 99 : 161,
-            g_ui.miniMode ? 235 : 166, 200); rx -= S(34);
-        svgicon::draw(g_sdlRdr, "camera",   rx, iconY, S(20), 161, 161, 166, 200);
+            g_ui.miniMode ? 235 : 166, A(200)); rx -= S(34);
+        svgicon::draw(g_sdlRdr, "camera",   rx, iconY, S(20), 161, 161, 166, A(200));
     }
 
-    int barTop = sbTopY();
+    // 控件淡出: 控制栏随 alpha 滑出屏底
+    int barTop = sbTopY() + (int)((1.0f - fa) * S(CONTROL_BAR_H) + 0.5f);
+
+    // --- 暂停压暗遮罩 + 中央圆形播放钮 (M32g.5 效果, 用户确认保留) ---
+    if (fa > 0.01f && g_mpv->state() == MpvBackend::State::Paused) {
+        int top = S(ui::TOPBAR_H);
+        SDL_Rect dim = {0, top, w, (barTop > top ? barTop - top : 0)};
+        SDL_SetRenderDrawColor(g_sdlRdr, 0, 0, 0, 130);
+        SDL_RenderFillRect(g_sdlRdr, &dim);
+        int ccx = w / 2, ccy = top + (barTop - top) / 2;
+        fillCircle(g_sdlRdr, ccx, ccy, S(44), 15, 15, 17, 210);
+        svgicon::draw(g_sdlRdr, "play", ccx, ccy, S(40), 255, 255, 255, 235);
+    }
 
     // --- gradient background (top transparent -> bottom opaque) ---
     drawGradientBar(g_sdlRdr, 1, 0, barTop, w, S(60), 11, 11, 11, 0, 220);
@@ -1510,10 +1584,11 @@ static void renderOverlay() {
     // --- transport row: centered prev/play/next ---
     {
         int cy = barTop + S(50);
-        svgicon::draw(g_sdlRdr, "prev", w / 2 - S(50), cy, S(20), 161, 161, 166, 200);
+        auto A = [&](Uint8 base) { return (Uint8)(base * fa); };
+        svgicon::draw(g_sdlRdr, "prev", w / 2 - S(50), cy, S(20), 161, 161, 166, A(200));
         const char* icon = (g_mpv->state() == MpvBackend::State::Paused) ? "play" : "pause";
-        svgicon::draw(g_sdlRdr, icon, w / 2, cy, S(ui::PLAYBTN_SIZE), 255, 255, 255, 255);
-        svgicon::draw(g_sdlRdr, "next", w / 2 + S(50), cy, S(20), 161, 161, 166, 200);
+        svgicon::draw(g_sdlRdr, icon, w / 2, cy, S(ui::PLAYBTN_SIZE), 255, 255, 255, A(255));
+        svgicon::draw(g_sdlRdr, "next", w / 2 + S(50), cy, S(20), 161, 161, 166, A(200));
     }
 
     // --- left side: time + title ---
@@ -1536,15 +1611,17 @@ static void renderOverlay() {
     // 速度文本左锚@w-S(160) HW徽标@w-S(204)；命中区与此一一对应
     {
         int cyI = barTop + S(50);
+        auto A = [&](Uint8 base) { return (Uint8)(base * fa); };
         const char* fid = g_ui.fullscreen ? "exitfull" : "full";
-        svgicon::draw(g_sdlRdr, fid, w - S(20), cyI, S(20), 161, 161, 166, 200);
+        svgicon::draw(g_sdlRdr, fid, w - S(20), cyI, S(20), 161, 161, 166, A(200));
         const char* vid = g_mpv->muted() ? "mute" : "volume";
-        svgicon::draw(g_sdlRdr, vid, w - S(54), cyI, S(20), 161, 161, 166, 200);
-        svgicon::draw(g_sdlRdr, "gear", w - S(88), cyI, S(20), 161, 161, 166, 200);
+        svgicon::draw(g_sdlRdr, vid, w - S(54), cyI, S(20), 161, 161, 166, A(200));
+        svgicon::draw(g_sdlRdr, "gear", w - S(88), cyI, S(20), 161, 161, 166, A(200));
         {
             // 字幕图标：可见=亮，隐藏=暗
-            Uint8 ca = g_mpv->subVisible() ? 230 : 90;
-            svgicon::draw(g_sdlRdr, "cc", w - S(122), cyI, S(20), 255, 255, 255, ca);
+            Uint8 ca = (g_mpv->subVisible() ? 230 : 90);
+            svgicon::draw(g_sdlRdr, "cc", w - S(122), cyI, S(20), 255, 255, 255,
+                          (Uint8)(ca * fa));
         }
         {
             char spd[16];
@@ -2089,6 +2166,7 @@ wc.style         = CS_DBLCLKS;   // 接收 WM_LBUTTONDBLCLK
     Uint32 lastPosSave = 0;
     int lastPosSec = -1;
     auto lastState = mpv.state();
+    Uint32 waitCap = 200;
     while (running) {
         MSG msg;
         BOOL hasMsg = FALSE;
@@ -2126,6 +2204,21 @@ wc.style         = CS_DBLCLKS;   // 接收 WM_LBUTTONDBLCLK
             g_ui.visible = false;
             g_dirty.store(true);
         }
+
+        // 控件淡入淡出逼近（M30 缓动: ~180ms 完成）
+        {
+            float target = g_ui.visible ? 1.0f : 0.0f;
+            float cur = g_ui.ctrlAlpha;
+            if ((target > cur && cur < 1.0f) || (target < cur && cur > 0.0f)) {
+                float dir = (target > cur) ? 1.0f : -1.0f;
+                cur += dir * 0.08f;
+                if ((dir > 0 && cur >= 1.0f) || (dir < 0 && cur <= 0.0f))
+                    cur = target;
+                g_ui.ctrlAlpha = cur;
+                g_dirty.store(true);
+                waitCap = 16;   // 动画期间高频刷新
+            }
+        }
         if (g_ui.volumeSliderOpen && !g_ui.volumeDragging &&
             now > g_ui.volHoverAt + 1200) {
             g_ui.volumeSliderOpen = false;
@@ -2148,6 +2241,8 @@ wc.style         = CS_DBLCLKS;   // 接收 WM_LBUTTONDBLCLK
 
         // 计算最近唤醒点（cap 200ms 保证播放中进度秒变响应；空闲更久）
         Uint32 wait = 200;
+        if (waitCap < wait) wait = waitCap;
+        waitCap = 200;
         auto upd = [&](Uint32 deadline) {
             if (deadline > now && deadline - now < wait) wait = deadline - now;
         };
