@@ -1814,16 +1814,10 @@ static void renderOverlay() {
         // prev
         svgicon::draw(g_sdlRdr, "prev", L.prev.x + S(17), L.prev.y + S(17), S(18),
                       iconC, iconC, 231, A(255));
-        // PLAY 圆形描边 + 白图标
+        // PLAY 白图标
         {
-            int cx = L.play.x + L.play.w / 2;
-            int cy = L.play.y + L.play.h / 2;
-            // 圆形描边 white.15
-            SDL_SetRenderDrawBlendMode(g_sdlRdr, SDL_BLENDMODE_BLEND);
-            SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 38);
-            fillCircle(g_sdlRdr, cx, cy, S(21), 255, 255, 255, 38);
             const char* pi = (g_mpv->state() == MpvBackend::State::Paused) ? "play" : "pause";
-            svgicon::draw(g_sdlRdr, pi, cx, cy,
+            svgicon::draw(g_sdlRdr, pi, L.play.x + L.play.w / 2, L.play.y + L.play.h / 2,
                           S(18), iconC, iconC, 231, A(255));
         }
         // next
@@ -1838,19 +1832,12 @@ static void renderOverlay() {
             g_text.drawText(L.timeX, L.cy - S(9), ts, 12, 161, 161, 166);
         }
 
-        // 右侧 textbtn 组 (圆角底框 + 文字 + 图标)
+        // 右侧 textbtn 组 (文字 + 图标)
         auto drawTextBtn = [&](const SDL_Rect& rc, const char* label,
                                const char* iconId, Uint8 ir, Uint8 ig, Uint8 ib) {
-            // 圆角底框 white.06
-            SDL_SetRenderDrawBlendMode(g_sdlRdr, SDL_BLENDMODE_BLEND);
-            SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 15);
-            SDL_Rect bg = {rc.x, rc.y + S(2), rc.w, rc.h - S(4)};
-            SDL_RenderFillRect(g_sdlRdr, &bg);
-            // 文字
             int tw = g_text.measureText(label, 12);
             int tx = rc.x + S(8);
             g_text.drawText(tx, rc.y + S(10), label, 12, 200, 200, 205);
-            // 图标
             svgicon::draw(g_sdlRdr, iconId, tx + tw + S(9), rc.y + S(17), S(15),
                           ir, ig, ib, A(255));
         };
@@ -1859,18 +1846,12 @@ static void renderOverlay() {
             Uint8 ic = g_mpv->subVisible() ? 235 : 110;
             drawTextBtn(L.subBtn, "字幕", "cc", ic, ic, ic);
         }
-        // 倍速: 圆角底框 + "倍速" text2 + 值 accent2 蓝
+        // 倍速: "倍速" text2 + 值 accent2 蓝
         {
             char spd[16];
             float s = g_mpv->speed();
             if (s == (int)s) std::snprintf(spd, sizeof(spd), "%.0fx", s);
             else             std::snprintf(spd, sizeof(spd), "%.2fx", s);
-            // 底框
-            SDL_SetRenderDrawBlendMode(g_sdlRdr, SDL_BLENDMODE_BLEND);
-            SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 15);
-            SDL_Rect bg = {L.speedBtn.x, L.speedBtn.y + S(2), L.speedBtn.w, L.speedBtn.h - S(4)};
-            SDL_RenderFillRect(g_sdlRdr, &bg);
-            // 文字
             int lw = g_text.measureText("倍速", 12);
             g_text.drawText(L.speedBtn.x + S(8), L.speedBtn.y + S(10), "倍速", 12, 200, 200, 205);
             g_text.drawText(L.speedBtn.x + S(8) + lw + S(4), L.speedBtn.y + S(10), spd, 12,
@@ -1880,11 +1861,6 @@ static void renderOverlay() {
         {
             const char* ql = qualityLabel();
             int qw = g_text.measureText("画质", 12);
-            // 底框
-            SDL_SetRenderDrawBlendMode(g_sdlRdr, SDL_BLENDMODE_BLEND);
-            SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 15);
-            SDL_Rect bg = {L.qualityBtn.x, L.qualityBtn.y + S(2), L.qualityBtn.w, L.qualityBtn.h - S(4)};
-            SDL_RenderFillRect(g_sdlRdr, &bg);
             g_text.drawText(L.qualityBtn.x + S(8), L.qualityBtn.y + S(10), "画质", 12, 200, 200, 205);
             g_text.drawText(L.qualityBtn.x + S(8) + qw + S(4), L.qualityBtn.y + S(11), ql, 11, 161, 161, 166);
         }
