@@ -1,5 +1,6 @@
 #pragma once
 #include <atomic>
+#include <cstdint>
 #include <functional>
 #include <mutex>
 #include <string>
@@ -44,6 +45,7 @@ public:
     bool hasMedia() const { return hasMedia_.load(); }
     std::string path() const { return path_; }
     bool hwDecodeActive() const { return hwDecode_.load(); }
+    bool seekbarFrozen() const;
 
     int videoWidth() const { return videoWidth_.load(); }
     int videoHeight() const { return videoHeight_.load(); }
@@ -79,4 +81,5 @@ private:
     double cachedClock_ = 0.0;
     double cachedBufferFill_ = 0.0;
     std::atomic<bool> eofFired_{ false };   // eof-reached 去重(事件线程读/loadFile 写)
+    uint32_t seekbarFreezeEnd_ = 0;         // 速度切换后冻结进度条显示(ms)
 };

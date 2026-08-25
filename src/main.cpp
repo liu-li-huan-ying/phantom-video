@@ -1640,7 +1640,23 @@ static void renderOverlay() {
     }
 
     double dur = g_mpv->duration();
-    double pos = g_ui.seekingDrag ? g_ui.seekTarget : g_mpv->clock();
+    // 速度切换后短暂冻结进度条, 防止 time-pos 跳变导致抖动
+    static double s_lastPos = 0.0;
+    static Uint32 s_freezeStart = 0;
+    double pos;
+    if (g_ui.seekingDrag) {
+        pos = g_ui.seekTarget;
+    } else if (g_mpv->seekbarFrozen()) {
+        // 冻结期间: 用冻结前的 pos + 经过的墙钟时间 * 新速度 推进
+        if (s_freezeStart == 0) { s_lastPos = g_mpv->clock(); s_freezeStart = SDL_GetTicks(); }
+        double elapsed = (SDL_GetTicks() - s_freezeStart) / 1000.0;
+        pos = s_lastPos + elapsed * g_mpv->speed();
+        double d = g_mpv->duration();
+        if (d > 0 && pos > d) pos = d;
+    } else {
+        pos = g_mpv->clock();
+        s_freezeStart = 0;  // 解冻: 重置
+    }
 
     // 控件淡出动画: alpha=0 时控制栏滑出屏、顶栏滑出屏顶
     float fa = g_ui.ctrlAlpha;

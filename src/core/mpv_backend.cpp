@@ -3,6 +3,7 @@
 #include "core/config.h"
 #include <cstring>
 #include <cstdlib>
+#include <SDL.h>
 
 MpvBackend::~MpvBackend() {
     shutdown();
@@ -196,9 +197,12 @@ void MpvBackend::setSpeed(float s) {
     if (s < 0.05f) s = 0.05f;
     if (s > 8.0f) s = 8.0f;
 
+    // 速度切换前冻结进度条, 防止 time-pos 跳变导致进度条抖动
+    seekbarFreezeEnd_ = SDL_GetTicks() + 500;
+
     double sd = s;
     int r = mpv_set_property(mpv_, "speed", MPV_FORMAT_DOUBLE, &sd);
-    LOG_INFO("MPV", "setSpeed %.2f ret=%d", s, r);
+    LOG_INFO("MPV", "setSpeed %.2f ret=%d (seekbar frozen 500ms)", s, r);
     speed_.store(s);
 }
 
@@ -262,6 +266,10 @@ double MpvBackend::clock() const {
     if (!mpv_) return 0.0;
     std::lock_guard<std::mutex> lock(propMutex_);
     return cachedClock_;
+}
+
+bool MpvBackend::seekbarFrozen() const {
+    return seekbarFreezeEnd_ > SDL_GetTicks();
 }
 
 double MpvBackend::duration() const {
