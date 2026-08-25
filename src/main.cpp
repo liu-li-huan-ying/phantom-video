@@ -331,7 +331,7 @@ static void buildPlaylistAround(const std::string& file) {
     if (dir.empty() || !fs::is_directory(dir, ec)) { g_playlist.push_back(file); return; }
     std::vector<fs::path> found;
     for (auto& e : fs::directory_iterator(dir, ec)) {
-        if (g_playlist.size() >= PLAYLIST_MAX) break;
+        if (found.size() >= PLAYLIST_MAX) break;
         if (!e.is_regular_file(ec)) continue;
         std::string ext = e.path().extension().string();
         for (auto* ve : kVideoExts) {
