@@ -51,19 +51,46 @@ static void formatTime(char* buf, size_t n, double sec) {
     else       std::snprintf(buf, n, "%02d:%02d", m, ss);
 }
 
+// ---- UTF-8 <-> UTF-16 ----
+// mpv/std::string 用 UTF-8; Win32 文件 API 与 fs::path(w) 用 UTF-16。
+// DragQueryFileA/fs::path(窄)/GetOpenFileNameA 都按 ANSI(GBK) 解读 ->
+// 中文路径必坏, 所有边界必须显式转换
+static std::wstring Utf8ToWide(const std::string& u8) {
+    int n = MultiByteToWideChar(CP_UTF8, 0, u8.c_str(), -1, nullptr, 0);
+    std::wstring w(n > 0 ? n - 1 : 0, L'\0');
+    if (n > 1) MultiByteToWideChar(CP_UTF8, 0, u8.c_str(), -1, w.data(), n);
+    return w;
+}
+
+static std::string WideToUtf8(const std::wstring& ws) {
+    int n = WideCharToMultiByte(CP_UTF8, 0, ws.c_str(), -1, nullptr, 0, nullptr, nullptr);
+    std::string s(n > 0 ? n - 1 : 0, '\0');
+    if (n > 1) WideCharToMultiByte(CP_UTF8, 0, ws.c_str(), -1, s.data(), n, nullptr, nullptr);
+    return s;
+}
+
 static std::string openFileDialog(HWND hwnd) {
-    char file[MAX_PATH] = {};
-    OPENFILENAMEA ofn = {};
+    wchar_t file[MAX_PATH * 2] = {};
+    OPENFILENAMEW ofn = {};
     ofn.lStructSize = sizeof(ofn);
     ofn.hwndOwner = hwnd;
     ofn.lpstrFilter =
-        "Video\0*.mp4;*.avi;*.mkv;*.mov;*.flv;*.wmv;*.rmvb;*.rm;*.3gp;*.mpg;*.mpeg;*.webm;*.ts;*.m2ts\0"
-        "All\0*.*\0";
+        L"Video\0*.mp4;*.avi;*.mkv;*.mov;*.flv;*.wmv;*.rmvb;*.rm;*.3gp;*.mpg;*.mpeg;*.webm;*.ts;*.m2ts\0"
+        L"All\0*.*\0";
     ofn.lpstrFile = file;
-    ofn.nMaxFile = MAX_PATH;
+    ofn.nMaxFile = MAX_PATH * 2;
     ofn.Flags = OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
-    if (GetOpenFileNameA(&ofn)) return std::string(file);
+    if (GetOpenFileNameW(&ofn)) return WideToUtf8(file);
     return "";
+}
+
+// 从 UTF-8 路径安全提取文件名（fs::path 窄构造会按 ANSI 误读）
+static std::string fileNameOf(const std::string& utf8path) {
+    namespace fs = std::filesystem;
+    try {
+        fs::path p(Utf8ToWide(utf8path));
+        return WideToUtf8(p.filename().wstring());
+    } catch (...) { return utf8path; }
 }
 
 // ---- UI state ----
@@ -372,7 +399,7 @@ static const size_t PLAYLIST_MAX = 2000;
 static void buildPlaylistAround(const std::string& file) {
     namespace fs = std::filesystem;
     g_playlist.clear();
-    fs::path p(file);
+    fs::path p(Utf8ToWide(file));                       // 宽字符构造, 杜绝 ANSI 误读
     fs::path dir = p.parent_path();
     std::error_code ec;
     if (dir.empty() || !fs::is_directory(dir, ec)) { g_playlist.push_back(file); return; }
@@ -380,14 +407,14 @@ static void buildPlaylistAround(const std::string& file) {
     for (auto& e : fs::directory_iterator(dir, ec)) {
         if (found.size() >= PLAYLIST_MAX) break;
         if (!e.is_regular_file(ec)) continue;
-        std::string ext = e.path().extension().string();
+        std::string ext = e.path().extension().string();   // 扩展名 ASCII, ANSI 读取安全
         for (auto* ve : kVideoExts) {
             if (_stricmp(ext.c_str(), ve) == 0) { found.push_back(e.path()); break; }
         }
     }
     if (found.empty()) { g_playlist.push_back(file); return; }
     std::sort(found.begin(), found.end());
-    for (auto& f : found) g_playlist.push_back(f.string());
+    for (auto& f : found) g_playlist.push_back(WideToUtf8(f.wstring()));   // 宽->UTF-8
 }
 
 static int playlistIndexOf(const std::string& path) {
@@ -1092,8 +1119,16 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     // ---- drag-drop ----
     case WM_DROPFILES: {
         HDROP hDrop = (HDROP)wp;
-        char path[MAX_PATH];
-        if (DragQueryFileA(hDrop, 0, path, MAX_PATH)) {
+        wchar_t wpath[MAX_PATH * 2];
+        if (DragQueryFileW(hDrop, 0, wpath, (UINT)(MAX_PATH * 2)) > 0) {
+            // ANSI 版会返回 GBK 字节, mpv 按 UTF-8 解析 -> 中文路径截断乱码
+            int u8len = WideCharToMultiByte(CP_UTF8, 0, wpath, -1,
+                                            nullptr, 0, nullptr, nullptr);
+            std::string path(u8len > 0 ? u8len - 1 : 0, '\0');
+            if (u8len > 1)
+                WideCharToMultiByte(CP_UTF8, 0, wpath, -1,
+                                    path.data(), u8len, nullptr, nullptr);
+            LOG_INFO("MAIN", "drop file (%zu bytes): %s", path.size(), path.c_str());
             buildPlaylistAround(path);
             playPath(path);
         }
@@ -1314,7 +1349,7 @@ static void renderOverlay() {
                 SDL_SetRenderDrawColor(g_sdlRdr,
                     isCur ? 37 : 255, isCur ? 99 : 255, isCur ? 235 : 255, isCur ? 200 : 15);
                 SDL_RenderDrawRect(g_sdlRdr, &cardRc);
-                std::string fn = std::filesystem::path(g_playlist[pi]).filename().string();
+                std::string fn = fileNameOf(g_playlist[pi]);
                 if (fn.size() > 18) fn = fn.substr(0, 15) + "...";
                 g_text.drawText(cx + S(8), cy + S(10), fn, 11, isCur ? 255 : 200, isCur ? 255 : 200, isCur ? 255 : 200);
                 double hpos = 0;
@@ -1429,7 +1464,7 @@ static void renderOverlay() {
     }
     {
         std::string title = g_mpv->title();
-        if (title.empty()) title = std::filesystem::path(g_mpv->path()).filename().string();
+        if (title.empty()) title = fileNameOf(g_mpv->path());
         if (title.size() > 50) title = title.substr(0, 47) + "...";
         g_text.drawText(S(20), barTop + S(60), title, 13, 255, 255, 255);
     }
@@ -1584,7 +1619,7 @@ static void renderOverlay() {
             }
 
             // file name
-            std::string fn = std::filesystem::path(p).filename().string();
+            std::string fn = fileNameOf(p);
             if (fn.size() > 26) fn = fn.substr(0, 23) + "...";
             g_text.drawText(panelX + S(88), iy + S(4), fn, 12,
                 isCurrent ? 255 : 200, isCurrent ? 255 : 200, isCurrent ? 255 : 200);
