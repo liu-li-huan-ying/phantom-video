@@ -1725,6 +1725,39 @@ Utf8ToWide/WideToUtf8 助手；fs::path 一律宽字符构造；
 + PostMessage(WM_DROPFILES)；注意 PS 的 char→Int16 转换对
 CJK 码点溢出，须走 Encoding.Unicode.GetBytes 字节流写入；
 中文参数经 bash→powershell 会乱码，改由 UTF-8 文件中转。
+
+---
+
+## M34a Phase 10: 播放失败/自然排序/独立面板（2026-08-25）
+
+用户反馈四项：拖入新文件不播放、prev/next 失效、列表应自然排序、
+列表应在右侧独立区域而非遮挡视频。
+
+### 播放失败根因（两个叠加 bug）
+1. **pause 残留**：`stop` 命令不重置 pause 属性——暂停中拖入新文件/
+   切上一下一首，新文件以暂停态打开，画面首帧静止被当作"没播放"。
+   修复：loadFile 成功后显式 `pause=false`。
+2. **keep-open 吞掉 EOF**：`keep-open=yes` 时播到结尾不发 END_FILE
+   事件——自动连播自 mpv 迁移以来从未真正生效！改观察
+   `eof-reached` 属性触发连播（atomic eofFired_ 去重，loadFile 复位）。
+   实测 V5→V6→V7→V8 每 3 秒自动推进 ✓
+
+另：桥接 `mpv_request_log_messages(warn)` + END_FILE(ERROR) 原因
+记录——此前 mpv 解码/加载失败完全静默，排查无从下手。
+
+### 自然排序
+naturalLess()：数字段按数值比较+前导零稳定序（V2<V10, 01<001）、
+字母段大小写不敏感；对 filename().wstring() 排序。
+sorted[0..2] 日志输出便于验证。
+
+### 右侧独立列表面板（恢复 M32g 窗口扩展设计）
+- 打开面板 → 主窗口宽 +S(320)（实测 1200↔1600），关闭缩回
+- UiState.totalW=客户区全宽；winW 语义收窄为视频区宽，
+  全部视频区 UI(seekbar/topbar/控制栏) 自动只占视频区
+- overlay 覆盖整个客户区；mpv 子窗口 MoveWindow 至 winW 宽
+- 全屏无法扩窗时退回覆盖式；面板背景改不透明强调独立性
+
+验证：拖入即播 / next 连续切换 / 排序日志 / 开关面板窗口 1200↔1600
 - gapless-audio 默认 weak 已满足本地播放
 
 ---
