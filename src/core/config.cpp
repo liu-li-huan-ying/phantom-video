@@ -57,6 +57,10 @@ bool loadConfig(const std::string& path, AppConfig& out) {
             out.subAutoLoad = std::atoi(line.c_str() + 12) != 0 ? 1 : 0;
         } else if (line.rfind("thumbcache=", 0) == 0) {
             out.thumbCache = std::atoi(line.c_str() + 11) != 0 ? 1 : 0;
+        } else if (line.rfind("hwdecode=", 0) == 0) {
+            out.hwDecode = std::atoi(line.c_str() + 9) != 0 ? 1 : 0;
+        } else if (line.rfind("volnorm=", 0) == 0) {
+            out.volNorm = std::atoi(line.c_str() + 8) != 0 ? 1 : 0;
         } else if (line.rfind("subscale=", 0) == 0) {
             float s = (float)std::atof(line.c_str() + 9);
             if (s >= 0.5f && s <= 3.0f) out.subScale = s;
@@ -90,6 +94,8 @@ bool saveConfig(const std::string& path, const AppConfig& cfg) {
     out << "resume=" << cfg.resume << "\n";
     out << "subautoload=" << cfg.subAutoLoad << "\n";
     out << "thumbcache=" << cfg.thumbCache << "\n";
+    out << "hwdecode=" << cfg.hwDecode << "\n";
+    out << "volnorm=" << cfg.volNorm << "\n";
     out << "subscale=" << cfg.subScale << "\n";
     if (cfg.posX != AppConfig::INVALID_POS && cfg.posW > 0)
         out << "pos=" << cfg.posX << "," << cfg.posY << "," << cfg.posW << "," << cfg.posH << "\n";

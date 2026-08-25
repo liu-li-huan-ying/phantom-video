@@ -212,6 +212,50 @@ static std::string formatBitrate(const std::string& bpsStr) {
     return buf;
 }
 
+// 运行时写 mpv 属性（字符串）
+static void mpvSetOpt(const char* prop, const char* val) {
+    if (!g_mpv || !g_mpv->mpv()) return;
+    int r = mpv_set_property_string(g_mpv->mpv(), prop, val);
+    LOG_DBG("MAIN", "set %s=%s ret=%d", prop, val, r);
+}
+
+// ---- 设置面板：几何与行定义（渲染/命中共用） ----
+struct SettingsGeom {
+    int panelX, panelY, panelW, panelH;
+    int closeCx, closeCy, closeR;
+    int swX, swW, swH;          // 开关
+    int rowY[5];                // 5 个开关行
+    int modeRowY;               // 播放模式行
+    int chipY, chipH, chipW;    // 模式 chips
+};
+static const int SET_ROW_COUNT = 5;
+
+static SettingsGeom settingsGeom(int w, int h) {
+    SettingsGeom g;
+    g.panelW = S(380); g.panelH = S(400);
+    g.panelX = (w - g.panelW) / 2;
+    g.panelY = (h - g.panelH) / 2;
+    g.closeCx = g.panelX + g.panelW - S(22);
+    g.closeCy = g.panelY + S(22);
+    g.closeR = S(12);
+    g.swX = g.panelX + g.panelW - S(60);
+    g.swW = S(40); g.swH = S(20);
+    for (int i = 0; i < SET_ROW_COUNT; ++i)
+        g.rowY[i] = g.panelY + S(55) + i * S(44);
+    g.modeRowY = g.rowY[4] + S(44);
+    g.chipY = g.modeRowY;
+    g.chipH = S(24); g.chipW = S(56);
+    return g;
+}
+
+// 应用设置变更到 mpv（开关翻转时调用）
+static void applySetting(const char* key, int value) {
+    if (std::strcmp(key, "hw") == 0)        mpvSetOpt("hwdec", value ? "auto-safe" : "no");
+    else if (std::strcmp(key, "vol") == 0)  mpvSetOpt("audio-filters", value ? "loudnorm" : "");
+    else if (std::strcmp(key, "sub") == 0)  mpvSetOpt("sub-auto", value ? "fuzzy" : "no");
+    // thumbCache/resume 纯本地，无需通知 mpv
+}
+
 // ---- overlay z 序 ----
 static void raiseOverlayAbove() {
     if (!g_overlayHwnd) return;
@@ -715,9 +759,54 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                  my >= barTop + S(38) && my <= barTop + S(62)) {
             g_ui.settingsOpen = !g_ui.settingsOpen;
         }
-        // --- settings modal backdrop click (close) ---
-        else if (g_ui.settingsOpen && my < sbTopY()) {
-            g_ui.settingsOpen = false;
+        // --- settings modal interactions ---
+        else if (g_ui.settingsOpen) {
+            SettingsGeom sg = settingsGeom(g_ui.winW, g_ui.winH);
+            bool inside = (mx >= sg.panelX && mx <= sg.panelX + sg.panelW &&
+                           my >= sg.panelY && my <= sg.panelY + sg.panelH);
+            if (!inside) {                       // 点外 = 关闭
+                g_ui.settingsOpen = false;
+            }
+            else if (std::abs(mx - sg.closeCx) <= sg.closeR &&
+                     std::abs(my - sg.closeCy) <= sg.closeR) {
+                g_ui.settingsOpen = false;
+                saveConfig(configPath(), g_cfg);
+            }
+            else {
+                int* vals[SET_ROW_COUNT] = { &g_cfg.hwDecode, &g_cfg.volNorm,
+                    &g_cfg.resume, &g_cfg.subAutoLoad, &g_cfg.thumbCache };
+                const char* keys[SET_ROW_COUNT] = { "hw", "vol", "resume", "sub", "thumb" };
+                const char* names[SET_ROW_COUNT] = { "Hardware Decode", "Volume Norm",
+                    "Resume", "Sub Auto-Load", "Thumb Cache" };
+                bool handled = false;
+                for (int i = 0; i < SET_ROW_COUNT && !handled; ++i) {
+                    if (my >= sg.rowY[i] - S(6) && my <= sg.rowY[i] + sg.swH + S(6) &&
+                        mx >= sg.panelX + S(12)) {
+                        *vals[i] = *vals[i] ? 0 : 1;
+                        applySetting(keys[i], *vals[i]);
+                        showToast(names[std::strcmp(keys[i],"hw")==0 ? 0 :
+                                        std::strcmp(keys[i],"vol")==0 ? 1 :
+                                        std::strcmp(keys[i],"resume")==0 ? 2 :
+                                        std::strcmp(keys[i],"sub")==0 ? 3 : 4]);
+                        LOG_INFO("MAIN", "setting %s -> %d", keys[i], *vals[i]);
+                        handled = true;
+                    }
+                }
+                if (!handled && my >= sg.chipY && my <= sg.chipY + sg.chipH) {
+                    for (int i = 0; i < 3; ++i) {
+                        int lx = sg.swX - S(180) + i * (sg.chipW + S(6));
+                        if (mx >= lx && mx <= lx + sg.chipW) {
+                            g_cfg.playMode = i;
+                            showToast(i == 0 ? "Mode: Single" :
+                                      i == 1 ? "Mode: Loop" : "Mode: Shuffle");
+                            LOG_INFO("MAIN", "playmode -> %d", i);
+                            handled = true;
+                            break;
+                        }
+                    }
+                }
+                saveConfig(configPath(), g_cfg);
+            }
         }
         // --- volume icon click ---
         else if (g_mpv && mx >= g_ui.winW - S(66) && mx <= g_ui.winW - S(42) &&
@@ -1331,78 +1420,62 @@ static void renderOverlay() {
 
     // --- settings modal panel ---
     if (g_ui.settingsOpen) {
+        SettingsGeom sg = settingsGeom(w, h);
+
         // semi-transparent backdrop
         SDL_SetRenderDrawColor(g_sdlRdr, 0, 0, 0, 180);
         SDL_Rect fullRc = {0, 0, w, h};
         SDL_RenderFillRect(g_sdlRdr, &fullRc);
 
         // panel
-        int panelW = S(380), panelH = S(360);
-        int panelX = (w - panelW) / 2;
-        int panelY = (h - panelH) / 2;
-        SDL_Rect panelRc = {panelX, panelY, panelW, panelH};
+        SDL_Rect panelRc = {sg.panelX, sg.panelY, sg.panelW, sg.panelH};
         SDL_SetRenderDrawColor(g_sdlRdr, 21, 21, 21, 250);
         SDL_RenderFillRect(g_sdlRdr, &panelRc);
-        // border
         SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 25);
         SDL_RenderDrawRect(g_sdlRdr, &panelRc);
 
-        // title
-        g_text.drawText(panelX + S(20), panelY + S(16), "Settings", 16, 255, 255, 255);
+        // title + close
+        g_text.drawText(sg.panelX + S(20), sg.panelY + S(16), "Settings", 16, 255, 255, 255);
+        svgicon::draw(g_sdlRdr, "close", sg.closeCx, sg.closeCy, S(18), 161, 161, 166, 200);
 
-        // close button
-        svgicon::draw(g_sdlRdr, "close", panelX + panelW - S(22), panelY + S(22), S(18), 161, 161, 166, 200);
-
-        // setting rows
-        int toggleVals[5] = {0, 0, g_cfg.resume, 0, g_cfg.subAutoLoad};
-        const char* rowLabels[] = {
-            "Hardware Decode (requires restart)",
+        // toggle rows
+        int toggleVals[SET_ROW_COUNT] = { g_cfg.hwDecode, g_cfg.volNorm,
+            g_cfg.resume, g_cfg.subAutoLoad, g_cfg.thumbCache };
+        const char* rowLabels[SET_ROW_COUNT] = {
+            "Hardware Decode",
             "Volume Normalization",
             "Resume Playback",
-            "Auto Next",
             "Subtitle Auto-Load",
+            "Thumbnail Disk Cache",
         };
-        int rowY = panelY + S(55);
-        for (int i = 0; i < 5; ++i) {
-            g_text.drawText(panelX + S(20), rowY + S(4), rowLabels[i], 13, 200, 200, 200);
-
-            // toggle switch
-            int swX = panelX + panelW - S(60);
-            int swW = S(40), swH = S(20);
+        for (int i = 0; i < SET_ROW_COUNT; ++i) {
+            int ry = sg.rowY[i];
             bool on = (toggleVals[i] != 0);
-            SDL_Rect swRc = {swX, rowY, swW, swH};
+            g_text.drawText(sg.panelX + S(20), ry + S(3), rowLabels[i], 13, on ? 230 : 170, on ? 230 : 170, on ? 230 : 170);
+
+            SDL_Rect swRc = {sg.swX, ry, sg.swW, sg.swH};
             SDL_SetRenderDrawColor(g_sdlRdr, on ? 37 : 80, on ? 99 : 80, on ? 235 : 80, 255);
             SDL_RenderFillRect(g_sdlRdr, &swRc);
-            // thumb
-            int thumbX = on ? swX + swW - swH : swX;
-            SDL_Rect tRc = {thumbX + S(2), rowY + S(2), swH - S(4), swH - S(4)};
+            int thumbX = on ? sg.swX + sg.swW - sg.swH : sg.swX;
+            SDL_Rect tRc = {thumbX + S(2), ry + S(2), sg.swH - S(4), sg.swH - S(4)};
             SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 255);
             SDL_RenderFillRect(g_sdlRdr, &tRc);
-
-            rowY += S(44);
         }
 
-        // language row
-        g_text.drawText(panelX + S(20), rowY + S(4), "Language", 13, 200, 200, 200);
-        const char* langs[] = {"CN", "EN", "JP"};
+        // playback mode row (Single / Loop / Shuffle)
+        g_text.drawText(sg.panelX + S(20), sg.modeRowY + S(3), "Playback Mode", 13, 200, 200, 200);
+        const char* modes[] = {"Single", "Loop", "Shuffle"};
         for (int i = 0; i < 3; ++i) {
-            int lx = panelX + panelW - S(130) + i * S(40);
-            SDL_Rect lr = {lx, rowY, S(34), S(22)};
-            SDL_SetRenderDrawColor(g_sdlRdr, 37, 99, 235, 255);
+            int lx = sg.swX - S(180) + i * (sg.chipW + S(6));
+            bool sel = (g_cfg.playMode == i);
+            SDL_Rect lr = {lx, sg.chipY, sg.chipW, sg.chipH};
+            SDL_SetRenderDrawColor(g_sdlRdr, sel ? 37 : 55, sel ? 99 : 55, sel ? 235 : 58, 255);
             SDL_RenderFillRect(g_sdlRdr, &lr);
-            g_text.drawText(lx + S(8), rowY + S(3), langs[i], 11, 255, 255, 255);
-        }
-        rowY += S(36);
-
-        // theme row
-        g_text.drawText(panelX + S(20), rowY + S(4), "Theme", 13, 200, 200, 200);
-        const char* themes[] = {"Dark", "Light"};
-        for (int i = 0; i < 2; ++i) {
-            int lx = panelX + panelW - S(100) + i * S(50);
-            SDL_Rect tr = {lx, rowY, S(44), S(22)};
-            SDL_SetRenderDrawColor(g_sdlRdr, i == 0 ? 37 : 80, i == 0 ? 99 : 80, i == 0 ? 235 : 80, 255);
-            SDL_RenderFillRect(g_sdlRdr, &tr);
-            g_text.drawText(lx + S(6), rowY + S(3), themes[i], 11, 255, 255, 255);
+            if (!sel) {
+                SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 25);
+                SDL_RenderDrawRect(g_sdlRdr, &lr);
+            }
+            g_text.drawText(lx + S(8), sg.chipY + S(4), modes[i], 11, sel ? 255 : 150, sel ? 255 : 150, sel ? 255 : 150);
         }
     }
 
@@ -1591,12 +1664,28 @@ int main(int argc, char** argv) {
         std::string cur = g_mpv->path();
         if (!cur.empty()) g_cfg.history[cur] = 0;   // 看完清零
         int idx = playlistIndexOf(cur);
-        if (idx >= 0 && idx + 1 < (int)g_playlist.size()) {
-            playIndex(idx + 1);                     // 自动下一个
+        int n = (int)g_playlist.size();
+        if (idx < 0 || n == 0) return;
+
+        if (g_cfg.playMode == 0) {                   // Single：停住
+            showToast("End of track");
+        } else if (g_cfg.playMode == 2) {            // Shuffle
+            if (n > 1) {
+                int next = idx;
+                while (next == idx) next = std::rand() % n;
+                playIndex(next);
+            }
+        } else {                                     // Loop：顺序循环
+            playIndex((idx + 1) % n);
         }
     };
 
     if (!mpv.init(g_mpvHwnd)) { LOG_ERROR("MAIN", "mpv init failed"); return 1; }
+
+    // 按配置应用运行时选项
+    mpvSetOpt("hwdec", g_cfg.hwDecode ? "auto-safe" : "no");
+    mpvSetOpt("sub-auto", g_cfg.subAutoLoad ? "fuzzy" : "no");
+    mpvSetOpt("audio-filters", g_cfg.volNorm ? "loudnorm" : "");
 
     // ---- SDL2 overlay（owned 顶层窗口，不进任务栏） ----
     if (!createOverlay(g_parentHwnd, rc.right, rc.bottom)) { return 1; }
