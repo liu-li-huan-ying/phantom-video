@@ -1571,3 +1571,25 @@ SetCursorPos 用物理像素 → 全部错位；渲染同时被系统拉伸模�
 日志 `setting hw -> 0` + `set hwdec=no ret=0` + `playmode -> 1`，ini 落盘 ✓
 
 遗留：Language/Theme 为诚实砍掉（i18n 与主题系统是独立工程）
+
+---
+
+## M34a Phase 4d: 大文件夹压测（2026-08-24）
+
+实测对象：`G:\影视资料\X`（**3604 个视频**，用户真实库）
+
+发现并修复 bug：
+- buildPlaylistAround 截断失效——循环内 `if (g_playlist.size() >= MAX) break`
+  检查的是尚为空的 g_playlist 而非正在填充的 found → 3604 全量载入。
+  一字之改（g_playlist→found）恢复上限语义。
+
+压测结果：
+| 指标 | 数值 |
+|------|------|
+| 扫描+启动 | ~1.9s (3604 文件) |
+| 截断后队列 | 2000 |
+| 缩略图实时提取 | ~30ms/个, 竖屏比例正确 |
+| 滚动增量提取 | 新可见项按需解码, 已见项磁盘缓存零开销 |
+| 内存 / CPU | 580MB / 正常(mpv 解码主导) |
+
+工具链：inject_wheel.ps1（PostMessage WM_MOUSEWHEEL，屏幕坐标 lParam）
