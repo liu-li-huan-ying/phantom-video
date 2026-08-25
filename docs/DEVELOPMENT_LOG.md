@@ -1786,8 +1786,30 @@ sorted[0..2] 日志输出便于验证。
 ### 11e 进度条时间预览气泡（M29）
 
 ### 待办提醒
-- Toast 胶囊样式精修（M32g）未恢复
+- ~~Toast 胶囊样式精修（M32g）未恢复~~ Phase 12 已恢复
 - 设置面板与 M33i 版内容差异较大（现以新功能为主），待用户验收
+
+---
+
+## M34a Phase 12: 倍速修复 + Toast 胶囊（2026-08-25）
+
+### 倍速失效根因：虚拟键码错配
+`case '[':` 匹配 ASCII 0x5B，但 Windows `[` 键实际发 **VK_OEM_4=0xDB**。
+字母键 VK==ASCII 掩盖了问题（M/F/C/I/X/Z 全正常），OEM 键独坏且从未实测。
+修复：case 合并 `['/0xDB]` 与 `[']/0xDD]`。菜单路径同步验证通过：
+键盘 `setSpeed 1.50 ret=0`、菜单选择 `setSpeed 1.00 ret=0`。
+
+附带修正：cc/速度标签命中区重叠误触（点"1.5x"右侧会误开字幕），
+speed hit [S(174),S(134)] / cc hit [S(132),S(106)]。
+
+### Toast 胶囊（M32g 恢复）
+- GdiTextCache::measureText()（DrawTextW DT_CALCRECT 测宽）
+- 居中胶囊：两端半圆(fillCircle)+中段矩形深底 #0f0f11，白字水平居中，
+  尾部 300ms 整体淡出
+
+### 经验
+键值类 bug 的共性：**字母键永远测得出来，OEM 键永远测不出来**——
+快捷键清单必须包含全部 OEM 键的专项注入测试。
 - gapless-audio 默认 weak 已满足本地播放
 
 ---
