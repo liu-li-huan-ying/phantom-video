@@ -1596,6 +1596,30 @@ SetCursorPos 用物理像素 → 全部错位；渲染同时被系统拉伸模�
 
 ---
 
+## M34a Phase 4e-5：列表跟随 / 双击全屏 / 音量 hover / 拖拽排序（2026-08-24）
+
+### Phase 4e (2f1c1b1)
+- playPath() 中面板打开时重算 scroll 使当前项居中（next/Loop/Shuffle 后定位）
+
+### Phase 5 (82bcf46) 三项交互
+1. **双击全屏**：CS_DBLCLKS + 视频区单击延迟 250ms 定时器执行暂停，
+   DBLCLK 取消待定暂停切全屏——解决"双击先暂停再全屏"的状态残留
+2. **音量交互重设计**：图标点击=静音切换；滑条 hover 展开、
+   离开/静止 1.2s 自动收起（拖拽中保持）
+3. **列表拖拽排序**：DOWN 候选→MOVE 超 S(8) 入拖拽态（边缘自动滚动）→
+   UP 落位（erase+insert）或单击播放；accent 插入指示线+被拖项高亮
+
+命中区系统性修正：右侧五控件渲染/命中统一按图标中心 ±S(14)，
+修复 vol 偏移 2px 未命中与 speed/cc 区域重叠。
+
+### 排查插曲
+音量 hover 测试无日志 → 注入 mm 坐标 1375,691 = 输入 1100,553 ×1.25：
+**inject_move.ps1 漏了 SetProcessDPIAware**，PS 进程 DPI 虚拟化放大了
+lParam。测试脚本必须与目标进程 DPI 上下文一致（此前 click/key 脚本已含，
+新脚本遗漏复踩）。
+
+---
+
 ## M34a Phase 4e: 列表当前项自动跟随（2026-08-24）
 
 - playPath() 中面板打开时重算 playlistScroll 使当前项居中
