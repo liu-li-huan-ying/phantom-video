@@ -1841,6 +1841,41 @@ overlay 每帧 clear 成品红 (255,0,255)，之后所有带 alpha 的绘制
 经验：colorkey 方案选穿透色时的约束不是"UI 不用这个颜色"，
 而是"UI 的所有半透明合成都不能以它为底色"。黑色对暗色 UI
 是唯一同时满足两者的选择。
+
+---
+
+## M34a Phase 14: UI 复刻冲刺——效果图规格对齐（2026-08-25）
+
+用户反馈 UI 粗糙，要求按《播放器效果图.html》1:1 复刻、苹果级高级感。
+逐项提取 CSS 规格后分两批落地。
+
+### 14a 控制栏 row1 复刻（最大视觉差）
+- **Row1Layout 布局函数**：渲染与命中测试共用单一事实来源（此前散装
+  手算坐标反复错位的根治）
+- PLAY 按钮改**白底圆角方 42×42 + 黑图标**（.ctrlbtn.play 规格）
+- time 移至 play 右侧同行（12px text2 tabular）
+- 右侧改文字按钮组：字幕(图标状态色)/倍速("倍速"+accent2 蓝值)/
+  至臻画质/音量wrap(hover 展开滑条)/设置(文字+gear)/全屏
+
+### 14b 列表卡片化（.pl-item 规格）+ 扩窗精确化
+- thumb 100×56 渐变占位+中央 play 白.25+dur 角标(黑.72)
+- title(#bfd6ff playing)+state 行三态配色；hover/playing 背景
+- itemH S(72) 全局同步；面板头"播放列表"+28×28 关闭钮
+- **扩窗漂移根治**：无边框窗口 GetWindowRect 比 client 多隐藏边框
+  ~18px，applyPlaylistWindow 按 client 增量换算 window 增量（宽高都补）
+
+### 其他
+- 中央播放钮白描边圆环（.center-play white.75 border）
+- Toast 加 white.10 边框
+- 控制栏隐藏最低透明度 0.25（效果图 --cb-opacity 行为）
+- 速度菜单锚定按钮下方+防右溢出+k 标注（慢/正常/快）
+
+### 排查方法论沉淀
+固定坐标注入测试在"位置记忆+可变窗口宽"下必然失效。正确姿势：
+1. 测试脚本动态读 client 宽计算目标坐标
+2. 应用层加 WM_SIZE/pl toggle 等状态日志，一轮拿全事实链
+3. pos 记忆脏数据循环污染测试环境——saveWindowPos 增加
+   IsZoomed/最小尺寸防御
 - gapless-audio 默认 weak 已满足本地播放
 
 ---
