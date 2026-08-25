@@ -258,6 +258,9 @@ struct Row1Layout {
     int cy;                             // 行中心 y
 };
 
+static void showToast(const char* msg);
+static const char* qualityLabel();
+
 static void layoutRow1(int w, int h, bool volOpen, Row1Layout& L) {
     const int pad = S(16);
     int cy = h - S(CONTROL_BAR_H) + S(50);
@@ -283,12 +286,12 @@ static void layoutRow1(int w, int h, bool volOpen, Row1Layout& L) {
     auto placeRight = [&](SDL_Rect& rc, int bw) {
         xr -= bw;
         rc = {xr, cy - S(17), bw, S(34)};
-        xr -= S(4);
+        xr -= S(6);  // 按钮间距
     };
     placeRight(L.fullBtn, S(34));
     placeRight(L.setBtn, S(58));                 // "设置"+gear
     L.volSliderW = volOpen ? S(80) : 0;
-    placeRight(L.qualityBtn, g_text.measureText("至臻画质", 12) + S(18));
+    placeRight(L.qualityBtn, g_text.measureText("画质", 12) + g_text.measureText(qualityLabel(), 11) + S(22));
     {
         char spd[16];
         float s = g_mpv ? g_mpv->speed() : 1.0f;
@@ -306,6 +309,21 @@ static void showToast(const char* msg) {
     std::snprintf(g_ui.toastMsg, sizeof(g_ui.toastMsg), "%s", msg);
     g_ui.toastActive = true;
     g_ui.toastStart = SDL_GetTicks();
+}
+
+static const char* qualityLabel() {
+    if (!g_mpv) return "---";
+    int h = g_mpv->videoHeight();
+    if (h <= 0) return "---";
+    if (h <= 240)  return "240p";
+    if (h <= 360)  return "360p";
+    if (h <= 480)  return "480p";
+    if (h <= 576)  return "576p";
+    if (h <= 720)  return "720p";
+    if (h <= 1080) return "1080p";
+    if (h <= 1440) return "2K";
+    if (h <= 2160) return "4K";
+    return "8K";
 }
 
 // ---- OSD：mpv 属性查询 ----
@@ -1796,11 +1814,17 @@ static void renderOverlay() {
         // prev
         svgicon::draw(g_sdlRdr, "prev", L.prev.x + S(17), L.prev.y + S(17), S(18),
                       iconC, iconC, 231, A(255));
-        // PLAY 无背景圆角 + 白图标
+        // PLAY 圆形描边 + 白图标
         {
+            int cx = L.play.x + L.play.w / 2;
+            int cy = L.play.y + L.play.h / 2;
+            // 圆形描边 white.15
+            SDL_SetRenderDrawBlendMode(g_sdlRdr, SDL_BLENDMODE_BLEND);
+            SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 38);
+            fillCircle(g_sdlRdr, cx, cy, S(21), 255, 255, 255, 38);
             const char* pi = (g_mpv->state() == MpvBackend::State::Paused) ? "play" : "pause";
-            svgicon::draw(g_sdlRdr, pi, L.play.x + L.play.w / 2, L.play.y + L.play.h / 2,
-                          S(20), iconC, iconC, 231, A(255));
+            svgicon::draw(g_sdlRdr, pi, cx, cy,
+                          S(18), iconC, iconC, 231, A(255));
         }
         // next
         svgicon::draw(g_sdlRdr, "next", L.next.x + S(17), L.next.y + S(17), S(18),
@@ -1814,33 +1838,56 @@ static void renderOverlay() {
             g_text.drawText(L.timeX, L.cy - S(9), ts, 12, 161, 161, 166);
         }
 
-        // 右侧 textbtn 组
-        auto drawTextBtnIcon = [&](const SDL_Rect& rc, const char* label,
-                                   const char* iconId, Uint8 ir, Uint8 ig, Uint8 ib) {
+        // 右侧 textbtn 组 (圆角底框 + 文字 + 图标)
+        auto drawTextBtn = [&](const SDL_Rect& rc, const char* label,
+                               const char* iconId, Uint8 ir, Uint8 ig, Uint8 ib) {
+            // 圆角底框 white.06
+            SDL_SetRenderDrawBlendMode(g_sdlRdr, SDL_BLENDMODE_BLEND);
+            SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 15);
+            SDL_Rect bg = {rc.x, rc.y + S(2), rc.w, rc.h - S(4)};
+            SDL_RenderFillRect(g_sdlRdr, &bg);
+            // 文字
             int tw = g_text.measureText(label, 12);
-            int tx = rc.x + S(9);
+            int tx = rc.x + S(8);
             g_text.drawText(tx, rc.y + S(10), label, 12, 200, 200, 205);
-            svgicon::draw(g_sdlRdr, iconId, tx + tw + S(11), rc.y + S(17), S(15),
+            // 图标
+            svgicon::draw(g_sdlRdr, iconId, tx + tw + S(9), rc.y + S(17), S(15),
                           ir, ig, ib, A(255));
         };
         // 字幕
         {
             Uint8 ic = g_mpv->subVisible() ? 235 : 110;
-            drawTextBtnIcon(L.subBtn, "字幕", "cc", ic, ic, ic);
+            drawTextBtn(L.subBtn, "字幕", "cc", ic, ic, ic);
         }
-        // 倍速: "倍速" text2 + 值 accent2 蓝粗
+        // 倍速: 圆角底框 + "倍速" text2 + 值 accent2 蓝
         {
             char spd[16];
             float s = g_mpv->speed();
             if (s == (int)s) std::snprintf(spd, sizeof(spd), "%.0fx", s);
             else             std::snprintf(spd, sizeof(spd), "%.2fx", s);
+            // 底框
+            SDL_SetRenderDrawBlendMode(g_sdlRdr, SDL_BLENDMODE_BLEND);
+            SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 15);
+            SDL_Rect bg = {L.speedBtn.x, L.speedBtn.y + S(2), L.speedBtn.w, L.speedBtn.h - S(4)};
+            SDL_RenderFillRect(g_sdlRdr, &bg);
+            // 文字
             int lw = g_text.measureText("倍速", 12);
-            g_text.drawText(L.speedBtn.x + S(9), L.speedBtn.y + S(10), "倍速", 12, 200, 200, 205);
-            g_text.drawText(L.speedBtn.x + S(9) + lw + S(5), L.speedBtn.y + S(10), spd, 12,
+            g_text.drawText(L.speedBtn.x + S(8), L.speedBtn.y + S(10), "倍速", 12, 200, 200, 205);
+            g_text.drawText(L.speedBtn.x + S(8) + lw + S(4), L.speedBtn.y + S(10), spd, 12,
                             59, 130, 246);
         }
-        // 至臻画质
-        g_text.drawText(L.qualityBtn.x + S(9), L.qualityBtn.y + S(10), "至臻画质", 12, 200, 200, 205);
+        // 画质 + 分辨率标签
+        {
+            const char* ql = qualityLabel();
+            int qw = g_text.measureText("画质", 12);
+            // 底框
+            SDL_SetRenderDrawBlendMode(g_sdlRdr, SDL_BLENDMODE_BLEND);
+            SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 15);
+            SDL_Rect bg = {L.qualityBtn.x, L.qualityBtn.y + S(2), L.qualityBtn.w, L.qualityBtn.h - S(4)};
+            SDL_RenderFillRect(g_sdlRdr, &bg);
+            g_text.drawText(L.qualityBtn.x + S(8), L.qualityBtn.y + S(10), "画质", 12, 200, 200, 205);
+            g_text.drawText(L.qualityBtn.x + S(8) + qw + S(4), L.qualityBtn.y + S(11), ql, 11, 161, 161, 166);
+        }
         // 音量图标
         {
             const char* vid = g_mpv->muted() ? "mute" : "volume";
@@ -1848,7 +1895,7 @@ static void renderOverlay() {
                           iconC, iconC, 231, A(255));
         }
         // 设置(文字+gear)
-        drawTextBtnIcon(L.setBtn, "设置", "gear", 200, 200, 205);
+        drawTextBtn(L.setBtn, "设置", "gear", 200, 200, 205);
         // 全屏
         const char* fid = g_ui.fullscreen ? "exitfull" : "full";
         svgicon::draw(g_sdlRdr, fid, L.fullBtn.x + S(17), L.fullBtn.y + S(17), S(18),
