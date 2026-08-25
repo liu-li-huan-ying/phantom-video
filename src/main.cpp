@@ -104,6 +104,18 @@ struct UiState {
     int    playlistAnimW = 0;   // current animation width
     int    playlistScroll = 0;  // 滚动偏移(px)
 
+    // 单击暂停延迟判定（双击全屏互斥）
+    bool   pendingPause = false;
+
+    // 音量滑条 hover 自动展开/收起
+    Uint32 volHoverAt = 0;
+
+    // 播放列表拖拽排序
+    int    plDragFrom = -1;     // 按下的项 index
+    int    plDownY = 0;        // 按下时 y
+    bool   plDragging = false;
+    int    plDragY = 0;         // 拖拽中鼠标 y
+
     // PIP / mini mode（置顶迷你小窗）
     bool   miniMode  = false;
     RECT   savedRect  = {};     // 还原用窗口 rect
@@ -148,6 +160,7 @@ static LRESULT CALLBACK mpvRelayProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
 static const int SB_MARGIN = 20;
 static const float SPEED_PRESETS[] = {0.25f, 0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f, 3.0f};
 static const int SPEED_PRESET_COUNT = 8;
+static const int TIMER_SINGLECLICK = 2;   // 单击暂停延迟定时器
 
 // ---- DPI 缩放 ----
 // g_dpi = 当前显示器 DPI/96。像素度量(图标/边距/条高)经 S() 缩放；
@@ -276,11 +289,13 @@ static void toggleFullscreen(HWND hwnd) {
             mi.rcMonitor.right - mi.rcMonitor.left,
             mi.rcMonitor.bottom - mi.rcMonitor.top, SWP_FRAMECHANGED);
         g_ui.fullscreen = true;
+        LOG_INFO("MAIN", "fullscreen ON");
     } else {
         SetWindowLongPtrW(hwnd, GWL_STYLE, sty | WS_OVERLAPPEDWINDOW);
         SetWindowPos(hwnd, nullptr, 100, 100, S(960), S(540),
             SWP_FRAMECHANGED | SWP_NOZORDER);
         g_ui.fullscreen = false;
+        LOG_INFO("MAIN", "fullscreen OFF");
     }
     raiseOverlayAbove();
 }
@@ -514,6 +529,13 @@ static void playIndex(int idx, bool relative = false) {
 }
 
 
+// ---- 音量交互区（图标+滑条范围） ----
+static bool inVolumeArea(int mx, int my) {
+    int barTop = sbTopY();
+    return my >= barTop + S(34) && my <= barTop + S(66) &&
+           mx >= g_ui.winW - S(170) && mx <= g_ui.winW - S(38);
+}
+
 // ---- topbar icon hit test ----
 static int hitTestTopbarIcon(int mx, int my, int winW) {
     if (my < 0 || my > S(ui::TOPBAR_H)) return -1;
@@ -658,6 +680,37 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         g_ui.visible = true;
         g_ui.hideAt = SDL_GetTicks() + (onTopbar ? 4000 : ui::CTRLBAR_HIDE_MS);
 
+        // 音量滑条 hover 自动展开；离开 1.2s 后收起（拖拽中不收）
+        if (inVolumeArea(g_ui.mouseX, g_ui.mouseY)) {
+            if (!g_ui.volumeSliderOpen) {
+                g_ui.volumeSliderOpen = true;
+                LOG_DBG("MAIN", "volume slider hover-expand");
+            }
+            g_ui.volHoverAt = SDL_GetTicks();
+        } else if (g_ui.volumeSliderOpen && !g_ui.volumeDragging &&
+                   SDL_GetTicks() > g_ui.volHoverAt + 1200) {
+            g_ui.volumeSliderOpen = false;
+            LOG_DBG("MAIN", "volume slider auto-collapse");
+        }
+
+        // 列表拖拽排序：位移超阈值进入拖拽态
+        if (g_ui.plDragFrom >= 0 && !g_ui.plDragging &&
+            std::abs(g_ui.mouseY - g_ui.plDownY) > S(8)) {
+            g_ui.plDragging = true;
+            LOG_DBG("MAIN", "playlist drag start from=%d", g_ui.plDragFrom);
+        }
+        if (g_ui.plDragging) {
+            g_ui.plDragY = g_ui.mouseY;
+            // 自动滚动：拖到面板上下边缘时滚动列表
+            int panelTop = S(ui::TOPBAR_H), panelBottom = g_ui.winH - S(10);
+            if (g_ui.mouseY < panelTop + S(30) && g_ui.playlistScroll > 0)
+                g_ui.playlistScroll -= S(12);
+            int contentH = (int)g_playlist.size() * S(52);
+            int viewH = g_ui.winH - S(ui::TOPBAR_H) - S(55);
+            if (g_ui.mouseY > panelBottom - S(30) && g_ui.playlistScroll < contentH - viewH)
+                g_ui.playlistScroll += S(12);
+        }
+
         // volume slider drag
         if (g_ui.volumeDragging && g_mpv) {
             int sliderW = S(ui::VOLSIDER_W);
@@ -748,9 +801,9 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             }
             g_ui.speedMenuOpen = false;
         }
-        // --- 字幕 cc 图标点击（切换可见性） ---
-        else if (g_mpv && mx >= g_ui.winW - S(134) && mx <= g_ui.winW - S(110) &&
-                 my >= barTop + S(38) && my <= barTop + S(62)) {
+        // --- 字幕 cc 图标点击（切换可见性）---
+        else if (g_mpv && mx >= g_ui.winW - S(136) && mx <= g_ui.winW - S(108) &&
+                 my >= barTop + S(36) && my <= barTop + S(64)) {
             bool vis = !g_mpv->subVisible();
             g_mpv->setSubVisibility(vis);
             std::string trk = g_mpv->currentSubTrack();
@@ -763,14 +816,14 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             showToast(msg);
             LOG_DBG("MAIN", "sub visibility -> %d", vis ? 1 : 0);
         }
-        // --- speed label click (toggle speed popup) ---
-        else if (g_mpv && mx >= g_ui.winW - S(166) && mx <= g_ui.winW - S(118) &&
-                 my >= barTop + S(36) && my <= barTop + S(62)) {
+        // --- speed label click（toggle 弹出菜单）---
+        else if (g_mpv && mx >= g_ui.winW - S(170) && mx <= g_ui.winW - S(138) &&
+                 my >= barTop + S(36) && my <= barTop + S(64)) {
             g_ui.speedMenuOpen = !g_ui.speedMenuOpen;
         }
         // --- settings gear click ---
-        else if (g_mpv && mx >= g_ui.winW - S(100) && mx <= g_ui.winW - S(76) &&
-                 my >= barTop + S(38) && my <= barTop + S(62)) {
+        else if (g_mpv && mx >= g_ui.winW - S(102) && mx <= g_ui.winW - S(74) &&
+                 my >= barTop + S(36) && my <= barTop + S(64)) {
             g_ui.settingsOpen = !g_ui.settingsOpen;
         }
         // --- settings modal interactions ---
@@ -822,10 +875,12 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 saveConfig(configPath(), g_cfg);
             }
         }
-        // --- volume icon click ---
-        else if (g_mpv && mx >= g_ui.winW - S(66) && mx <= g_ui.winW - S(42) &&
-                 my >= barTop + S(38) && my <= barTop + S(62)) {
-            g_ui.volumeSliderOpen = !g_ui.volumeSliderOpen;
+        // --- 音量图标点击：切换静音（滑条由 hover 展开） ---
+        else if (g_mpv && mx >= g_ui.winW - S(68) && mx <= g_ui.winW - S(40) &&
+                 my >= barTop + S(36) && my <= barTop + S(64)) {
+            g_mpv->toggleMute();
+            showToast(g_mpv->muted() ? "Muted" : "Unmuted");
+            LOG_INFO("MAIN", "mute toggled -> %d", g_mpv->muted() ? 1 : 0);
         }
         // --- volume slider drag ---
         else if (g_ui.volumeSliderOpen && g_mpv) {
@@ -863,26 +918,53 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             }
             // 其余空隙不处理
         }
-        // --- 播放列表面板区域 ---
+        // --- 播放列表面板区域：按下记候选（拖拽排序 / 松手播放） ---
         else if (g_ui.playlistOpen && mx >= g_ui.winW - S(320)) {
             int panelY = S(ui::TOPBAR_H);
             int itemH = S(52);
             int rel = my - (panelY + S(45)) + g_ui.playlistScroll;
+            g_ui.plDragFrom = -1; g_ui.plDragging = false;
             if (rel >= 0) {
                 int itemIdx = rel / itemH;
-                if (itemIdx < (int)g_playlist.size())
-                    playIndex(itemIdx);
+                if (itemIdx < (int)g_playlist.size()) {
+                    g_ui.plDragFrom = itemIdx;
+                    g_ui.plDownY = my;
+                    SetCapture(hwnd);   // 拖拽/松手都在面板外也能跟踪
+                }
             }
         }
-        // --- click on video area ---
+        // --- click on video area（延迟执行暂停，双击留给全屏） ---
         else {
-            if (g_mpv) g_mpv->togglePause();
+            if (g_mpv) {
+                g_ui.pendingPause = true;
+                SetTimer(hwnd, TIMER_SINGLECLICK, 250, nullptr);
+            }
         }
 
         g_ui.visible = true;
         g_ui.hideAt = SDL_GetTicks() + ui::CTRLBAR_HIDE_MS;
         return 0;
     }
+    case WM_LBUTTONDBLCLK: {
+        int mx = (short)LOWORD(lp), my = (short)HIWORD(lp);
+        int barTop = sbTopY();
+        // 视频区双击 -> 全屏切换（取消待定暂停）
+        if (g_mpv && my > S(ui::TOPBAR_H) && my < barTop - S(6)) {
+            KillTimer(hwnd, TIMER_SINGLECLICK);
+            g_ui.pendingPause = false;
+            toggleFullscreen(hwnd);
+        }
+        return 0;
+    }
+    case WM_TIMER:
+        if (wp == TIMER_SINGLECLICK) {
+            KillTimer(hwnd, TIMER_SINGLECLICK);
+            if (g_ui.pendingPause && g_mpv) {
+                g_mpv->togglePause();
+            }
+            g_ui.pendingPause = false;
+        }
+        return 0;
     case WM_LBUTTONUP:
         if (g_ui.seekingDrag) {
             g_ui.seekingDrag = false;
@@ -890,6 +972,31 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
         if (g_ui.volumeDragging) {
             g_ui.volumeDragging = false;
+        }
+        // 列表拖拽落位 / 单击播放
+        if (g_ui.plDragFrom >= 0) {
+            if (g_ui.plDragging) {
+                int itemH = S(52);
+                int topY = S(ui::TOPBAR_H) + S(45);
+                float rel = (float)(g_ui.plDragY - topY) + g_ui.playlistScroll;
+                int drop = (int)(rel / itemH + 0.5f);
+                int n = (int)g_playlist.size();
+                if (drop < 0) drop = 0;
+                if (drop > n) drop = n;
+                int from = g_ui.plDragFrom;
+                if (drop != from && drop != from + 1) {
+                    std::string p = g_playlist[from];
+                    g_playlist.erase(g_playlist.begin() + from);
+                    int ins = drop; if (ins > from) --ins;
+                    if (ins > (int)g_playlist.size()) ins = (int)g_playlist.size();
+                    g_playlist.insert(g_playlist.begin() + ins, p);
+                    LOG_INFO("MAIN", "playlist move %d -> %d", from, ins);
+                    showToast("Playlist reordered");
+                }
+            } else {
+                playIndex(g_ui.plDragFrom);   // 未拖动 = 单击播放
+            }
+            g_ui.plDragFrom = -1; g_ui.plDragging = false;
         }
         ReleaseCapture();
         return 0;
@@ -1247,7 +1354,7 @@ static void renderOverlay() {
             float s = g_mpv->speed();
             if (s == (int)s) std::snprintf(spd, sizeof(spd), "%.0fx", s);
             else             std::snprintf(spd, sizeof(spd), "%.1fx", s);
-            g_text.drawText(w - S(160), barTop + S(42), spd, 12, 161, 161, 166);
+            g_text.drawText(w - S(166), barTop + S(42), spd, 12, 161, 161, 166);
         }
         if (g_mpv->hwDecodeActive()) {
             g_text.drawText(w - S(204), barTop + S(42), "[HW]", 11, 37, 99, 235);
@@ -1396,6 +1503,30 @@ static void renderOverlay() {
             if (isCurrent) {
                 const char* icon = (g_mpv->state() == MpvBackend::State::Paused) ? "play" : "pause";
                 svgicon::draw(g_sdlRdr, icon, panelX + panelW - S(24), iy + itemH / 2, S(14), 37, 99, 235, 255);
+            }
+        }
+
+        // 拖拽排序视觉反馈：插入指示线 + 被拖项高亮
+        if (g_ui.plDragging && g_ui.plDragFrom >= 0) {
+            int itemH = S(52);
+            int topY = panelY + S(45);
+            float rel = (float)(g_ui.plDragY - topY) + g_ui.playlistScroll;
+            int drop = (int)(rel / itemH + 0.5f);
+            int n = (int)g_playlist.size();
+            if (drop < 0) drop = 0;
+            if (drop > n) drop = n;
+            int lineY = topY + drop * itemH - g_ui.playlistScroll - itemH / 2 + itemH / 2;
+            lineY = topY + drop * itemH - g_ui.playlistScroll;
+            if (lineY >= panelY && lineY <= panelY + panelH) {
+                SDL_Rect line = {panelX + S(4), lineY - S(2), panelW - S(10), S(3)};
+                SDL_SetRenderDrawColor(g_sdlRdr, 37, 99, 235, 255);
+                SDL_RenderFillRect(g_sdlRdr, &line);
+            }
+            int fromY = topY + g_ui.plDragFrom * itemH - g_ui.playlistScroll;
+            if (fromY >= panelY && fromY <= panelY + panelH) {
+                SDL_Rect hl = {panelX + S(4), fromY - S(2), panelW - S(8), itemH};
+                SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 30);
+                SDL_RenderFillRect(g_sdlRdr, &hl);
             }
         }
 
@@ -1597,8 +1728,9 @@ int main(int argc, char** argv) {
     }
 
     // ---- Win32 parent window ----
-    WNDCLASSEXW wc = {};
-    wc.cbSize        = sizeof(wc);
+WNDCLASSEXW wc = {};
+wc.cbSize        = sizeof(wc);
+wc.style         = CS_DBLCLKS;   // 接收 WM_LBUTTONDBLCLK
     wc.lpfnWndProc   = parentProc;
     wc.hInstance      = GetModuleHandleW(nullptr);
     wc.hCursor        = LoadCursor(nullptr, IDC_ARROW);
@@ -1762,6 +1894,13 @@ int main(int argc, char** argv) {
 
         if (g_ui.visible && SDL_GetTicks() > g_ui.hideAt)
             g_ui.visible = false;
+
+        // 音量滑条超时自动收起（鼠标静止时无 MOUSEMOVE）
+        if (g_ui.volumeSliderOpen && !g_ui.volumeDragging &&
+            SDL_GetTicks() > g_ui.volHoverAt + 1200) {
+            g_ui.volumeSliderOpen = false;
+            LOG_DBG("MAIN", "volume slider auto-collapse (idle)");
+        }
 
         renderOverlay();
         Sleep(1);
