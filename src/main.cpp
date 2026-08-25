@@ -130,6 +130,12 @@ struct UiState {
 static HWND          g_parentHwnd = nullptr;
 static HWND          g_mpvHwnd    = nullptr;
 static HWND          g_overlayHwnd = nullptr;   // overlay 原生句柄(z序调整用)
+
+// ---- 按需渲染 ----
+// 任何 Win32 消息都可能改变视觉状态 -> proc 入口置脏;
+// 播放进度秒变/定时到期在主循环轮询置脏; 空闲时 MsgWait 阻塞零占用
+#include <atomic>
+static std::atomic<bool> g_dirty{ true };
 static MpvBackend*   g_mpv        = nullptr;
 static SDL_Window*   g_sdlWin     = nullptr;
 static SDL_Renderer* g_sdlRdr     = nullptr;
@@ -604,6 +610,7 @@ static int hitTestTopbarIcon(int mx, int my, int winW) {
 
 // ---- Win32 WndProc ----
 static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    g_dirty.store(true);   // 任何消息都视为潜在视觉变化（入口统一置脏）
     switch (msg) {
 
     case WM_SIZE: {
@@ -1961,20 +1968,32 @@ wc.style         = CS_DBLCLKS;   // 接收 WM_LBUTTONDBLCLK
     g_thumbQuit.store(false);
     g_thumbThread = std::thread(thumbWorkerMain);
 
-    // ---- main loop ----
+    // ---- main loop（按需渲染：脏标记 + 定时唤醒 + 空闲阻塞） ----
     bool running = true;
     Uint32 lastPosSave = 0;
+    int lastPosSec = -1;
+    auto lastState = mpv.state();
     while (running) {
         MSG msg;
-        while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+        BOOL hasMsg = FALSE;
+        while ((hasMsg = PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) != 0) {
             if (msg.message == WM_QUIT) { running = false; break; }
             TranslateMessage(&msg);
-            DispatchMessageW(&msg);
+            DispatchMessageW(&msg);   // parentProc 入口已置 dirty
         }
         if (!running) break;
 
-        // 周期保存播放进度（3 秒）
         Uint32 now = SDL_GetTicks();
+
+        // 播放状态轮询：进度秒变 / 播放状态切换 -> dirty
+        if (g_mpv && g_mpv->hasMedia()) {
+            double pos = g_mpv->clock();
+            if ((int)pos != lastPosSec) { lastPosSec = (int)pos; g_dirty.store(true); }
+            auto st = g_mpv->state();
+            if (st != lastState) { lastState = st; g_dirty.store(true); }
+        }
+
+        // 周期保存播放进度（3 秒）
         if (now - lastPosSave >= 3000) {
             lastPosSave = now;
             if (g_mpv && g_mpv->hasMedia() && g_mpv->state() == MpvBackend::State::Playing) {
@@ -1986,18 +2005,43 @@ wc.style         = CS_DBLCLKS;   // 接收 WM_LBUTTONDBLCLK
             }
         }
 
-        if (g_ui.visible && SDL_GetTicks() > g_ui.hideAt)
+        // 定时状态迁移（迁移动作本身置 dirty）
+        if (g_ui.visible && now > g_ui.hideAt) {
             g_ui.visible = false;
-
-        // 音量滑条超时自动收起（鼠标静止时无 MOUSEMOVE）
+            g_dirty.store(true);
+        }
         if (g_ui.volumeSliderOpen && !g_ui.volumeDragging &&
-            SDL_GetTicks() > g_ui.volHoverAt + 1200) {
+            now > g_ui.volHoverAt + 1200) {
             g_ui.volumeSliderOpen = false;
             LOG_DBG("MAIN", "volume slider auto-collapse (idle)");
+            g_dirty.store(true);
+        }
+        if (g_ui.toastActive && now - g_ui.toastStart > ui::TOAST_MS + 50) {
+            g_ui.toastActive = false;
+            g_dirty.store(true);
+        }
+        if (g_ui.osdActive && now - g_ui.osdStart > 8000) {
+            g_ui.osdActive = false;
+            g_dirty.store(true);
         }
 
-        renderOverlay();
-        Sleep(1);
+        // 仅脏时渲染
+        if (g_dirty.exchange(false)) {
+            renderOverlay();
+        }
+
+        // 计算最近唤醒点（cap 200ms 保证播放中进度秒变响应；空闲更久）
+        Uint32 wait = 200;
+        auto upd = [&](Uint32 deadline) {
+            if (deadline > now && deadline - now < wait) wait = deadline - now;
+        };
+        upd(g_ui.hideAt);
+        if (g_ui.volumeSliderOpen) upd(g_ui.volHoverAt + 1200);
+        if (g_ui.toastActive)      upd(g_ui.toastStart + ui::TOAST_MS + 60);
+        if (g_ui.osdActive)        upd(g_ui.osdStart + 8050);
+        // 进度保存(3s 周期)由 200ms 兜底轮询覆盖, 无需专门加速
+
+        MsgWaitForMultipleObjectsEx(0, nullptr, wait, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
     }
 
     // 退出前保存最终进度 + 窗口位置（WM_CLOSE 已存，此处兜底）
