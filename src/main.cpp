@@ -998,14 +998,14 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             case 'X': {
                 g_mpv->addSubDelay(-0.5);
                 char msg[40];
-                std::snprintf(msg, sizeof(msg), "Sub delay: %.1fs", -g_mpv->subDelay());
+                std::snprintf(msg, sizeof(msg), "%s: %.1fs", T("字幕延迟", "Sub delay"), -g_mpv->subDelay());
                 showToast(msg);
                 break;
             }
             case 'Z': {
                 g_mpv->addSubDelay(0.5);
                 char msg[40];
-                std::snprintf(msg, sizeof(msg), "Sub delay: %.1fs", -g_mpv->subDelay());
+                std::snprintf(msg, sizeof(msg), "%s: %.1fs", T("字幕延迟", "Sub delay"), -g_mpv->subDelay());
                 showToast(msg);
                 break;
             }
@@ -1034,9 +1034,10 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     int next = (cur + 1) % (int)chs.size();
                     g_mpv->seekToChapter(next);
                     char msg[64];
-                    std::snprintf(msg, sizeof(msg), "Chapter %d/%d: %s",
+                    std::snprintf(msg, sizeof(msg), "%s %d/%d: %s",
+                                 T("章节", "Chapter"),
                                  next + 1, (int)chs.size(),
-                                 chs[next].title.empty() ? "Untitled" : chs[next].title.c_str());
+                                 chs[next].title.empty() ? T("无标题", "Untitled") : chs[next].title.c_str());
                     showToast(msg);
                 }
                 break;
@@ -1053,8 +1054,9 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     }
                     g_mpv->setAudioTrack(tracks[nextIdx].id);
                     char msg[64];
-                    std::snprintf(msg, sizeof(msg), "Audio: %s",
-                                 tracks[nextIdx].desc.empty() ? "Default" : tracks[nextIdx].desc.c_str());
+                    std::snprintf(msg, sizeof(msg), "%s: %s",
+                                 T("音轨", "Audio"),
+                                 tracks[nextIdx].desc.empty() ? T("默认", "Default") : tracks[nextIdx].desc.c_str());
                     showToast(msg);
                 } else {
                     showToast(i18n::singleTrack());
@@ -1348,8 +1350,9 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 g_mpv->setSubVisibility(vis);
                 std::string trk = g_mpv->currentSubTrack();
                 char msg[96];
-                std::snprintf(msg, sizeof(msg), vis ? "Subtitles ON %s" : "Subtitles OFF",
-                              trk.empty() ? "" : ("[" + trk + "]").c_str());
+                std::snprintf(msg, sizeof(msg), vis ? "%s [%s]" : "%s",
+                              vis ? i18n::subtitlesOn() : i18n::subtitlesOff(),
+                              trk.c_str());
                 showToast(msg);
             }
             else if (inRc(L.speedBtn)) {
@@ -1410,7 +1413,8 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     int idx = (my - itemsY) / itemH;
                     if (idx >= 0 && idx < QUALITY_PRESET_COUNT) {
                         applyQualityPreset(idx);
-                        showToast(QUALITY_PRESETS[idx].name);
+                        const char* qNames[] = { T("省电", "Power Saving"), T("标准", "Standard"), T("至臻", "Ultimate") };
+                        showToast(qNames[idx]);
                     }
                 }
             }
@@ -1480,7 +1484,7 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 if (idx >= 0 && idx < SPEED_PRESET_COUNT) {
                     g_mpv->setSpeed(SPEED_PRESETS[idx]);
                     char msg[32];
-                    std::snprintf(msg, sizeof(msg), "Speed: %.2fx", SPEED_PRESETS[idx]);
+                    std::snprintf(msg, sizeof(msg), "%s: %.2fx", T("倍速", "Speed"), SPEED_PRESETS[idx]);
                     showToast(msg);
                 }
             }
@@ -1580,9 +1584,8 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 g_ui.sbDragging = true;
                 g_ui.sbGrabOff = my - g_ui.sbBarY;
             } else {
-                int panelY = S(ui::TOPBAR_H);
                 int itemH = S(72);
-                int rel = my - (panelY + S(45)) + g_ui.playlistScroll;
+                int rel = my - S(45) + g_ui.playlistScroll;   // panelY=0 与渲染一致
                 g_ui.plDragFrom = -1; g_ui.plDragging = false;
                 if (rel >= 0) {
                     int itemIdx = rel / itemH;
@@ -1654,7 +1657,7 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         if (g_ui.plDragFrom >= 0) {
             if (g_ui.plDragging) {
                 int itemH = S(72);
-                int topY = S(ui::TOPBAR_H) + S(45);
+                int topY = S(45);   // panelY=0 与渲染一致
                 float rel = (float)(g_ui.plDragY - topY) + g_ui.playlistScroll;
                 int drop = (int)(rel / itemH + 0.5f);
                 int n = (int)g_playlist.size();
@@ -1829,12 +1832,55 @@ struct GradKey {
                cb == o.cb && aTop == o.aTop && aBot == o.aBot;
     }
 };
-static SDL_Texture* g_gradTex[2]   = { nullptr, nullptr };
-static GradKey       g_gradKey[2]  = {};
+static SDL_Texture* g_gradTex[3]   = { nullptr, nullptr, nullptr };
+static GradKey       g_gradKey[3]  = {};
 
 static void destroyGradCache() {
     for (auto& t : g_gradTex)
         if (t) { SDL_DestroyTexture(t); t = nullptr; }
+}
+
+// 均匀抖动压暗: Bayer 抖动混合"透明键黑"与不透明深色, 模拟半透明遮罩
+// (colorkey 架构下无法真半透明, 抖动是唯一正确方案)
+static void drawDitherDim(SDL_Renderer* r, int x, int y, int w, int h,
+                          Uint8 cr, Uint8 cg, Uint8 cb, Uint8 alpha) {
+    static const int bayer[4][4] = {
+        {  0, 136,  34, 170},
+        {204,  68, 238, 102},
+        { 51, 187,  17, 153},
+        {255, 119, 221,  85}
+    };
+    if (w <= 0 || h <= 0) return;
+    GradKey key{ w, h, cr, cg, cb, alpha, alpha };
+
+    // slot 2 专用缓存
+    static SDL_Texture* dimTex = nullptr;
+    static GradKey      dimKey = {};
+    if (!dimTex || !(dimKey == key)) {
+        if (dimTex) { SDL_DestroyTexture(dimTex); dimTex = nullptr; }
+        SDL_Texture* tex = SDL_CreateTexture(r, SDL_PIXELFORMAT_ARGB8888,
+                                             SDL_TEXTUREACCESS_STREAMING, w, h);
+        if (!tex) return;
+        SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
+        Uint32* pixels = nullptr; int pitch = 0;
+        if (SDL_LockTexture(tex, nullptr, (void**)&pixels, &pitch) == 0) {
+            Uint32 rgb = ((Uint32)cr << 16) | ((Uint32)cg << 8) | cb;
+            for (int dy = 0; dy < h; ++dy) {
+                int by = dy % 4;
+                Uint32* row = (Uint32*)((Uint8*)pixels + dy * pitch);
+                for (int dx = 0; dx < w; ++dx) {
+                    row[dx] = (alpha > bayer[by][dx % 4])
+                            ? (0xFF000000u | rgb)
+                            : 0x00000000u;
+                }
+            }
+            SDL_UnlockTexture(tex);
+        }
+        dimTex = tex;
+        dimKey = key;
+    }
+    SDL_Rect dst = { x, y, w, h };
+    SDL_RenderCopy(r, dimTex, nullptr, &dst);
 }
 
 static void drawGradientBar(SDL_Renderer* r, int slot, int x, int y, int w, int h,
@@ -1930,8 +1976,8 @@ static void renderOverlay() {
                 pos = segEnd + gapLen;
             }
         }
-        g_text.drawText(w / 2 - S(60), dzY + S(30), "Drop video here", 13, 161, 161, 166);
-        g_text.drawText(w / 2 - S(55), dzY + S(55), "or press Ctrl+O", 12, 100, 100, 100);
+        g_text.drawText(w / 2 - S(60), dzY + S(30), i18n::dropHint(), 13, 161, 161, 166);
+        g_text.drawText(w / 2 - S(55), dzY + S(55), i18n::ctrlOHint(), 12, 100, 100, 100);
 
         // 播放队列网格（当前文件夹扫描结果）
         if (!g_playlist.empty()) {
@@ -1969,7 +2015,9 @@ static void renderOverlay() {
         }
 
         // keyboard hints
-        g_text.drawText(S(20), h - S(30), "Space=Play/Pause  Left/Right=Seek  F=Fullscreen  M=Mute  [/]=Speed", 10, 80, 80, 80);
+        g_text.drawText(S(20), h - S(30),
+                        T("空格=播放/暂停  左/右=快进退  F=全屏  M=静音  [/]=倍速", "Space=Play/Pause  Left/Right=Seek  F=Fullscreen  M=Mute  [/]=Speed"),
+                        10, 80, 80, 80);
 
         SDL_RenderPresent(g_sdlRdr);
         return;
@@ -2030,11 +2078,9 @@ static void renderOverlay() {
     // --- 暂停压暗遮罩 + 中央播放图标 (无圆形背景) ---
     if (fa > 0.01f && g_mpv->state() == MpvBackend::State::Paused) {
         int top = S(ui::TOPBAR_H);
-        SDL_Rect dim = {0, top, w, (barTop > top ? barTop - top : 0)};
-        // 半透明压暗(非纯黑条), 让视频仍隐约可见
-        SDL_SetRenderDrawBlendMode(g_sdlRdr, SDL_BLENDMODE_BLEND);
-        SDL_SetRenderDrawColor(g_sdlRdr, 0, 0, 0, (Uint8)(100 * fa));
-        SDL_RenderFillRect(g_sdlRdr, &dim);
+        // 抖动压暗: colorkey 下半透明纯黑会被抠成全透, 必须用 Bayer 抖动
+        drawDitherDim(g_sdlRdr, 0, top, w, (barTop > top ? barTop - top : 0),
+                      5, 5, 7, (Uint8)(110 * fa));
         int ccx = w / 2, ccy = top + (barTop - top) / 2;
         // 仅播放图标, 无圆形背景
         svgicon::draw(g_sdlRdr, "play", ccx, ccy, S(30),
@@ -2254,8 +2300,8 @@ static void renderOverlay() {
             else               std::snprintf(label, sizeof(label), "%.2fx", sp);
             g_text.drawText(menuX + S(10), iy + S(6), label, 13, tr, tg, tb);
             // k 标注: 慢/正常/快
-            const char* k = (sp < 0.99f) ? "慢" : (sp < 1.01f) ? "正常" :
-                            (sp < 2.01f) ? nullptr : "快";
+            const char* k = (sp < 0.99f) ? T("慢", "Slow") : (sp < 1.01f) ? T("正常", "Normal") :
+                            (sp < 2.01f) ? nullptr : T("快", "Fast");
             if (k) {
                 int kw = g_text.measureText(k, 11);
                 g_text.drawText(menuX + menuW - kw - S(10), iy + S(7), k, 11, 161, 161, 166);
@@ -2483,9 +2529,9 @@ static void renderOverlay() {
             // state: 正在播放(accent2)/已播放(#6b7280)/未播放(#3f3f46)
             {
                 const char* st; Uint8 sr, sg_, sb_;
-                if (isCurrent) { st = "正在播放"; sr = 59; sg_ = 130; sb_ = 246; }
-                else if (hpos > 1.0) { st = "已播放"; sr = 107; sg_ = 114; sb_ = 128; }
-                else { st = "未播放"; sr = 63; sg_ = 63; sb_ = 70; }
+                if (isCurrent) { st = i18n::playing(); sr = 59; sg_ = 130; sb_ = 246; }
+                else if (hpos > 1.0) { st = i18n::played(); sr = 107; sg_ = 114; sb_ = 128; }
+                else { st = i18n::unplayed(); sr = 63; sg_ = 63; sb_ = 70; }
                 g_text.drawText(thRc.x + thRc.w + S(10), iy + S(32), st, 11, sr, sg_, sb_);
             }
         }
@@ -2553,7 +2599,7 @@ static void renderOverlay() {
         }
 
         if (g_playlist.empty()) {
-            g_text.drawText(panelX + S(16), itemY + S(10), "No files in playlist", 12, 100, 100, 100);
+            g_text.drawText(panelX + S(16), itemY + S(10), i18n::emptyPlaylist(), 12, 100, 100, 100);
         }
     }
 
@@ -2863,7 +2909,8 @@ wc.style         = CS_DBLCLKS;   // 接收 WM_LBUTTONDBLCLK
             LOG_INFO("MAIN", "resume at %.1fs", g_pendingResumePos);
             mpv.seek(g_pendingResumePos);
             char msg[48];
-            std::snprintf(msg, sizeof(msg), "Resumed at %02d:%02d",
+            std::snprintf(msg, sizeof(msg), "%s %02d:%02d",
+                T("续播于", "Resumed at"),
                 (int)(g_pendingResumePos / 60), (int)g_pendingResumePos % 60);
             showToast(msg);
         }
