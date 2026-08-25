@@ -1677,6 +1677,18 @@ settingsGeom 写 rowY[5..7] 越界踩栈，点击 gear 即崩。
 （MOUSEMOVE/PAINT/0xC0F4），系物理鼠标悬停窗口引发系统重绘投递，
 非自身循环问题（render 恒 6-8/s）。移开鼠标即恢复。
 另修 wait=0 加速分支造成的忙转窗口。
+
+---
+
+## M34a Phase 8: 高质量缩放开关（2026-08-25）
+
+- hiQScale 开关：scale/cscale 在 spline36 ↔ ewa_lanczossharp 间切换
+  （EWA 系极锐利但 GPU 开销较高，适合 4K 屏放 1080p；默认关）
+- scale-antiring=0.7 常开：缩放振铃抑制，两种算法均受益
+- 面板 9 行 / panelH S(500)——物理高度 625px 与 client 628 只差 3px，
+  更高分辨率屏幕无碍；若未来加行需考虑分页或两列
+
+验证：`set scale/cscale=ewa_lanczossharp ret=0` ×2 + ini 落盘 ✓
 - gapless-audio 默认 weak 已满足本地播放
 
 ---
