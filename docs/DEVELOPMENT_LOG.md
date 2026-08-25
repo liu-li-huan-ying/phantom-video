@@ -1903,6 +1903,26 @@ overlay 每帧 clear 成品红 (255,0,255)，之后所有带 alpha 的绘制
 原 bug: `L.volIconCx * 0` 恒为0 → icon y 坐标=0+cy
 修复: 直接用 L.cy. 滑条渲染从独立块移入 Row1Layout 块,
 统一用 L.volIconCx/L.volSliderX 定位, 消除 icon 与 slider 位置漂移.
+
+---
+
+## M34a Phase 16: 进度条跳变修复（2026-08-25）
+
+### 问题
+切换倍速([ / ])时进度条剧烈偏移/抖动.
+
+### 根因
+mpv `setSpeed()` 后, 内部重新计算播放速率, `time-pos` 属性在极短时间内
+可能报告不一致的值(与旧速度的累积误差). 渲染循环每帧读 `clock()`
+(= cachedClock_ = time-pos), 读到跳变值 → 进度条位置计算错误 → 抖动.
+
+### 修复方案
+- `setSpeed()` 后设置 `seekbarFreezeEnd_ = SDL_GetTicks() + 500` (500ms 冻结)
+- `seekbarFrozen()` 接口查询是否在冻结期
+- 渲染循环 pos 计算:
+  - 冻结期: `pos = lastPos + elapsed * newSpeed` (墙钟推进插值)
+  - 解冻后: 切回 `g_mpv->clock()`
+- 无视觉中断: 500ms 内进度条平滑前进(用新速度), 之后无缝对接 mpv 实际 time-pos
 - gapless-audio 默认 weak 已满足本地播放
 
 ---
