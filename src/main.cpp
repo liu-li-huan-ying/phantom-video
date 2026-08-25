@@ -147,6 +147,13 @@ struct UiState {
     bool   plDragging = false;
     int    plDragY = 0;         // 拖拽中鼠标 y
 
+    // 播放列表滚动条（M33d: 悬停常驻/拖拽/轨道跳页）
+    bool   sbHover = false;
+    bool   sbDragging = false;
+    int    sbGrabOff = 0;       // 按下点相对 bar 顶的偏移
+    int    sbTrackX = -1, sbTrackY = 0, sbTrackW = 0, sbTrackH = 0;
+    int    sbBarY = 0, sbBarH = 0;
+
     // PIP / mini mode（置顶迷你小窗）
     bool   miniMode  = false;
     RECT   savedRect  = {};     // 还原用窗口 rect
@@ -340,11 +347,11 @@ static void raiseOverlayAbove() {
                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
-// 播放列表开/关 -> 主窗口宽度增减 S(320)（右侧独立区域，不遮挡视频）
+// 播放列表开/关 -> 主窗口宽度增减 S(430)（右侧独立区域，不遮挡视频）
 static void applyPlaylistWindow(HWND hwnd) {
     RECT wr;
     GetWindowRect(hwnd, &wr);
-    int newW = (wr.right - wr.left) + (g_ui.playlistOpen ? S(320) : -S(320));
+    int newW = (wr.right - wr.left) + (g_ui.playlistOpen ? S(430) : -S(430));
     SetWindowPos(hwnd, nullptr, 0, 0, newW, wr.bottom - wr.top,
                  SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
     // WM_SIZE 中按 playlistOpen 分配视频区/列表区
@@ -401,6 +408,14 @@ static void toggleMini(HWND hwnd) {
 
 // ---- 播放队列（稳定顺序，文件夹扫描生成，不随播放重排） ----
 static std::vector<std::string> g_playlist;
+
+static void clampPlaylistScroll() {
+    int contentH = (int)g_playlist.size() * S(52);
+    int viewH = g_ui.winH - S(ui::TOPBAR_H) - S(55);
+    if (g_ui.playlistScroll > contentH - viewH) g_ui.playlistScroll = contentH - viewH;
+    if (g_ui.playlistScroll < 0) g_ui.playlistScroll = 0;
+}
+
 static const char* kVideoExts[] = {
     ".mp4",".mkv",".avi",".mov",".flv",".wmv",".webm",".ts",".m2ts",
     ".rmvb",".rm",".3gp",".mpg",".mpeg"
@@ -706,7 +721,7 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         RECT rc; GetClientRect(hwnd, &rc);
         g_ui.totalW = rc.right;
         // 列表面板打开(非全屏)时: 右侧独立区域, mpv/overlay 只占视频区
-        int panelExtra = (g_ui.playlistOpen && !g_ui.fullscreen) ? S(320) : 0;
+        int panelExtra = (g_ui.playlistOpen && !g_ui.fullscreen) ? S(430) : 0;
         g_ui.winW = rc.right - panelExtra;
         g_ui.winH = rc.bottom;
         if (g_mpvHwnd) MoveWindow(g_mpvHwnd, 0, 0, g_ui.winW, rc.bottom, TRUE);
@@ -839,8 +854,29 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             LOG_DBG("MAIN", "volume slider auto-collapse");
         }
 
+        // 列表滚动条: hover 高亮 + 拖拽滚动
+        {
+            bool over = g_ui.sbTrackX >= 0 &&
+                        g_ui.mouseX >= g_ui.sbTrackX - S(5) &&
+                        g_ui.mouseX <= g_ui.sbTrackX + g_ui.sbTrackW + S(5) &&
+                        g_ui.mouseY >= g_ui.sbTrackY &&
+                        g_ui.mouseY <= g_ui.sbTrackY + g_ui.sbTrackH;
+            g_ui.sbHover = over || g_ui.sbDragging;
+            if (g_ui.sbDragging && g_ui.sbTrackX >= 0) {
+                int contentH = (int)g_playlist.size() * S(52);
+                int viewH = g_ui.sbTrackH;
+                if (viewH - g_ui.sbBarH > 0) {
+                    g_ui.playlistScroll =
+                        (g_ui.mouseY - g_ui.sbGrabOff - g_ui.sbTrackY) *
+                        (contentH - viewH) / (viewH - g_ui.sbBarH);
+                    clampPlaylistScroll();
+                    g_dirty.store(true);
+                }
+            }
+        }
+
         // 列表拖拽排序：位移超阈值进入拖拽态
-        if (g_ui.plDragFrom >= 0 && !g_ui.plDragging &&
+        if (!g_ui.sbDragging && g_ui.plDragFrom >= 0 && !g_ui.plDragging &&
             std::abs(g_ui.mouseY - g_ui.plDownY) > S(8)) {
             g_ui.plDragging = true;
             LOG_DBG("MAIN", "playlist drag start from=%d", g_ui.plDragFrom);
@@ -1110,18 +1146,35 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             }
             // 其余空隙不处理
         }
-        // --- 播放列表面板区域：按下记候选（拖拽排序 / 松手播放） ---
+        // --- 播放列表面板区域：滚动条优先，其次列表项候选 ---
         else if (g_ui.playlistOpen && mx >= g_ui.winW) {
-            int panelY = S(ui::TOPBAR_H);
-            int itemH = S(52);
-            int rel = my - (panelY + S(45)) + g_ui.playlistScroll;
-            g_ui.plDragFrom = -1; g_ui.plDragging = false;
-            if (rel >= 0) {
-                int itemIdx = rel / itemH;
-                if (itemIdx < (int)g_playlist.size()) {
-                    g_ui.plDragFrom = itemIdx;
-                    g_ui.plDownY = my;
-                    SetCapture(hwnd);   // 拖拽/松手都在面板外也能跟踪
+            if (g_ui.sbTrackX >= 0 &&
+                mx >= g_ui.sbTrackX - S(5) && mx <= g_ui.sbTrackX + g_ui.sbTrackW + S(5) &&
+                my >= g_ui.sbTrackY && my <= g_ui.sbTrackY + g_ui.sbTrackH) {
+                SetCapture(hwnd);
+                if (my < g_ui.sbBarY || my > g_ui.sbBarY + g_ui.sbBarH) {
+                    // 轨道跳页: bar 中心对齐点击处
+                    int contentH = (int)g_playlist.size() * S(52);
+                    int viewH = g_ui.sbTrackH;
+                    g_ui.playlistScroll =
+                        (my - g_ui.sbGrabOff - g_ui.sbTrackY - g_ui.sbBarH / 2) *
+                        (contentH - viewH) / (viewH - g_ui.sbBarH);
+                    clampPlaylistScroll();
+                }
+                g_ui.sbDragging = true;
+                g_ui.sbGrabOff = my - g_ui.sbBarY;
+            } else {
+                int panelY = S(ui::TOPBAR_H);
+                int itemH = S(52);
+                int rel = my - (panelY + S(45)) + g_ui.playlistScroll;
+                g_ui.plDragFrom = -1; g_ui.plDragging = false;
+                if (rel >= 0) {
+                    int itemIdx = rel / itemH;
+                    if (itemIdx < (int)g_playlist.size()) {
+                        g_ui.plDragFrom = itemIdx;
+                        g_ui.plDownY = my;
+                        SetCapture(hwnd);   // 拖拽/松手都在面板外也能跟踪
+                    }
                 }
             }
         }
@@ -1164,6 +1217,9 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
         if (g_ui.volumeDragging) {
             g_ui.volumeDragging = false;
+        }
+        if (g_ui.sbDragging) {
+            g_ui.sbDragging = false;
         }
         // 列表拖拽落位 / 单击播放
         if (g_ui.plDragFrom >= 0) {
@@ -1570,7 +1626,7 @@ static void renderOverlay() {
             SDL_RenderFillRect(g_sdlRdr, &prRc);
         }
 
-        // thumb (on hover or drag)
+        // thumb (on hover or drag) + 时间预览 (M29)
         if (g_ui.seekbarHover || g_ui.seekingDrag) {
             int cx = tx + progW;
             int cy = ty + th / 2;
@@ -1578,6 +1634,22 @@ static void renderOverlay() {
             SDL_Rect tRc = {cx - r, cy - r, S(ui::SEEKTHUMB_D), S(ui::SEEKTHUMB_D)};
             SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 255);
             SDL_RenderFillRect(g_sdlRdr, &tRc);
+
+            // 预览时间戳气泡
+            double hoverPos = dur * ((double)(g_ui.mouseX - tx) / tw);
+            char pv[16];
+            formatTime(pv, sizeof(pv), hoverPos);
+            int bw = S(56), bh = S(24);
+            int bx = g_ui.mouseX - bw / 2;
+            if (bx < tx) bx = tx;
+            if (bx + bw > tx + tw) bx = tx + tw - bw;
+            int by = ty - bh - S(8);
+            SDL_Rect bubble = {bx, by, bw, bh};
+            SDL_SetRenderDrawColor(g_sdlRdr, 20, 20, 22, 235);
+            SDL_RenderFillRect(g_sdlRdr, &bubble);
+            SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 40);
+            SDL_RenderDrawRect(g_sdlRdr, &bubble);
+            g_text.drawText(bx + S(12), by + S(4), pv, 11, 255, 255, 255);
         }
     }
 
@@ -1712,7 +1784,7 @@ static void renderOverlay() {
             panelW = totalW - w;                 // 窗口扩展出的独立区域
             panelX = w;
         } else {                                  // 全屏无法扩窗: 覆盖式
-            panelW = S(320);
+            panelW = S(430);
             panelX = w - panelW;
         }
         if (panelW < S(200)) { panelW = S(200); panelX = w - panelW; }   // 兜底
@@ -1821,21 +1893,31 @@ static void renderOverlay() {
             g_thumbWant.swap(missing);
         }
 
-        // scrollbar
+        // scrollbar（M33d: 悬停加亮/拖拽/轨道跳页）
         {
             int contentH = (int)g_playlist.size() * itemH;
             int viewH = panelH - S(55);
             if (contentH > viewH && contentH > 0) {
-                int trackX = panelX + panelW - S(5);
+                int trackW = S(6);
+                int trackX = panelX + panelW - trackW - S(4);
                 int trackY = panelY + S(45);
-                SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 15);
-                SDL_Rect trk = {trackX, trackY, S(3), viewH};
+                SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 18);
+                SDL_Rect trk = {trackX, trackY, trackW, viewH};
                 SDL_RenderFillRect(g_sdlRdr, &trk);
                 int barH = std::max(S(30), viewH * viewH / contentH);
-                int barY = trackY + g_ui.playlistScroll * viewH / contentH;
-                SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 70);
-                SDL_Rect br = {trackX, barY, S(3), barH};
+                int barY = trackY + g_ui.playlistScroll * (viewH - barH) / (contentH - viewH);
+                // hover/拖拽时加亮
+                Uint8 ba = (g_ui.sbHover || g_ui.sbDragging) ? 160 : 70;
+                SDL_SetRenderDrawColor(g_sdlRdr, 235, 235, 240, ba);
+                SDL_Rect br = {trackX, barY, trackW, barH};
                 SDL_RenderFillRect(g_sdlRdr, &br);
+
+                // 暴露几何给命中测试
+                g_ui.sbTrackX = trackX; g_ui.sbTrackY = trackY;
+                g_ui.sbTrackW = trackW; g_ui.sbTrackH = viewH;
+                g_ui.sbBarY = barY;     g_ui.sbBarH = barH;
+            } else {
+                g_ui.sbTrackX = -1;
             }
         }
 
