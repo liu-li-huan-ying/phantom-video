@@ -1733,7 +1733,7 @@ static void renderOverlay() {
     // --- seekbar (at very top of bar) ---
     if (dur > 0) {
         int tx = sbLeftX(), tw = sbWidth();
-        int ty = barTop + S(4);
+        int ty = barTop + S(9);
         int th = g_ui.seekbarHover ? S(ui::SEEKBAR_TRACK_H_HOVER) : S(ui::SEEKBAR_TRACK_H);
 
         // track background
@@ -1796,14 +1796,11 @@ static void renderOverlay() {
         // prev
         svgicon::draw(g_sdlRdr, "prev", L.prev.x + S(17), L.prev.y + S(17), S(18),
                       iconC, iconC, 231, A(255));
-        // PLAY 白底圆角方(r8) + 黑图标 —— 效果图 .ctrlbtn.play
+        // PLAY 无背景圆角 + 白图标
         {
-            SDL_SetRenderDrawColor(g_sdlRdr, A(235), A(235), A(235), 255);
-            SDL_RenderFillRect(g_sdlRdr, &L.play);
-            SDL_SetRenderDrawBlendMode(g_sdlRdr, SDL_BLENDMODE_BLEND);
             const char* pi = (g_mpv->state() == MpvBackend::State::Paused) ? "play" : "pause";
             svgicon::draw(g_sdlRdr, pi, L.play.x + L.play.w / 2, L.play.y + L.play.h / 2,
-                          S(20), 11, 11, 11, 255);
+                          S(20), iconC, iconC, 231, A(255));
         }
         // next
         svgicon::draw(g_sdlRdr, "next", L.next.x + S(17), L.next.y + S(17), S(18),
