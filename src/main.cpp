@@ -1162,7 +1162,8 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             int menuW = S(132);
             int menuH = SPEED_PRESET_COUNT * itemH + S(12);
             int menuX = L.speedBtn.x;
-            int menuY = L.speedBtn.y + L.speedBtn.h + S(6);
+            int menuY = L.speedBtn.y - menuH - S(6);  // 向上展开
+            if (menuY < 0) menuY = L.speedBtn.y + L.speedBtn.h + S(6);  // 空间不足时回退向下
             if (menuX + menuW > g_ui.winW - S(8)) menuX = g_ui.winW - menuW - S(8);
             if (mx >= menuX && mx <= menuX + menuW && my >= menuY && my <= menuY + SPEED_PRESET_COUNT * itemH) {
                 int idx = (my - menuY) / itemH;
@@ -1554,8 +1555,8 @@ static void renderOverlay() {
         // --- welcome page ---
         int w = g_ui.winW, h = g_ui.winH, totalW = g_ui.totalW;
 
-        // topbar still visible
-        drawGradientBar(g_sdlRdr, 0, 0, 0, w, S(ui::TOPBAR_H), 11, 11, 11, 220, 0);
+        // topbar still visible (glass: 半透明)
+        drawGradientBar(g_sdlRdr, 0, 0, 0, w, S(ui::TOPBAR_H), 11, 11, 11, 150, 0);
         // title
         g_text.drawText(S(20), S(14), "VPlayer", 14, 255, 255, 255);
         // topbar icons
@@ -1646,10 +1647,10 @@ static void renderOverlay() {
     Uint8 fade = (Uint8)(fa * 255.0f);
     int topOff = -(int)((1.0f - fa) * S(ui::TOPBAR_H) + 0.5f);
 
-    // --- topbar (gradient opaque->transparent from top; 淡出时整体上滑) ---
+    // --- topbar (gradient: glass 半透明效果, 视频隐约可见) ---
     {
         drawGradientBar(g_sdlRdr, 0, 0, topOff, w, S(ui::TOPBAR_H), 11, 11, 11,
-                        (Uint8)(220 * fa), 0);
+                        (Uint8)(150 * fa), 0);
 
         // title (left)
         std::string title = g_mpv->title();
@@ -1678,8 +1679,9 @@ static void renderOverlay() {
     if (fa > 0.01f && g_mpv->state() == MpvBackend::State::Paused) {
         int top = S(ui::TOPBAR_H);
         SDL_Rect dim = {0, top, w, (barTop > top ? barTop - top : 0)};
-        // 注意: 不可用纯黑+alpha —— 黑 key 下会混合成穿透色; 用不透明近黑
-        SDL_SetRenderDrawColor(g_sdlRdr, 5, 5, 7, 255);
+        // 半透明压暗(非纯黑条), 让视频仍隐约可见
+        SDL_SetRenderDrawBlendMode(g_sdlRdr, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(g_sdlRdr, 0, 0, 0, (Uint8)(100 * fa));
         SDL_RenderFillRect(g_sdlRdr, &dim);
         int ccx = w / 2, ccy = top + (barTop - top) / 2;
         // 效果图 .center-play: 白描边圆(white.75) + 黑底(blur 近似) + play 右偏
@@ -1689,11 +1691,12 @@ static void renderOverlay() {
                       255, 255, 255, (Uint8)(235 * fa));
     }
 
-    // --- gradient background (top transparent -> bottom opaque) ---
-    drawGradientBar(g_sdlRdr, 1, 0, barTop, w, S(60), 11, 11, 11, 0, 220);
-    // solid bottom portion
+    // --- gradient background (glass: 半透明) ---
+    drawGradientBar(g_sdlRdr, 1, 0, barTop, w, S(60), 11, 11, 11, 0, 150);
+    // solid bottom portion (glass: 降低不透明度)
     SDL_Rect solidRc = {0, barTop + S(60), w, S(CONTROL_BAR_H) - S(60)};
-    SDL_SetRenderDrawColor(g_sdlRdr, 11, 11, 11, 255);
+    SDL_SetRenderDrawBlendMode(g_sdlRdr, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(g_sdlRdr, 11, 11, 11, 150);
     SDL_RenderFillRect(g_sdlRdr, &solidRc);
 
     // --- seekbar (at very top of bar) ---
@@ -1810,26 +1813,11 @@ static void renderOverlay() {
         }
         // 至臻画质
         g_text.drawText(L.qualityBtn.x + S(9), L.qualityBtn.y + S(10), "至臻画质", 12, 200, 200, 205);
-        // 音量图标 + 滑条(展开)
+        // 音量图标
         {
             const char* vid = g_mpv->muted() ? "mute" : "volume";
-            svgicon::draw(g_sdlRdr, vid, L.volIconCx, L.volIconCx * 0 + L.cy, S(18),
+            svgicon::draw(g_sdlRdr, vid, L.volIconCx, L.cy, S(18),
                           iconC, iconC, 231, A(255));
-            if (volOpen && L.volSliderW > 0) {
-                int sldW = S(70);
-                int sx = L.volSliderX;
-                int sy = L.cy - S(2);
-                SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 51);
-                SDL_Rect trk = {sx, sy, sldW, S(4)};
-                SDL_RenderFillRect(g_sdlRdr, &trk);
-                float v = g_mpv->volume();
-                int fw = (int)(sldW * v);
-                if (fw > 0) {
-                    SDL_Rect fl = {sx, sy, fw, S(4)};
-                    SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 255);
-                    SDL_RenderFillRect(g_sdlRdr, &fl);
-                }
-            }
         }
         // 设置(文字+gear)
         drawTextBtnIcon(L.setBtn, "设置", "gear", 200, 200, 205);
@@ -1837,6 +1825,23 @@ static void renderOverlay() {
         const char* fid = g_ui.fullscreen ? "exitfull" : "full";
         svgicon::draw(g_sdlRdr, fid, L.fullBtn.x + S(17), L.fullBtn.y + S(17), S(18),
                       iconC, iconC, 231, A(255));
+
+        // 音量滑条(展开态, 在 Row1Layout 内用 L.volIconCx 定位)
+        if (volOpen && L.volSliderW > 0) {
+            int sldW = S(70);
+            int sx = L.volSliderX;
+            int sy = L.cy - S(2);
+            SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 51);
+            SDL_Rect trk = {sx, sy, sldW, S(4)};
+            SDL_RenderFillRect(g_sdlRdr, &trk);
+            float v = g_mpv->volume();
+            int fw = (int)(sldW * v);
+            if (fw > 0) {
+                SDL_Rect fl = {sx, sy, fw, S(4)};
+                SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 255);
+                SDL_RenderFillRect(g_sdlRdr, &fl);
+            }
+        }
 
         // HW 徽标(顶栏右侧下方小字, 效果图无此项但保留信息)
         if (g_mpv->hwDecodeActive()) {
@@ -1849,7 +1854,7 @@ static void renderOverlay() {
         g_text.drawText(w / 2 - S(30), barTop + S(75), "Buffering...", 12, 161, 161, 166);
     }
 
-    // --- speed popup menu（效果图规格: min130/item 7x10 r7/sel accent2/k标注/锚定按钮下方） ---
+    // --- speed popup menu（效果图规格: 圆角r8/向上展开/k标注） ---
     if (g_ui.speedMenuOpen) {
         Row1Layout L;
         layoutRow1(w, h, g_ui.volumeSliderOpen || g_ui.volumeDragging, L);
@@ -1857,14 +1862,29 @@ static void renderOverlay() {
         int menuW = S(132);
         int menuH = SPEED_PRESET_COUNT * itemH + S(12);
         int menuX = L.speedBtn.x;                        // 与按钮左对齐
-        int menuY = L.speedBtn.y + L.speedBtn.h + S(6);  // 按钮下方 6px
+        int menuY = L.speedBtn.y - menuH - S(6);        // 向上展开
+        if (menuY < 0) menuY = L.speedBtn.y + L.speedBtn.h + S(6);  // 空间不足时回退向下
         if (menuX + menuW > w - S(8)) menuX = w - menuW - S(8);
 
-        SDL_Rect bgRc = {menuX, menuY, menuW, menuH};
+        // 圆角矩形: 先画矩形主体, 再用圆填充四角
+        int cr = S(8);  // corner radius
+        SDL_Rect bgRc = {menuX + cr, menuY, menuW - cr * 2, menuH};
         SDL_SetRenderDrawColor(g_sdlRdr, 24, 24, 26, 255);
         SDL_RenderFillRect(g_sdlRdr, &bgRc);
+        // 中间无圆角部分(上下条)
+        SDL_Rect midH = {menuX, menuY + cr, menuW, menuH - cr * 2};
+        SDL_RenderFillRect(g_sdlRdr, &midH);
+        // 四角圆
+        fillCircle(g_sdlRdr, menuX + cr, menuY + cr, cr, 24, 24, 26, 255);
+        fillCircle(g_sdlRdr, menuX + menuW - cr, menuY + cr, cr, 24, 24, 26, 255);
+        fillCircle(g_sdlRdr, menuX + cr, menuY + menuH - cr, cr, 24, 24, 26, 255);
+        fillCircle(g_sdlRdr, menuX + menuW - cr, menuY + menuH - cr, cr, 24, 24, 26, 255);
+        // 边框(简化: 只画直线段)
         SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 26);
-        SDL_RenderDrawRect(g_sdlRdr, &bgRc);
+        SDL_RenderDrawLine(g_sdlRdr, menuX + cr, menuY, menuX + menuW - cr, menuY);
+        SDL_RenderDrawLine(g_sdlRdr, menuX + cr, menuY + menuH, menuX + menuW - cr, menuY + menuH);
+        SDL_RenderDrawLine(g_sdlRdr, menuX, menuY + cr, menuX, menuY + menuH - cr);
+        SDL_RenderDrawLine(g_sdlRdr, menuX + menuW, menuY + cr, menuX + menuW, menuY + menuH - cr);
 
         float curSpeed = g_mpv->speed();
         for (int i = 0; i < SPEED_PRESET_COUNT; ++i) {
@@ -1884,39 +1904,6 @@ static void renderOverlay() {
                 g_text.drawText(menuX + menuW - kw - S(10), iy + S(7), k, 11, 161, 161, 166);
             }
         }
-    }
-
-    // --- volume slider (appears left of volume icon) ---
-    if (g_ui.volumeSliderOpen || g_ui.volumeDragging) {
-        int sliderW = S(ui::VOLSIDER_W);
-        int sliderH = S(4);
-        int volIconX = w - S(54);
-        int sliderX = volIconX - sliderW - S(10);
-        int sliderY = barTop + S(50) - sliderH / 2;
-
-        // track bg
-        SDL_Rect sBg = {sliderX, sliderY, sliderW, sliderH};
-        SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 25);
-        SDL_RenderFillRect(g_sdlRdr, &sBg);
-        // filled
-        float vol = g_mpv->volume();
-        int fillW = (int)(sliderW * vol);
-        if (fillW > 0) {
-            SDL_Rect sFill = {sliderX, sliderY, fillW, sliderH};
-            SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 200);
-            SDL_RenderFillRect(g_sdlRdr, &sFill);
-        }
-        // thumb
-        int thumbX = sliderX + fillW;
-        int thumbR = S(5);
-        SDL_Rect tRc = {thumbX - thumbR, sliderY + sliderH/2 - thumbR, thumbR*2, thumbR*2};
-        SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 255);
-        SDL_RenderFillRect(g_sdlRdr, &tRc);
-
-        // volume percentage
-        char vStr[16];
-        std::snprintf(vStr, sizeof(vStr), "%d%%", (int)(vol * 100));
-        g_text.drawText(sliderX + sliderW/2 - S(12), sliderY - S(18), vStr, 11, 161, 161, 166);
     }
 
     // --- playlist panel (右侧独立区域) ---
