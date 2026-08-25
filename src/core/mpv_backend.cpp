@@ -196,8 +196,10 @@ void MpvBackend::setSpeed(float s) {
     if (s < 0.05f) s = 0.05f;
     if (s > 8.0f) s = 8.0f;
 
+    double sd = s;
+    int r = mpv_set_property(mpv_, "speed", MPV_FORMAT_DOUBLE, &sd);
+    LOG_INFO("MPV", "setSpeed %.2f ret=%d", s, r);
     speed_.store(s);
-    mpv_set_property(mpv_, "speed", MPV_FORMAT_DOUBLE, &s);
 }
 
 // ---- 字幕 ----

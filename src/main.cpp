@@ -768,14 +768,18 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             }
             case 'N': g_mpv->seekRelative( 10.0); break;
             case 'P': g_mpv->seekRelative(-10.0); break;
-            case '[': {
+            case '[':
+            case 0xDB:   // VK_OEM_4: Windows 对 [ 键发的虚拟码(≠ASCII 0x5B)
+            {
                 g_mpv->setSpeed(g_mpv->speed() - 0.25f);
                 char msg[32];
                 std::snprintf(msg, sizeof(msg), "Speed: %.2fx", g_mpv->speed());
                 showToast(msg);
                 break;
             }
-            case ']': {
+            case ']':
+            case 0xDD:   // VK_OEM_6
+            {
                 g_mpv->setSpeed(g_mpv->speed() + 0.25f);
                 char msg[32];
                 std::snprintf(msg, sizeof(msg), "Speed: %.2fx", g_mpv->speed());
@@ -1029,7 +1033,7 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             g_ui.speedMenuOpen = false;
         }
         // --- 字幕 cc 图标点击（切换可见性）---
-        else if (g_mpv && mx >= g_ui.winW - S(136) && mx <= g_ui.winW - S(108) &&
+        else if (g_mpv && mx >= g_ui.winW - S(132) && mx <= g_ui.winW - S(106) &&
                  my >= barTop + S(36) && my <= barTop + S(64)) {
             bool vis = !g_mpv->subVisible();
             g_mpv->setSubVisibility(vis);
@@ -1044,9 +1048,11 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             LOG_DBG("MAIN", "sub visibility -> %d", vis ? 1 : 0);
         }
         // --- speed label click（toggle 弹出菜单）---
-        else if (g_mpv && mx >= g_ui.winW - S(170) && mx <= g_ui.winW - S(138) &&
+        else if (g_mpv && mx >= g_ui.winW - S(174) && mx <= g_ui.winW - S(134) &&
                  my >= barTop + S(36) && my <= barTop + S(64)) {
             g_ui.speedMenuOpen = !g_ui.speedMenuOpen;
+            LOG_INFO("MAIN", "speed menu -> %d (click %d,%d)",
+                     g_ui.speedMenuOpen ? 1 : 0, mx, my);
         }
         // --- settings gear click ---
         else if (g_mpv && mx >= g_ui.winW - S(102) && mx <= g_ui.winW - S(74) &&
@@ -1993,7 +1999,7 @@ static void renderOverlay() {
         }
     }
 
-    // --- toast notification ---
+    // --- toast notification（M32g 胶囊样式: 居中圆角深底 + 白字） ---
     if (g_ui.toastActive) {
         Uint32 elapsed = SDL_GetTicks() - g_ui.toastStart;
         if (elapsed > ui::TOAST_MS) {
@@ -2003,7 +2009,16 @@ static void renderOverlay() {
             if (elapsed > ui::TOAST_MS - 300)
                 alpha = 1.0f - (float)(elapsed - (ui::TOAST_MS - 300)) / 300.0f;
             Uint8 a = (Uint8)(alpha * 255);
-            g_text.drawText(w / 2 - S(40), S(70), g_ui.toastMsg, 13, 255, 255, 255);
+            int tw = g_text.measureText(g_ui.toastMsg, 13);
+            int bh = S(36), capR = bh / 2, padX = S(20);
+            int bw = tw + padX * 2;
+            int bx = w / 2 - bw / 2, by = S(60);
+            SDL_SetRenderDrawColor(g_sdlRdr, 15, 15, 17, a);
+            SDL_Rect mid = {bx + capR, by, bw - capR * 2, bh};
+            SDL_RenderFillRect(g_sdlRdr, &mid);
+            fillCircle(g_sdlRdr, bx + capR, by + bh / 2, bh / 2, 15, 15, 17, a);
+            fillCircle(g_sdlRdr, bx + bw - capR, by + bh / 2, bh / 2, 15, 15, 17, a);
+            g_text.drawText(w / 2 - tw / 2, by + S(8), g_ui.toastMsg, 13, 255, 255, 255);
         }
     }
 

@@ -97,6 +97,33 @@ SDL_Texture* GdiTextCache::renderText(const std::string& utf8, int ptSize,
     return tex;
 }
 
+int GdiTextCache::measureText(const std::string& utf8, int ptSize) {
+    if (utf8.empty()) return 0;
+    // Toast 等低频调用: 直接测量, 不走纹理缓存
+    int wLen = MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), (int)utf8.size(), nullptr, 0);
+    if (wLen <= 0) return 0;
+    std::vector<wchar_t> wbuf(wLen + 1);
+    MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), (int)utf8.size(), wbuf.data(), wLen);
+    wbuf[wLen] = 0;
+
+    HDC hdc = GetDC(nullptr);
+    HDC memDC = CreateCompatibleDC(hdc);
+    HFONT hFont = CreateFontW(
+        -MulDiv(ptSize, GetDeviceCaps(hdc, LOGPIXELSY), 72),
+        0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Microsoft YaHei");
+    HGDIOBJ oldFont = SelectObject(memDC, hFont);
+    RECT rc{ 0, 0, 0, 0 };
+    DrawTextW(memDC, wbuf.data(), -1, &rc, DT_CALCRECT | DT_LEFT | DT_SINGLELINE);
+    int w = rc.right;
+    SelectObject(memDC, oldFont);
+    DeleteObject(hFont);
+    DeleteDC(memDC);
+    ReleaseDC(nullptr, hdc);
+    return w;
+}
+
 void GdiTextCache::drawText(int x, int y, const std::string& utf8, int ptSize,
                              int r, int g, int b) {
     // 查缓存（哈希表 O(1)；旧实现 vector 线性扫描每帧数千次字符串比较）
