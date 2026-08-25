@@ -113,6 +113,10 @@ struct UiState {
     // speed popup
     bool   speedMenuOpen = false;
 
+    // quality popup
+    bool   qualityMenuOpen = false;
+    int    qualityPreset = 1;   // 0=省电 1=标准 2=至臻
+
     // volume slider
     bool   volumeSliderOpen = false;
     bool   volumeDragging   = false;
@@ -206,6 +210,41 @@ static const int SB_MARGIN = 20;
 static const float SPEED_PRESETS[] = {0.25f, 0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f, 3.0f};
 static const int SPEED_PRESET_COUNT = 8;
 static const int TIMER_SINGLECLICK = 2;   // 单击暂停延迟定时器
+
+// ---- quality presets ----
+struct QualityPreset {
+    const char* name;
+    const char* scale;      // 上采样
+    const char* dscale;     // 下采样
+    const char* cscale;     // 色度上采样
+    int         deband;     // 去色带 0/1
+    float       antiring;   // 振铃抑制
+};
+static const QualityPreset QUALITY_PRESETS[] = {
+    { "省电",  "bilinear", "bilinear", "bilinear", 0, 0.0f },
+    { "标准",  "spline36", "mitchell", "spline36", 1, 0.7f },
+    { "至臻",  "ewa_lanczossharp", "ewa_lanczossharp", "ewa_lanczossharp", 1, 0.7f },
+};
+static const int QUALITY_PRESET_COUNT = 3;
+
+static void applyQualityPreset(int idx) {
+    if (!g_mpv || !g_mpv->mpv() || idx < 0 || idx >= QUALITY_PRESET_COUNT) return;
+    const QualityPreset& p = QUALITY_PRESETS[idx];
+    auto set = [](const char* k, const char* v) {
+        mpv_set_property_string(g_mpv->mpv(), k, v);
+    };
+    auto setf = [](const char* k, float v) {
+        mpv_set_property(g_mpv->mpv(), k, MPV_FORMAT_DOUBLE, &v);
+    };
+    set("scale", p.scale);
+    set("dscale", p.dscale);
+    set("cscale", p.cscale);
+    int deband = p.deband;
+    mpv_set_property(g_mpv->mpv(), "deband", MPV_FORMAT_FLAG, &deband);
+    setf("scale-antiring", p.antiring);
+    g_ui.qualityPreset = idx;
+    LOG_INFO("MAIN", "quality preset -> %s (scale=%s deband=%d)", p.name, p.scale, p.deband);
+}
 
 // ---- DPI 缩放 ----
 // g_dpi = 当前显示器 DPI/96。像素度量(图标/边距/条高)经 S() 缩放；
@@ -1147,7 +1186,7 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 g_ui.speedMenuOpen = !g_ui.speedMenuOpen;
             }
             else if (inRc(L.qualityBtn)) {
-                showToast("至臻画质");
+                g_ui.qualityMenuOpen = !g_ui.qualityMenuOpen;
             }
             else if (mx >= L.volIconCx - S(17) && mx <= L.volIconCx + S(17) &&
                      my >= L.cy - S(17) && my <= L.cy + S(17)) {
@@ -1181,6 +1220,27 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                         char msg[32];
                         std::snprintf(msg, sizeof(msg), "Speed: %.2fx", SPEED_PRESETS[idx]);
                         showToast(msg);
+                    }
+                }
+            }
+            else if (g_ui.qualityMenuOpen) {
+                // 画质菜单: 视频区弹出, 先检测项命中
+                Row1Layout QL;
+                layoutRow1(g_ui.winW, g_ui.winH, false, QL);
+                int itemH = S(32);
+                int menuW = S(140);
+                int menuH = QUALITY_PRESET_COUNT * itemH + S(44);  // +info区
+                int menuX = QL.qualityBtn.x;
+                int menuY = QL.qualityBtn.y - menuH - S(6);
+                if (menuY < 0) menuY = QL.qualityBtn.y + QL.qualityBtn.h + S(6);
+                if (menuX + menuW > g_ui.winW - S(8)) menuX = g_ui.winW - menuW - S(8);
+                int itemsY = menuY + S(38);  // 跳过信息区
+                if (mx >= menuX && mx <= menuX + menuW &&
+                    my >= itemsY && my <= itemsY + QUALITY_PRESET_COUNT * itemH) {
+                    int idx = (my - itemsY) / itemH;
+                    if (idx >= 0 && idx < QUALITY_PRESET_COUNT) {
+                        applyQualityPreset(idx);
+                        showToast(QUALITY_PRESETS[idx].name);
                     }
                 }
             }
@@ -1957,7 +2017,58 @@ static void renderOverlay() {
         }
     }
 
-    // --- playlist panel (右侧独立区域) ---
+    // --- quality popup menu (画质: 视频信息 + 三档预设) ---
+    if (g_ui.qualityMenuOpen) {
+        Row1Layout L;
+        layoutRow1(w, h, g_ui.volumeSliderOpen || g_ui.volumeDragging, L);
+        int itemH = S(32);
+        int menuW = S(140);
+        int infoH = S(38);
+        int menuH = infoH + QUALITY_PRESET_COUNT * itemH + S(12);
+        int menuX = L.qualityBtn.x;
+        int menuY = L.qualityBtn.y - menuH - S(6);
+        if (menuY < 0) menuY = L.qualityBtn.y + L.qualityBtn.h + S(6);
+        if (menuX + menuW > w - S(8)) menuX = w - menuW - S(8);
+
+        // 圆角矩形背景
+        int cr = S(8);
+        SDL_SetRenderDrawColor(g_sdlRdr, 24, 24, 26, 255);
+        SDL_Rect bgRc = {menuX + cr, menuY, menuW - cr * 2, menuH};
+        SDL_RenderFillRect(g_sdlRdr, &bgRc);
+        SDL_Rect midH = {menuX, menuY + cr, menuW, menuH - cr * 2};
+        SDL_RenderFillRect(g_sdlRdr, &midH);
+        fillCircle(g_sdlRdr, menuX + cr, menuY + cr, cr, 24, 24, 26, 255);
+        fillCircle(g_sdlRdr, menuX + menuW - cr, menuY + cr, cr, 24, 24, 26, 255);
+        fillCircle(g_sdlRdr, menuX + cr, menuY + menuH - cr, cr, 24, 24, 26, 255);
+        fillCircle(g_sdlRdr, menuX + menuW - cr, menuY + menuH - cr, cr, 24, 24, 26, 255);
+        SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 26);
+        SDL_RenderDrawLine(g_sdlRdr, menuX + cr, menuY, menuX + menuW - cr, menuY);
+        SDL_RenderDrawLine(g_sdlRdr, menuX + cr, menuY + menuH, menuX + menuW - cr, menuY + menuH);
+        SDL_RenderDrawLine(g_sdlRdr, menuX, menuY + cr, menuX, menuY + menuH - cr);
+        SDL_RenderDrawLine(g_sdlRdr, menuX + menuW, menuY + cr, menuX + menuW, menuY + menuH - cr);
+
+        // 视频信息区
+        int iw = g_mpv->videoWidth(), ih = g_mpv->videoHeight();
+        char info[64];
+        std::snprintf(info, sizeof(info), "%dx%d", iw, ih);
+        g_text.drawText(menuX + S(10), menuY + S(8), info, 12, 161, 161, 166);
+        // 分隔线
+        SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 20);
+        SDL_RenderDrawLine(g_sdlRdr, menuX + S(8), menuY + infoH - S(4),
+                           menuX + menuW - S(8), menuY + infoH - S(4));
+
+        // 预设选项
+        for (int i = 0; i < QUALITY_PRESET_COUNT; ++i) {
+            int iy = menuY + infoH + i * itemH;
+            bool sel = (g_ui.qualityPreset == i);
+            Uint8 tr = sel ? 59 : 228, tg = sel ? 130 : 228, tb = sel ? 246 : 231;
+            g_text.drawText(menuX + S(10), iy + S(8), QUALITY_PRESETS[i].name, 13, tr, tg, tb);
+            // 当前选中标记
+            if (sel) {
+                g_text.drawText(menuX + menuW - S(24), iy + S(8), "✓", 13, 59, 130, 246);
+            }
+        }
+    }
     if (g_ui.playlistOpen) {
         int panelW, panelX;
         if (!g_ui.fullscreen) {
