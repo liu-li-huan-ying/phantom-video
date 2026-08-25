@@ -776,7 +776,10 @@ static void playPath(const std::string& path) {
     auto it = g_cfg.history.find(path);
     if (g_cfg.resume && it != g_cfg.history.end() && it->second > 1.0)
         g_pendingResumePos = it->second;
-    g_mpv->loadFile(path);
+    if (!g_mpv->loadFile(path)) {
+        showToast("Failed to open file");
+        return;
+    }
     g_cfg.lastFile = path;
 
     // 播放列表面板打开时，滚动到当前项附近
@@ -1384,8 +1387,18 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_LBUTTONDBLCLK: {
         int mx = (short)LOWORD(lp), my = (short)HIWORD(lp);
         int barTop = sbTopY();
+        // 进度条区域双击 -> 跳转到点击位置
+        if (g_mpv && g_mpv->duration() > 0 &&
+            my >= barTop - S(6) && my <= barTop + S(22) &&
+            mx >= sbLeftX() && mx <= sbRightX()) {
+            double ratio = (double)(mx - sbLeftX()) / sbWidth();
+            if (ratio < 0) ratio = 0; if (ratio > 1) ratio = 1;
+            g_mpv->seek(g_mpv->duration() * ratio);
+            g_ui.visible = true;
+            g_ui.hideAt = SDL_GetTicks() + ui::CTRLBAR_HIDE_MS;
+        }
         // 视频区双击 -> 全屏切换（取消待定暂停）
-        if (g_mpv && my > S(ui::TOPBAR_H) && my < barTop - S(6)) {
+        else if (g_mpv && my > S(ui::TOPBAR_H) && my < barTop - S(6)) {
             KillTimer(hwnd, TIMER_SINGLECLICK);
             g_ui.pendingPause = false;
             toggleFullscreen(hwnd);
@@ -1836,30 +1849,40 @@ static void renderOverlay() {
             SDL_RenderFillRect(g_sdlRdr, &prRc);
         }
 
-        // thumb (on hover or drag) + 时间预览 (M29)
+        // thumb (on hover or drag) + 时间预览气泡
         if (g_ui.seekbarHover || g_ui.seekingDrag) {
             int cx = tx + progW;
             int cy = ty + th / 2;
-            int r = S(ui::SEEKTHUMB_D) / 2;
-            SDL_Rect tRc = {cx - r, cy - r, S(ui::SEEKTHUMB_D), S(ui::SEEKTHUMB_D)};
-            SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 255);
-            SDL_RenderFillRect(g_sdlRdr, &tRc);
+            int r = S(6);  // thumb 半径
+            // 圆形 thumb
+            fillCircle(g_sdlRdr, cx, cy, r, 255, 255, 255, 255);
 
             // 预览时间戳气泡
             double hoverPos = dur * ((double)(g_ui.mouseX - tx) / tw);
+            if (hoverPos < 0) hoverPos = 0;
+            if (hoverPos > dur) hoverPos = dur;
             char pv[16];
             formatTime(pv, sizeof(pv), hoverPos);
-            int bw = S(56), bh = S(24);
+            int bw = g_text.measureText(pv, 11) + S(16);
+            int bh = S(22);
             int bx = g_ui.mouseX - bw / 2;
             if (bx < tx) bx = tx;
             if (bx + bw > tx + tw) bx = tx + tw - bw;
-            int by = ty - bh - S(8);
-            SDL_Rect bubble = {bx, by, bw, bh};
+            int by = ty - bh - S(10);
+            // 气泡背景(圆角近似)
             SDL_SetRenderDrawColor(g_sdlRdr, 20, 20, 22, 235);
+            SDL_Rect bubble = {bx + S(4), by, bw - S(8), bh};
             SDL_RenderFillRect(g_sdlRdr, &bubble);
-            SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 40);
-            SDL_RenderDrawRect(g_sdlRdr, &bubble);
-            g_text.drawText(bx + S(12), by + S(4), pv, 11, 255, 255, 255);
+            SDL_Rect bubbleL = {bx, by + S(4), S(4), bh - S(8)};
+            SDL_RenderFillRect(g_sdlRdr, &bubbleL);
+            SDL_Rect bubbleR = {bx + bw - S(4), by + S(4), S(4), bh - S(8)};
+            SDL_RenderFillRect(g_sdlRdr, &bubbleR);
+            fillCircle(g_sdlRdr, bx + S(4), by + S(4), S(4), 20, 20, 22, 235);
+            fillCircle(g_sdlRdr, bx + bw - S(4), by + S(4), S(4), 20, 20, 22, 235);
+            fillCircle(g_sdlRdr, bx + S(4), by + bh - S(4), S(4), 20, 20, 22, 235);
+            fillCircle(g_sdlRdr, bx + bw - S(4), by + bh - S(4), S(4), 20, 20, 22, 235);
+            // 气泡文字
+            g_text.drawText(bx + S(8), by + S(4), pv, 11, 255, 255, 255);
         }
     }
 
@@ -2621,18 +2644,21 @@ wc.style         = CS_DBLCLKS;   // 接收 WM_LBUTTONDBLCLK
             g_dirty.store(true);
         }
 
-        // 控件淡入淡出逼近（M30 缓动 + 效果图 cb-opacity 最低 0.25）
+        // 控件淡入淡出（ease-out 缓动 + 效果图 cb-opacity 最低 0.25）
         {
             float target = g_ui.visible ? 1.0f : 0.25f;
             float cur = g_ui.ctrlAlpha;
-            if ((target > cur && cur < target) || (target < cur && cur > target)) {
-                float dir = (target > cur) ? 1.0f : -1.0f;
-                cur += dir * 0.08f;
-                if ((dir > 0 && cur >= target) || (dir < 0 && cur <= target))
-                    cur = target;
+            if (std::abs(target - cur) > 0.001f) {
+                // ease-out: 接近目标时减速
+                float diff = target - cur;
+                float step = diff * 0.12f;  // 每帧移动剩余距离的12%
+                if (std::abs(step) < 0.005f) step = (diff > 0 ? 0.005f : -0.005f);
+                cur += step;
                 g_ui.ctrlAlpha = cur;
                 g_dirty.store(true);
                 waitCap = 16;   // 动画期间高频刷新
+            } else {
+                g_ui.ctrlAlpha = target;
             }
         }
         if (g_ui.volumeSliderOpen && !g_ui.volumeDragging &&
