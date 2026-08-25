@@ -1876,6 +1876,33 @@ overlay 每帧 clear 成品红 (255,0,255)，之后所有带 alpha 的绘制
 2. 应用层加 WM_SIZE/pl toggle 等状态日志，一轮拿全事实链
 3. pos 记忆脏数据循环污染测试环境——saveWindowPos 增加
    IsZoomed/最小尺寸防御
+
+---
+
+## M34a Phase 15: UI 打磨冲刺——视觉问题逐项修复（2026-08-25）
+
+### 倍速菜单向上展开
+原来向下展开与按钮打架,改为向上展开(`menuY = btn.y - menuH - S(6)`),
+空间不足时回退向下. hit-test/render 两处同步更新.
+
+### 暂停遮罩修复
+原来不透明近黑(alpha 255)整块覆盖=大黑条.改为半透明压暗(alpha 100*fa),
+视频仍隐约可见,仅叠一层暗纱+中央play按钮. 黑色key兼容:
+用 `SDL_BLENDMODE_BLEND` + `SDL_SetRenderDrawColor(0,0,0,alpha)`.
+
+### 玻璃透明效果
+顶部栏: 渐变最大alpha 220→150. 视频帧透过玻璃隐约可见.
+控制栏: 渐变+solid底部同降150, 上下一致玻璃质感.
+保留渐变过渡(顶部不透明→底部全透)不变,只降低了峰值不透明度.
+
+### 速度菜单圆角
+四角 r8 圆弧 + 矩形主体: fillCircle 4次 + SDL_RenderFillRect 中间带.
+边框用 4 条 SDL_RenderDrawLine 近似(角弧处有微小缺口,接受).
+
+### 音量定位修复
+原 bug: `L.volIconCx * 0` 恒为0 → icon y 坐标=0+cy
+修复: 直接用 L.cy. 滑条渲染从独立块移入 Row1Layout 块,
+统一用 L.volIconCx/L.volSliderX 定位, 消除 icon 与 slider 位置漂移.
 - gapless-audio 默认 weak 已满足本地播放
 
 ---
