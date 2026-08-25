@@ -1727,13 +1727,8 @@ static void renderOverlay() {
                       255, 255, 255, (Uint8)(235 * fa));
     }
 
-    // --- gradient background (glass: 半透明) ---
-    drawGradientBar(g_sdlRdr, 1, 0, barTop, w, S(60), 11, 11, 11, 0, 150);
-    // solid bottom portion (glass: 降低不透明度)
-    SDL_Rect solidRc = {0, barTop + S(60), w, S(CONTROL_BAR_H) - S(60)};
-    SDL_SetRenderDrawBlendMode(g_sdlRdr, SDL_BLENDMODE_BLEND);
-    SDL_SetRenderDrawColor(g_sdlRdr, 11, 11, 11, 150);
-    SDL_RenderFillRect(g_sdlRdr, &solidRc);
+    // --- gradient background (效果图: 单层渐变 底部62%不透明 → 顶部全透) ---
+    drawGradientBar(g_sdlRdr, 1, 0, barTop, w, S(CONTROL_BAR_H), 0, 0, 0, 158, 0);
 
     // --- seekbar (at very top of bar) ---
     if (dur > 0) {
