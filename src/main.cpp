@@ -1145,6 +1145,26 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             }
             else if (g_ui.speedMenuOpen) {
                 // 点菜单外任意处 = 关闭菜单（不触发视频暂停）
+                // 但先检查是否点到了菜单项(菜单在视频区, 不在控制栏内)
+                Row1Layout SL;
+                layoutRow1(g_ui.winW, g_ui.winH, false, SL);
+                int itemH = S(32);
+                int menuW = S(132);
+                int menuH = SPEED_PRESET_COUNT * itemH + S(12);
+                int menuX = SL.speedBtn.x;
+                int menuY = SL.speedBtn.y - menuH - S(6);
+                if (menuY < 0) menuY = SL.speedBtn.y + SL.speedBtn.h + S(6);
+                if (menuX + menuW > g_ui.winW - S(8)) menuX = g_ui.winW - menuW - S(8);
+                if (mx >= menuX && mx <= menuX + menuW &&
+                    my >= menuY && my <= menuY + SPEED_PRESET_COUNT * itemH) {
+                    int idx = (my - menuY) / itemH;
+                    if (idx >= 0 && idx < SPEED_PRESET_COUNT) {
+                        g_mpv->setSpeed(SPEED_PRESETS[idx]);
+                        char msg[32];
+                        std::snprintf(msg, sizeof(msg), "Speed: %.2fx", SPEED_PRESETS[idx]);
+                        showToast(msg);
+                    }
+                }
             }
             else {
                 goto videoAreaClick;
