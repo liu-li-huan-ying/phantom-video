@@ -1923,6 +1923,26 @@ mpv `setSpeed()` 后, 内部重新计算播放速率, `time-pos` 属性在极短
   - 冻结期: `pos = lastPos + elapsed * newSpeed` (墙钟推进插值)
   - 解冻后: 切回 `g_mpv->clock()`
 - 无视觉中断: 500ms 内进度条平滑前进(用新速度), 之后无缝对接 mpv 实际 time-pos
+
+---
+
+## M34a Phase 17: 速度菜单点击无效修复（2026-08-25）
+
+### 问题
+速度菜单弹出后, 点击选项无反应, 菜单直接关闭.
+
+### 根因
+速度菜单向上展开到视频区(y≈268~536), 但 WM_LBUTTONDOWN 的命中检测流程:
+1. 先进入控制栏行1块(line 1087-1155)
+2. 点击位置不在任何控制栏按钮内
+3. `else if (speedMenuOpen)` → 直接关菜单, return 0
+4. 永远走不到 `videoAreaClick` 标签后的菜单项命中测试
+
+### 修复
+在控制栏块的 `speedMenuOpen` 分支内, 先计算菜单几何并检测项命中:
+- 命中菜单项 → setSpeed + showToast
+- 未命中 → 关菜单(原逻辑)
+保证点击流: 控制栏块 → 菜单项检测 → 关菜单/选中
 - gapless-audio 默认 weak 已满足本地播放
 
 ---
