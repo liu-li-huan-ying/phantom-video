@@ -1620,6 +1620,39 @@ lParam。测试脚本必须与目标进程 DPI 上下文一致（此前 click/ke
 
 ---
 
+## M34a Phase 6: 性能画质音质优化（2026-08-24）
+
+### 画质（mpv 渲染链路，启动回读验证全部生效）
+| 选项 | 值 | 收益 |
+|------|-----|------|
+| scale | spline36 | 替代默认 bilinear，上采样锐利少振铃 |
+| dscale | mitchell | 缩小抗锯齿（mpv 官方推荐值） |
+| cscale | spline36 | 4:2:0 源色度上采样修复 |
+| deband | yes | 去 8bit 色带（动画/渐变天空） |
+| target-colorspace-hint | yes | HDR 屏色彩提示（SDR 自动忽略） |
+
+未开 interpolation（需 display-resample 改变时钟行为，GPU 开销大，风险高）。
+
+### UI 性能
+1. **渐变条纹理化**：原逐像素 FillRect ≈13 万次/帧（顶栏 52h+底栏 60h×1182w），
+   是 UI 帧时间最大项；改为 ARGB 纹理缓存（GradKey=w/h/rgb/aTop/aBot，
+   变更才重建），每帧 2 次 RenderCopy。透明像素写 0x00000000 与品红
+   colorkey 天然兼容——穿透机制零改动。
+2. **GdiTextCache** vector 线性扫描（每帧几十次×200 条字符串比较）
+   → unordered_map O(1)；淘汰策略简化为保留新条目整体释放。
+
+### 其他
+- 滚轮调音量 Toast 百分比反馈（原无任何反馈）
+- 缩略图磁盘缓存启动清理 >7 天旧文件
+- README.md + docs/architecture.txt
+
+### 音质结论（评估后未改动项及理由）
+- WASAPI 独占：绕过混音器但独占设备影响其他应用，不适合默认
+- 重采样质量：mpv/swresample 默认已高质量；loudnorm 已覆盖响度场景
+- gapless-audio 默认 weak 已满足本地播放
+
+---
+
 ## M34a Phase 4e: 列表当前项自动跟随（2026-08-24）
 
 - playPath() 中面板打开时重算 playlistScroll 使当前项居中
