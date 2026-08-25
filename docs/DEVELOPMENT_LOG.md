@@ -1952,3 +1952,29 @@ mpv `setSpeed()` 后, 内部重新计算播放速率, `time-pos` 属性在极短
 - playPath() 中面板打开时重算 playlistScroll 使当前项居中
 - 覆盖场景：点击列表项 / prev-next / Loop 回绕 / Shuffle 跳选后的定位
 - 验证：滚轮下移后点 next → V_0003 加载且面板回滚 ✓
+
+## M34a Phase 18: 设置面板/死锁/压暗综合修复（2026-08-25）
+
+### 任务
+用户报告：语言切换无效、设置按钮两行挤压、暂停压暗劣质且只盖中间一条、三倍速误触进度条、列表开合后窗口尺寸虚胖、列表标题参与滚动。
+
+### 根因与修复
+1. **语言切换无效（关键）**：设置面板底部（语言行 y=576..606）与进度条命中区（y=576..601）重叠，点击被 seekbar 分支吃掉。修复：settingsOpen 时命中处理提到 WM_LBUTTONDOWN 链最前（进度条/控制栏之前），面板内点击不再下传；点外关闭。另加宽语言分段 S(80)→S(150)（English 文本溢出），panelY 底部钳制到控制栏上方。
+2. **EOF 自动连播死锁（重大）**：onPlaybackEnded 在 mpv 事件线程同步调 playPath→loadFile(mpv 命令)+showToast(g_ui)，与 UI 线程 mpv 属性轮询形成锁循环，UI 线程僵死（两次实例复现：消息不处理、MoveWindow 无 WM_SIZE）。修复：事件线程只投递 g_autoNextPath/g_resumeSeekPos（mutex 保护），UI 主循环消费执行。
+3. **暂停压暗从未显示**：overlay 清屏色=纯黑=colorkey 透明键，半透明黑遮罩混合后仍是键色被整块抠掉（此前实现全部无效）。修复：改用 mpv brightness=-30 让视频画面本身均匀变暗（applyPauseDim，状态轮询驱动），删除抖动方案。
+4. **三倍速误触进度条**：命中区垂直容差 -6/+22 过深，收窄为 -8/+12（WM_LBUTTONDOWN/MOUSEMOVE/DBLCLK 三处同步）。
+5. **窗口尺寸虚胖**：saveWindowPos 在列表展开时保存含 +S(430) 扩展区的宽度，重启恢复即虚胖，再开列表雪上加霜。修复：保存时扣除列表宽度。
+6. **列表标题参与滚动**：列表项无裁剪，滚动时盖过固定标题。修复：SDL_RenderSetClipRect 裁剪列表区，拖拽指示线/滚动条在裁剪外绘制。
+7. **设置按钮挤压**：setBtn 固定宽 S(58)，英文 "Settings" 溢出；qualityBtn 硬编码"画质"宽度与 i18n 文本不匹配。修复：均改 measureText 动态宽度。
+
+### 踩坑记录（测试方法论）
+- inject_click.ps1 PostMessage 曾"失效"：真因是 EnumWindows 选中 console 窗口（同进程、owner=0），已改为优先 VPlayerParent 类名。
+- click_client.ps1 OffX 语义是"距右缘偏移（负值）"，传正值会点到窗口外。
+- Logger 文件写入有缓冲，LastWriteTime 滞后——grep 日志判断"点击无效"全是误判，实际全部生效。
+- 窗口尺寸/位置在测试期间被 MoveWindow/DPI 变更反复改变，坐标必须每次从 GetClientRect 现算。
+- 无 pos 配置时窗口默认开在别的 DPI 显示器，MoveWindow 到主屏触发 WM_DPICHANGED 自动 ×1.25。
+- 实机验证：95s 连续播放跨 2+ 次 EOF，UI 保持响应；设置面板中英文即时切换成功（截图确认）。
+
+### 提交
+- 5a18162 修复播放列表点击偏移/暂停压暗抖动实现/toast 全面双语化
+- 6c24bf7 设置面板命中优先级修复语言切换/EOF连播死锁修复/暂停亮度压暗/进度条命中收紧/列表标题固定/窗口尺寸记忆修正
