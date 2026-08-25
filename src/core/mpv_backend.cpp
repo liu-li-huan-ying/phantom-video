@@ -44,6 +44,7 @@ bool MpvBackend::init(HWND hwnd) {
     mpv_set_option_string(mpv_, "dscale", "mitchell");
     mpv_set_option_string(mpv_, "cscale", "spline36");
     mpv_set_option_string(mpv_, "deband", "yes");
+    mpv_set_option_string(mpv_, "scale-antiring", "0.7");   // 缩放振铃抑制(对 ewa 系同样有效)
     // HDR 片源在 HDR 显示器上的色彩空间提示(gpu-next, SDR 屏自动忽略)
     mpv_set_option_string(mpv_, "target-colorspace-hint", "yes");
     // 抖动防梯度断裂(默认 auto, 显式声明意图)

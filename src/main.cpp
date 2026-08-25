@@ -261,15 +261,15 @@ struct SettingsGeom {
     int panelX, panelY, panelW, panelH;
     int closeCx, closeCy, closeR;
     int swX, swW, swH;          // 开关
-    int rowY[8];                // 8 个开关行
+    int rowY[9];                // 9 个开关行
     int modeRowY;               // 播放模式行
     int chipY, chipH, chipW;    // 模式 chips
 };
-static const int SET_ROW_COUNT = 8;
+static const int SET_ROW_COUNT = 9;
 
 static SettingsGeom settingsGeom(int w, int h) {
     SettingsGeom g;
-    g.panelW = S(400); g.panelH = S(470);
+    g.panelW = S(400); g.panelH = S(500);
     g.panelX = (w - g.panelW) / 2;
     g.panelY = (h - g.panelH) / 2;
     g.closeCx = g.panelX + g.panelW - S(22);
@@ -293,6 +293,11 @@ static void applySetting(const char* key, int value) {
     else if (std::strcmp(key, "vol") == 0 ||
              std::strcmp(key, "night") == 0)   rebuildAudioFilters();
     else if (std::strcmp(key, "interp") == 0)  applyMotionInterp(value != 0);
+    else if (std::strcmp(key, "hiq") == 0) {
+        const char* s = value ? "ewa_lanczossharp" : "spline36";
+        mpvSetOpt("scale", s);
+        mpvSetOpt("cscale", s);
+    }
     // thumbCache/resume 纯本地，无需通知 mpv
 }
 
@@ -895,12 +900,13 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             else {
                 int* vals[SET_ROW_COUNT] = { &g_cfg.hwDecode, &g_cfg.volNorm,
                     &g_cfg.subAutoLoad, &g_cfg.thumbCache, &g_cfg.resume,
-                    &g_cfg.nightMode, &g_cfg.audioExclusive, &g_cfg.motionInterp };
+                    &g_cfg.nightMode, &g_cfg.audioExclusive, &g_cfg.motionInterp,
+                    &g_cfg.hiQScale };
                 const char* keys[SET_ROW_COUNT] = { "hw", "vol", "sub", "thumb",
-                    "resume", "night", "excl", "interp" };
+                    "resume", "night", "excl", "interp", "hiq" };
                 const char* names[SET_ROW_COUNT] = { "Hardware Decode", "Volume Norm",
                     "Sub Auto-Load", "Thumb Cache", "Resume",
-                    "Night Mode", "Exclusive Audio", "Motion Interp" };
+                    "Night Mode", "Exclusive Audio", "Motion Interp", "HQ Scaling" };
                 bool handled = false;
                 for (int i = 0; i < SET_ROW_COUNT && !handled; ++i) {
                     if (my >= sg.rowY[i] - S(5) && my <= sg.rowY[i] + sg.swH + S(5) &&
@@ -1680,7 +1686,8 @@ static void renderOverlay() {
         // toggle rows
         int toggleVals[SET_ROW_COUNT] = { g_cfg.hwDecode, g_cfg.volNorm,
             g_cfg.subAutoLoad, g_cfg.thumbCache, g_cfg.resume,
-            g_cfg.nightMode, g_cfg.audioExclusive, g_cfg.motionInterp };
+            g_cfg.nightMode, g_cfg.audioExclusive, g_cfg.motionInterp,
+            g_cfg.hiQScale };
         const char* rowLabels[SET_ROW_COUNT] = {
             "Hardware Decode",
             "Volume Normalization",
@@ -1690,6 +1697,7 @@ static void renderOverlay() {
             "Night Mode (Compressor)",
             "Exclusive Audio (WASAPI)",
             "Motion Interpolation",
+            "High Quality Scaling (GPU+)",
         };
         for (int i = 0; i < SET_ROW_COUNT; ++i) {
             int ry = sg.rowY[i];
@@ -1932,6 +1940,10 @@ wc.style         = CS_DBLCLKS;   // 接收 WM_LBUTTONDBLCLK
     mpvSetOpt("audio-exclusive", g_cfg.audioExclusive ? "yes" : "no");
     rebuildAudioFilters();
     if (g_cfg.motionInterp) applyMotionInterp(true);
+    if (g_cfg.hiQScale) {
+        mpvSetOpt("scale", "ewa_lanczossharp");
+        mpvSetOpt("cscale", "ewa_lanczossharp");
+    }
 
     // ---- SDL2 overlay（owned 顶层窗口，不进任务栏） ----
     if (!createOverlay(g_parentHwnd, rc.right, rc.bottom)) { return 1; }

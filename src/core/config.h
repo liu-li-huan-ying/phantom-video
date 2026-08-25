@@ -17,6 +17,7 @@ struct AppConfig {
     int nightMode = 0;     // 夜间模式(acompressor 动态压缩)
     int audioExclusive = 0;// WASAPI 独占输出
     int motionInterp = 0;  // 运动插值(display-resample + oversample)
+    int hiQScale = 0;      // 高质量缩放(ewa_lanczossharp, GPU 开销较高)
     // 窗口位置（物理像素；x==INVALID_POS 表示未记忆）
     static const int INVALID_POS = -32001;
     int posX = INVALID_POS, posY = INVALID_POS;
