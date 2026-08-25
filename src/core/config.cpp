@@ -72,6 +72,9 @@ bool loadConfig(const std::string& path, AppConfig& out) {
         } else if (line.rfind("subscale=", 0) == 0) {
             float s = (float)std::atof(line.c_str() + 9);
             if (s >= 0.5f && s <= 3.0f) out.subScale = s;
+        } else if (line.rfind("lang=", 0) == 0) {
+            int l = std::atoi(line.c_str() + 5);
+            if (l >= 0 && l <= 1) out.lang = l;
         } else if (line.rfind("pos=", 0) == 0) {
             int x, y, w, h;
             if (sscanf(line.c_str() + 4, "%d,%d,%d,%d", &x, &y, &w, &h) == 4 &&
@@ -109,6 +112,7 @@ bool saveConfig(const std::string& path, const AppConfig& cfg) {
     out << "motioninterp=" << cfg.motionInterp << "\n";
     out << "hiqscale=" << cfg.hiQScale << "\n";
     out << "subscale=" << cfg.subScale << "\n";
+    out << "lang=" << cfg.lang << "\n";
     if (cfg.posX != AppConfig::INVALID_POS && cfg.posW > 0)
         out << "pos=" << cfg.posX << "," << cfg.posY << "," << cfg.posW << "," << cfg.posH << "\n";
     for (const auto& kv : cfg.history) {

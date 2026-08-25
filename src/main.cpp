@@ -190,6 +190,73 @@ static GdiTextCache  g_text;
 static UiState       g_ui;
 static AppConfig     g_cfg;
 
+// ---- i18n: 双语字符串表 (0=中文 1=English) ----
+static const char* T(const char* zh, const char* en) {
+    return g_cfg.lang == 0 ? zh : en;
+}
+namespace i18n {
+    inline const char* subtitles()  { return T("字幕", "Subtitles"); }
+    inline const char* speed()      { return T("倍速", "Speed"); }
+    inline const char* quality()    { return T("画质", "Quality"); }
+    inline const char* settings()   { return T("设置", "Settings"); }
+    inline const char* settingsTitle()  { return T("设置", "Settings"); }
+    inline const char* language()       { return T("语言", "Language"); }
+    inline const char* chinese()        { return T("中文", "Chinese"); }
+    inline const char* english()        { return T("English", "English"); }
+    inline const char* hwDecode()       { return T("硬件解码", "Hardware Decode"); }
+    inline const char* volNorm()        { return T("音量标准化", "Volume Normalization"); }
+    inline const char* subAutoLoad()    { return T("字幕自动加载", "Subtitle Auto-Load"); }
+    inline const char* thumbCache()     { return T("缩略图缓存", "Thumbnail Cache"); }
+    inline const char* resume()         { return T("续播记忆", "Resume Playback"); }
+    inline const char* nightMode()      { return T("夜间模式", "Night Mode"); }
+    inline const char* exclusiveAudio() { return T("独占音频", "Exclusive Audio"); }
+    inline const char* motionInterp()   { return T("运动插值", "Motion Interpolation"); }
+    inline const char* hiQScaling()     { return T("高质量缩放", "HQ Scaling"); }
+    inline const char* playbackMode()   { return T("播放模式", "Playback Mode"); }
+    inline const char* modeSingle()     { return T("单曲", "Single"); }
+    inline const char* modeLoop()       { return T("循环", "Loop"); }
+    inline const char* modeShuffle()    { return T("随机", "Shuffle"); }
+    inline const char* playlist()       { return T("播放列表", "Playlist"); }
+    inline const char* playing()        { return T("正在播放", "Playing"); }
+    inline const char* played()         { return T("已播放", "Played"); }
+    inline const char* unplayed()       { return T("未播放", "Unplayed"); }
+    inline const char* emptyPlaylist()  { return T("无文件", "No files"); }
+    inline const char* dropHint()       { return T("拖入视频文件", "Drop video here"); }
+    inline const char* ctrlOHint()      { return T("或按 Ctrl+O", "or press Ctrl+O"); }
+    inline const char* equalizer()      { return T("均衡器", "Equalizer"); }
+    inline const char* reset()          { return T("重置", "Reset"); }
+    inline const char* muted()          { return T("已静音", "Muted"); }
+    inline const char* unmuted()        { return T("已取消静音", "Unmuted"); }
+    inline const char* subtitlesOn()    { return T("字幕已开启", "Subtitles ON"); }
+    inline const char* subtitlesOff()   { return T("字幕已关闭", "Subtitles OFF"); }
+    inline const char* loopASet()       { return T("已设置 A 点", "Loop A set"); }
+    inline const char* loopActive()     { return T("AB 循环中", "AB loop active"); }
+    inline const char* loopCleared()    { return T("循环已清除", "Loop cleared"); }
+    inline const char* singleTrack()    { return T("单音轨", "Single audio track"); }
+    inline const char* playlistReordered() { return T("列表已重排", "Playlist reordered"); }
+    inline const char* failedOpen()     { return T("打开失败", "Failed to open file"); }
+    inline const char* eqReset()        { return T("EQ 已重置", "EQ reset"); }
+    inline const char* noPrev()         { return T("无上一曲", "No previous track"); }
+    inline const char* noNext()         { return T("无下一曲", "No next track"); }
+    inline const char* screenshotSaved() { return T("截图已保存", "Screenshot saved"); }
+    inline const char* screenshotFailed() { return T("截图失败", "Screenshot failed"); }
+    inline const char* pipOn()          { return T("画中画已开启", "PIP ON"); }
+    inline const char* pipOff()         { return T("画中画已关闭", "PIP OFF"); }
+    inline const char* buffering()      { return T("缓冲中...", "Buffering..."); }
+    inline const char* endOfTrack()     { return T("播放结束", "End of track"); }
+    inline const char* resumedAt()      { return T("已续播", "Resumed at"); }
+    inline const char* modeSingleT()   { return T("模式: 单曲", "Mode: Single"); }
+    inline const char* modeLoopT()     { return T("模式: 循环", "Mode: Loop"); }
+    inline const char* modeShuffleT()  { return T("模式: 随机", "Mode: Shuffle"); }
+    inline const char* debandOff()     { return T("关闭", "Off"); }
+    inline const char* debandLight()   { return T("轻", "Light"); }
+    inline const char* debandMedium()  { return T("中", "Medium"); }
+    inline const char* debandStrong()  { return T("强", "Strong"); }
+    inline const char* subBottom()     { return T("底部", "Bottom"); }
+    inline const char* subCenter()     { return T("居中", "Center"); }
+    inline const char* subTop()        { return T("顶部", "Top"); }
+}
+
 // ---- mpv 子窗口鼠标/键盘消息中继 ----
 // overlay(WS_EX_TRANSPARENT) 点击会命中 mpv 的 STATIC 子窗口而非 parent，
 // 导致所有鼠标交互失效；此处把输入类消息转发给 parent 统一处理。
@@ -340,9 +407,9 @@ static void layoutRow1(int w, int h, bool volOpen, Row1Layout& L) {
         float s = g_mpv ? g_mpv->speed() : 1.0f;
         if (s == (int)s) std::snprintf(spd, sizeof(spd), "%.0fx", s);
         else             std::snprintf(spd, sizeof(spd), "%.2fx", s);
-        placeRight(L.speedBtn, g_text.measureText(spd, 12) + g_text.measureText("倍速", 12) + S(24));
+        placeRight(L.speedBtn, g_text.measureText(spd, 12) + g_text.measureText(i18n::speed(), 12) + S(24));
     }
-    placeRight(L.subBtn, g_text.measureText("字幕", 12) + S(26));
+        placeRight(L.subBtn, g_text.measureText(i18n::subtitles(), 12) + S(26));
     // 音量 wrap: slider(open) + icon
     L.volIconCx = xr - S(17);
     if (volOpen) { L.volSliderX = xr - S(34) - S(80) + S(5); xr -= S(84); }
@@ -421,12 +488,14 @@ struct SettingsGeom {
     int rowY[9];                // 9 个开关行
     int modeRowY;               // 播放模式行
     int chipY, chipH, chipW;    // 模式 chips
+    int langRowY;               // 语言行 Y
+    int langSegX, langSegW, langSegH; // 语言分段控件
 };
 static const int SET_ROW_COUNT = 9;
 
 static SettingsGeom settingsGeom(int w, int h) {
     SettingsGeom g;
-    g.panelW = S(400); g.panelH = S(500);
+    g.panelW = S(400); g.panelH = S(540);
     g.panelX = (w - g.panelW) / 2;
     g.panelY = (h - g.panelH) / 2;
     g.closeCx = g.panelX + g.panelW - S(22);
@@ -439,6 +508,10 @@ static SettingsGeom settingsGeom(int w, int h) {
     g.modeRowY = g.rowY[7] + S(44);
     g.chipY = g.modeRowY;
     g.chipH = S(24); g.chipW = S(56);
+    // 语言行: 在播放模式下方
+    g.langRowY = g.chipY + S(44);
+    g.langSegX = g.swX - S(80);
+    g.langSegW = S(80); g.langSegH = S(24);
     return g;
 }
 
@@ -517,7 +590,7 @@ static void toggleMini(HWND hwnd) {
             SWP_NOZORDER | SWP_NOACTIVATE);
         g_ui.miniMode = true;
         LOG_INFO("MAIN", "pip mini ON (%dx%d)", w, h);
-        showToast("Picture-in-picture: ON");
+        showToast(i18n::pipOn());
     } else {
         SetWindowPos(hwnd, HWND_NOTOPMOST,
             g_ui.savedRect.left, g_ui.savedRect.top,
@@ -526,7 +599,7 @@ static void toggleMini(HWND hwnd) {
             SWP_NOZORDER | SWP_NOACTIVATE);
         g_ui.miniMode = false;
         LOG_INFO("MAIN", "pip mini OFF");
-        showToast("Picture-in-picture: OFF");
+        showToast(i18n::pipOff());
     }
     raiseOverlayAbove();
 }
@@ -781,7 +854,7 @@ static void playPath(const std::string& path) {
     if (g_cfg.resume && it != g_cfg.history.end() && it->second > 1.0)
         g_pendingResumePos = it->second;
     if (!g_mpv->loadFile(path)) {
-        showToast("Failed to open file");
+        showToast(i18n::failedOpen());
         return;
     }
     g_cfg.lastFile = path;
@@ -893,7 +966,7 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             case VK_DOWN:  g_mpv->setVolume(g_mpv->volume() - 0.05f); break;
             case 'M': {
                 g_mpv->toggleMute();
-                showToast(g_mpv->muted() ? "Muted" : "Unmuted");
+                showToast(g_mpv->muted() ? i18n::muted() : i18n::unmuted());
                 break;
             }
             case 'N': g_mpv->seekRelative( 10.0); break;
@@ -919,7 +992,7 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             case 'C': {
                 bool vis = !g_mpv->subVisible();
                 g_mpv->setSubVisibility(vis);
-                showToast(vis ? "Subtitles ON" : "Subtitles OFF");
+                showToast(vis ? i18n::subtitlesOn() : i18n::subtitlesOff());
                 break;
             }
             case 'X': {
@@ -944,13 +1017,13 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             case 'A': {  // AB 循环: 第一次设 A, 第二次设 B, 第三次清除
                 if (!g_mpv->looping()) {
                     g_mpv->setLoopA();
-                    showToast("Loop A set");
+                    showToast(i18n::loopASet());
                 } else if (g_mpv->loopA() >= 0 && g_mpv->loopB() < 0) {
                     g_mpv->setLoopB();
-                    showToast("AB loop active");
+                    showToast(i18n::loopActive());
                 } else {
                     g_mpv->clearLoop();
-                    showToast("Loop cleared");
+                    showToast(i18n::loopCleared());
                 }
                 break;
             }
@@ -984,18 +1057,18 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                                  tracks[nextIdx].desc.empty() ? "Default" : tracks[nextIdx].desc.c_str());
                     showToast(msg);
                 } else {
-                    showToast("Single audio track");
+                    showToast(i18n::singleTrack());
                 }
                 break;
             }
             case 'B': {  // 字幕位置: 循环底部/居中/顶部
                 static int subPosIdx = 0;
                 int positions[] = {100, 50, 10};
-                const char* names[] = {"Bottom", "Center", "Top"};
+                const char* names[] = {i18n::subBottom(), i18n::subCenter(), i18n::subTop()};
                 subPosIdx = (subPosIdx + 1) % 3;
                 g_mpv->setSubPos(positions[subPosIdx]);
                 char msg[32];
-                std::snprintf(msg, sizeof(msg), "Sub: %s", names[subPosIdx]);
+                std::snprintf(msg, sizeof(msg), "%s: %s", T("字幕", "Sub"), names[subPosIdx]);
                 showToast(msg);
                 break;
             }
@@ -1003,9 +1076,9 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 int cur = g_mpv->debandLevel();
                 int next = (cur + 1) % 4;
                 g_mpv->setDebandLevel(next);
-                const char* names[] = {"Off", "Light", "Medium", "Strong"};
+                const char* names[] = {i18n::debandOff(), i18n::debandLight(), i18n::debandMedium(), i18n::debandStrong()};
                 char msg[32];
-                std::snprintf(msg, sizeof(msg), "Deband: %s", names[next]);
+                std::snprintf(msg, sizeof(msg), "%s: %s", T("去色带", "Deband"), names[next]);
                 showToast(msg);
                 break;
             }
@@ -1216,7 +1289,7 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     int r = mpv_command(g_mpv->mpv(), cmd);
                     LOG_INFO("MAIN", "screenshot ret=%d (%s)", r,
                              r < 0 ? mpv_error_string(r) : "ok");
-                    showToast(r < 0 ? "Screenshot failed" : "Screenshot saved");
+                    showToast(r < 0 ? i18n::screenshotFailed() : i18n::screenshotSaved());
                 }
                 return 0;
             }
@@ -1258,8 +1331,8 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             }
             else if (inRc(L.prev)) {
                 int idx = playlistIndexOf(g_mpv->path());
-                if (idx > 0) { playIndex(idx - 1); showToast("Previous"); }
-                else showToast("No previous track");
+                if (idx > 0) { playIndex(idx - 1); showToast(T("上一曲", "Previous")); }
+                else showToast(i18n::noPrev());
             }
             else if (inRc(L.play)) {
                 g_mpv->togglePause();
@@ -1267,8 +1340,8 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             else if (inRc(L.next)) {
                 int idx = playlistIndexOf(g_mpv->path());
                 int n = (int)g_playlist.size();
-                if (idx >= 0 && idx + 1 < n) { playIndex(idx + 1); showToast("Next"); }
-                else showToast("No next track");
+                if (idx >= 0 && idx + 1 < n) { playIndex(idx + 1); showToast(T("下一曲", "Next")); }
+                else showToast(i18n::noNext());
             }
             else if (inRc(L.subBtn)) {
                 bool vis = !g_mpv->subVisible();
@@ -1288,7 +1361,7 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             else if (mx >= L.volIconCx - S(17) && mx <= L.volIconCx + S(17) &&
                      my >= L.cy - S(17) && my <= L.cy + S(17)) {
                 g_mpv->toggleMute();
-                showToast(g_mpv->muted() ? "Muted" : "Unmuted");
+                showToast(g_mpv->muted() ? i18n::muted() : i18n::unmuted());
                 LOG_INFO("MAIN", "mute toggled -> %d", g_mpv->muted() ? 1 : 0);
             }
             else if (inRc(L.setBtn)) {
@@ -1373,7 +1446,7 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     if (mx >= menuX + menuW / 2 - S(30) && mx <= menuX + menuW / 2 + S(30) &&
                         my >= resetY && my <= resetY + S(26)) {
                         for (int i = 0; i < 6; ++i) g_mpv->setEQBand(i, 0.0f);
-                        showToast("EQ reset");
+                        showToast(i18n::eqReset());
                     }
                     // 点击在菜单内其他位置: 不关闭
                     g_ui.visible = true;
@@ -1418,7 +1491,7 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             SettingsGeom sg = settingsGeom(g_ui.winW, g_ui.winH);
             bool inside = (mx >= sg.panelX && mx <= sg.panelX + sg.panelW &&
                            my >= sg.panelY && my <= sg.panelY + sg.panelH);
-            if (!inside) {                       // 点外 = 关闭
+            if (!inside) {
                 g_ui.settingsOpen = false;
             }
             else if (std::abs(mx - sg.closeCx) <= sg.closeR &&
@@ -1433,16 +1506,17 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     &g_cfg.hiQScale };
                 const char* keys[SET_ROW_COUNT] = { "hw", "vol", "sub", "thumb",
                     "resume", "night", "excl", "interp", "hiq" };
-                const char* names[SET_ROW_COUNT] = { "Hardware Decode", "Volume Norm",
-                    "Sub Auto-Load", "Thumb Cache", "Resume",
-                    "Night Mode", "Exclusive Audio", "Motion Interp", "HQ Scaling" };
                 bool handled = false;
                 for (int i = 0; i < SET_ROW_COUNT && !handled; ++i) {
                     if (my >= sg.rowY[i] - S(5) && my <= sg.rowY[i] + sg.swH + S(5) &&
                         mx >= sg.panelX + S(12)) {
                         *vals[i] = *vals[i] ? 0 : 1;
                         applySetting(keys[i], *vals[i]);
-                        showToast(names[i]);
+                        // toast 用当前语言
+                        const char* tNames[] = { i18n::hwDecode(), i18n::volNorm(), i18n::subAutoLoad(),
+                            i18n::thumbCache(), i18n::resume(), i18n::nightMode(),
+                            i18n::exclusiveAudio(), i18n::motionInterp(), i18n::hiQScaling() };
+                        showToast(tNames[i]);
                         LOG_INFO("MAIN", "setting %s -> %d", keys[i], *vals[i]);
                         handled = true;
                     }
@@ -1452,9 +1526,21 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                         int lx = sg.swX - S(180) + i * (sg.chipW + S(6));
                         if (mx >= lx && mx <= lx + sg.chipW) {
                             g_cfg.playMode = i;
-                            showToast(i == 0 ? "Mode: Single" :
-                                      i == 1 ? "Mode: Loop" : "Mode: Shuffle");
+                            const char* mNames[] = { i18n::modeSingleT(), i18n::modeLoopT(), i18n::modeShuffleT() };
+                            showToast(mNames[i]);
                             LOG_INFO("MAIN", "playmode -> %d", i);
+                            handled = true;
+                            break;
+                        }
+                    }
+                }
+                // 语言切换
+                if (!handled && my >= sg.langRowY && my <= sg.langRowY + sg.langSegH) {
+                    for (int i = 0; i < 2; ++i) {
+                        int lx = sg.langSegX + i * (sg.langSegW / 2);
+                        if (mx >= lx && mx <= lx + sg.langSegW / 2) {
+                            g_cfg.lang = i;
+                            LOG_INFO("MAIN", "lang -> %d", i);
                             handled = true;
                             break;
                         }
@@ -1467,7 +1553,7 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         else if (g_mpv && mx >= g_ui.winW - S(68) && mx <= g_ui.winW - S(40) &&
                  my >= barTop + S(36) && my <= barTop + S(64)) {
             g_mpv->toggleMute();
-            showToast(g_mpv->muted() ? "Muted" : "Unmuted");
+            showToast(g_mpv->muted() ? i18n::muted() : i18n::unmuted());
             LOG_INFO("MAIN", "mute toggled -> %d", g_mpv->muted() ? 1 : 0);
         }
         // --- 播放列表面板区域：关闭钮 -> 滚动条 -> 列表项候选 ---
@@ -1582,7 +1668,7 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     if (ins > (int)g_playlist.size()) ins = (int)g_playlist.size();
                     g_playlist.insert(g_playlist.begin() + ins, p);
                     LOG_INFO("MAIN", "playlist move %d -> %d", from, ins);
-                    showToast("Playlist reordered");
+                    showToast(i18n::playlistReordered());
                 }
             } else {
                 playIndex(g_ui.plDragFrom);   // 未拖动 = 单击播放
@@ -2066,24 +2152,24 @@ static void renderOverlay() {
         // 字幕
         {
             Uint8 ic = g_mpv->subVisible() ? 235 : 110;
-            drawTextBtn(L.subBtn, "字幕", "cc", ic, ic, ic);
+            drawTextBtn(L.subBtn, i18n::subtitles(), "cc", ic, ic, ic);
         }
-        // 倍速: "倍速" text2 + 值 accent2 蓝
+        // 倍速
         {
             char spd[16];
             float s = g_mpv->speed();
             if (s == (int)s) std::snprintf(spd, sizeof(spd), "%.0fx", s);
             else             std::snprintf(spd, sizeof(spd), "%.2fx", s);
-            int lw = g_text.measureText("倍速", 12);
-            g_text.drawText(L.speedBtn.x + S(8), L.speedBtn.y + S(10), "倍速", 12, 200, 200, 205);
+            int lw = g_text.measureText(i18n::speed(), 12);
+            g_text.drawText(L.speedBtn.x + S(8), L.speedBtn.y + S(10), i18n::speed(), 12, 200, 200, 205);
             g_text.drawText(L.speedBtn.x + S(8) + lw + S(4), L.speedBtn.y + S(10), spd, 12,
                             59, 130, 246);
         }
         // 画质 + 分辨率标签
         {
             const char* ql = qualityLabel();
-            int qw = g_text.measureText("画质", 12);
-            g_text.drawText(L.qualityBtn.x + S(8), L.qualityBtn.y + S(10), "画质", 12, 200, 200, 205);
+            int qw = g_text.measureText(i18n::quality(), 12);
+            g_text.drawText(L.qualityBtn.x + S(8), L.qualityBtn.y + S(10), i18n::quality(), 12, 200, 200, 205);
             g_text.drawText(L.qualityBtn.x + S(8) + qw + S(4), L.qualityBtn.y + S(11), ql, 11, 161, 161, 166);
         }
         // 音量图标
@@ -2093,7 +2179,7 @@ static void renderOverlay() {
                           iconC, iconC, 231, A(255));
         }
         // 设置(文字+gear)
-        drawTextBtn(L.setBtn, "设置", "gear", 200, 200, 205);
+        drawTextBtn(L.setBtn, i18n::settings(), "gear", 200, 200, 205);
         // 全屏
         const char* fid = g_ui.fullscreen ? "exitfull" : "full";
         svgicon::draw(g_sdlRdr, fid, L.fullBtn.x + S(17), L.fullBtn.y + S(17), S(18),
@@ -2220,11 +2306,12 @@ static void renderOverlay() {
                            menuX + menuW - S(8), menuY + infoH - S(4));
 
         // 预设选项
+        const char* qNames[] = { T("省电", "Power Saving"), T("标准", "Standard"), T("至臻", "Ultimate") };
         for (int i = 0; i < QUALITY_PRESET_COUNT; ++i) {
             int iy = menuY + infoH + i * itemH;
             bool sel = (g_ui.qualityPreset == i);
             Uint8 tr = sel ? 59 : 228, tg = sel ? 130 : 228, tb = sel ? 246 : 231;
-            g_text.drawText(menuX + S(10), iy + S(8), QUALITY_PRESETS[i].name, 13, tr, tg, tb);
+            g_text.drawText(menuX + S(10), iy + S(8), qNames[i], 13, tr, tg, tb);
             // 当前选中标记
             if (sel) {
                 g_text.drawText(menuX + menuW - S(24), iy + S(8), "✓", 13, 59, 130, 246);
@@ -2255,7 +2342,7 @@ static void renderOverlay() {
         fillCircle(g_sdlRdr, menuX + cr, menuY + menuH - cr, cr, 24, 24, 26, 255);
         fillCircle(g_sdlRdr, menuX + menuW - cr, menuY + menuH - cr, cr, 24, 24, 26, 255);
         // 标题
-        g_text.drawText(menuX + S(10), menuY + S(10), "Equalizer", 13, 255, 255, 255);
+        g_text.drawText(menuX + S(10), menuY + S(10), i18n::equalizer(), 13, 255, 255, 255);
         // 开关状态
         const char* st = g_mpv->eqEnabled() ? "ON" : "OFF";
         Uint8 sr = g_mpv->eqEnabled() ? 59 : 161, sg = g_mpv->eqEnabled() ? 130 : 161, sb = g_mpv->eqEnabled() ? 246 : 166;
@@ -2293,7 +2380,7 @@ static void renderOverlay() {
         SDL_Rect resetRc = {menuX + menuW / 2 - S(30), resetY, S(60), S(26)};
         SDL_SetRenderDrawColor(g_sdlRdr, 58, 58, 62, 255);
         SDL_RenderFillRect(g_sdlRdr, &resetRc);
-        g_text.drawText(resetRc.x + S(14), resetRc.y + S(5), "Reset", 11, 228, 228, 231);
+        g_text.drawText(resetRc.x + S(14), resetRc.y + S(5), i18n::reset(), 11, 228, 228, 231);
     }
     if (g_ui.playlistOpen) {
         int panelW, panelX;
@@ -2317,7 +2404,7 @@ static void renderOverlay() {
         SDL_RenderDrawLine(g_sdlRdr, panelX, panelY, panelX, panelY + panelH);
 
         // title + 关闭钮（效果图 .pl-head）
-        g_text.drawText(panelX + S(14), panelY + S(16), "播放列表", 13, 255, 255, 255);
+        g_text.drawText(panelX + S(14), panelY + S(16), i18n::playlist(), 13, 255, 255, 255);
         int closeX = panelX + panelW - S(40);
         int closeY = panelY + S(10);
         SDL_Rect closeRc = {closeX, closeY, S(28), S(28)};
@@ -2476,20 +2563,35 @@ static void renderOverlay() {
     if (g_ui.settingsOpen) {
         SettingsGeom sg = settingsGeom(w, h);
 
-        // backdrop（黑 key 下不能用纯黑+alpha, 用不透明深灰压暗观感）
-        SDL_SetRenderDrawColor(g_sdlRdr, 14, 14, 16, 255);
-        SDL_Rect fullRc = {0, 0, w, h};
-        SDL_RenderFillRect(g_sdlRdr, &fullRc);
+        // 无全屏遮挡 — 视频在面板周围保持可见 (Apple/Google 浮动面板风格)
+        // 面板阴影（柔和扩散）
+        for (int i = 4; i >= 1; --i) {
+            Uint8 sha = (Uint8)(12 * i);
+            SDL_SetRenderDrawColor(g_sdlRdr, 0, 0, 0, sha);
+            SDL_Rect sr = {sg.panelX - i*2, sg.panelY - i*2, sg.panelW + i*4, sg.panelH + i*4};
+            SDL_RenderDrawRect(g_sdlRdr, &sr);
+        }
 
-        // panel
-        SDL_Rect panelRc = {sg.panelX, sg.panelY, sg.panelW, sg.panelH};
-        SDL_SetRenderDrawColor(g_sdlRdr, 21, 21, 21, 250);
-        SDL_RenderFillRect(g_sdlRdr, &panelRc);
-        SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 25);
-        SDL_RenderDrawRect(g_sdlRdr, &panelRc);
+        // panel (圆角矩形)
+        int cr = S(12);
+        SDL_SetRenderDrawColor(g_sdlRdr, 28, 28, 30, 255);
+        SDL_Rect pBody = {sg.panelX + cr, sg.panelY, sg.panelW - cr*2, sg.panelH};
+        SDL_RenderFillRect(g_sdlRdr, &pBody);
+        SDL_Rect pH = {sg.panelX, sg.panelY + cr, sg.panelW, sg.panelH - cr*2};
+        SDL_RenderFillRect(g_sdlRdr, &pH);
+        fillCircle(g_sdlRdr, sg.panelX + cr, sg.panelY + cr, cr, 28, 28, 30, 255);
+        fillCircle(g_sdlRdr, sg.panelX + sg.panelW - cr, sg.panelY + cr, cr, 28, 28, 30, 255);
+        fillCircle(g_sdlRdr, sg.panelX + cr, sg.panelY + sg.panelH - cr, cr, 28, 28, 30, 255);
+        fillCircle(g_sdlRdr, sg.panelX + sg.panelW - cr, sg.panelY + sg.panelH - cr, cr, 28, 28, 30, 255);
+        // 边框
+        SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 20);
+        SDL_Rect borderH = {sg.panelX + cr, sg.panelY, sg.panelW - cr*2, sg.panelH};
+        SDL_RenderDrawRect(g_sdlRdr, &borderH);
+        SDL_Rect borderV = {sg.panelX, sg.panelY + cr, sg.panelW, sg.panelH - cr*2};
+        SDL_RenderDrawRect(g_sdlRdr, &borderV);
 
         // title + close
-        g_text.drawText(sg.panelX + S(20), sg.panelY + S(16), "Settings", 16, 255, 255, 255);
+        g_text.drawText(sg.panelX + S(20), sg.panelY + S(16), i18n::settingsTitle(), 16, 255, 255, 255);
         svgicon::draw(g_sdlRdr, "close", sg.closeCx, sg.closeCy, S(18), 161, 161, 166, 200);
 
         // toggle rows
@@ -2498,44 +2600,80 @@ static void renderOverlay() {
             g_cfg.nightMode, g_cfg.audioExclusive, g_cfg.motionInterp,
             g_cfg.hiQScale };
         const char* rowLabels[SET_ROW_COUNT] = {
-            "Hardware Decode",
-            "Volume Normalization",
-            "Subtitle Auto-Load",
-            "Thumbnail Disk Cache",
-            "Resume Playback",
-            "Night Mode (Compressor)",
-            "Exclusive Audio (WASAPI)",
-            "Motion Interpolation",
-            "High Quality Scaling (GPU+)",
+            i18n::hwDecode(), i18n::volNorm(), i18n::subAutoLoad(),
+            i18n::thumbCache(), i18n::resume(), i18n::nightMode(),
+            i18n::exclusiveAudio(), i18n::motionInterp(), i18n::hiQScaling(),
         };
         for (int i = 0; i < SET_ROW_COUNT; ++i) {
             int ry = sg.rowY[i];
             bool on = (toggleVals[i] != 0);
             g_text.drawText(sg.panelX + S(20), ry + S(3), rowLabels[i], 13, on ? 230 : 170, on ? 230 : 170, on ? 230 : 170);
 
+            // Switch
             SDL_Rect swRc = {sg.swX, ry, sg.swW, sg.swH};
-            SDL_SetRenderDrawColor(g_sdlRdr, on ? 37 : 80, on ? 99 : 80, on ? 235 : 80, 255);
-            SDL_RenderFillRect(g_sdlRdr, &swRc);
-            int thumbX = on ? sg.swX + sg.swW - sg.swH : sg.swX;
-            SDL_Rect tRc = {thumbX + S(2), ry + S(2), sg.swH - S(4), sg.swH - S(4)};
-            SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 255);
-            SDL_RenderFillRect(g_sdlRdr, &tRc);
+            int swR = sg.swH / 2;
+            if (on) {
+                fillCircle(g_sdlRdr, sg.swX + swR, ry + swR, swR, 37, 99, 235, 255);
+                fillCircle(g_sdlRdr, sg.swX + sg.swW - swR, ry + swR, swR, 37, 99, 235, 255);
+                SDL_Rect mid = {sg.swX + swR, ry, sg.swW - sg.swH, sg.swH};
+                SDL_RenderFillRect(g_sdlRdr, &mid);
+            } else {
+                fillCircle(g_sdlRdr, sg.swX + swR, ry + swR, swR, 80, 80, 80, 255);
+                fillCircle(g_sdlRdr, sg.swX + sg.swW - swR, ry + swR, swR, 80, 80, 80, 255);
+                SDL_Rect mid = {sg.swX + swR, ry, sg.swW - sg.swH, sg.swH};
+                SDL_RenderFillRect(g_sdlRdr, &mid);
+            }
+            int thumbX = on ? sg.swX + sg.swW - sg.swH + S(2) : sg.swX + S(2);
+            fillCircle(g_sdlRdr, thumbX + (sg.swH - S(4))/2, ry + S(10), (sg.swH - S(4))/2, 255, 255, 255, 255);
         }
 
-        // playback mode row (Single / Loop / Shuffle)
-        g_text.drawText(sg.panelX + S(20), sg.modeRowY + S(3), "Playback Mode", 13, 200, 200, 200);
-        const char* modes[] = {"Single", "Loop", "Shuffle"};
+        // playback mode row
+        g_text.drawText(sg.panelX + S(20), sg.modeRowY + S(3), i18n::playbackMode(), 13, 200, 200, 200);
+        const char* modes[] = { i18n::modeSingle(), i18n::modeLoop(), i18n::modeShuffle() };
         for (int i = 0; i < 3; ++i) {
             int lx = sg.swX - S(180) + i * (sg.chipW + S(6));
             bool sel = (g_cfg.playMode == i);
-            SDL_Rect lr = {lx, sg.chipY, sg.chipW, sg.chipH};
+            int cr2 = S(6);
             SDL_SetRenderDrawColor(g_sdlRdr, sel ? 37 : 55, sel ? 99 : 55, sel ? 235 : 58, 255);
+            SDL_Rect lr = {lx + cr2, sg.chipY, sg.chipW - cr2*2, sg.chipH};
             SDL_RenderFillRect(g_sdlRdr, &lr);
+            SDL_Rect lh = {lx, sg.chipY + cr2, sg.chipW, sg.chipH - cr2*2};
+            SDL_RenderFillRect(g_sdlRdr, &lh);
+            fillCircle(g_sdlRdr, lx + cr2, sg.chipY + cr2, cr2, sel ? 37 : 55, sel ? 99 : 55, sel ? 235 : 58, 255);
+            fillCircle(g_sdlRdr, lx + sg.chipW - cr2, sg.chipY + cr2, cr2, sel ? 37 : 55, sel ? 99 : 55, sel ? 235 : 58, 255);
             if (!sel) {
                 SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 25);
-                SDL_RenderDrawRect(g_sdlRdr, &lr);
+                SDL_Rect mr1 = {lx + cr2, sg.chipY, sg.chipW - cr2*2, sg.chipH};
+                SDL_RenderDrawRect(g_sdlRdr, &mr1);
+                SDL_Rect mr2 = {lx, sg.chipY + cr2, sg.chipW, sg.chipH - cr2*2};
+                SDL_RenderDrawRect(g_sdlRdr, &mr2);
             }
             g_text.drawText(lx + S(8), sg.chipY + S(4), modes[i], 11, sel ? 255 : 150, sel ? 255 : 150, sel ? 255 : 150);
+        }
+
+        // 语言切换行
+        g_text.drawText(sg.panelX + S(20), sg.langRowY + S(3), i18n::language(), 13, 200, 200, 200);
+        const char* langLabels[] = { i18n::chinese(), i18n::english() };
+        for (int i = 0; i < 2; ++i) {
+            int lx = sg.langSegX + i * (sg.langSegW / 2);
+            bool sel = (g_cfg.lang == i);
+            int cr2 = S(6);
+            SDL_SetRenderDrawColor(g_sdlRdr, sel ? 37 : 50, sel ? 99 : 50, sel ? 235 : 52, 255);
+            SDL_Rect lr = {lx + cr2, sg.langRowY, sg.langSegW/2 - cr2*2, sg.langSegH};
+            SDL_RenderFillRect(g_sdlRdr, &lr);
+            SDL_Rect lh = {lx, sg.langRowY + cr2, sg.langSegW/2, sg.langSegH - cr2*2};
+            SDL_RenderFillRect(g_sdlRdr, &lh);
+            fillCircle(g_sdlRdr, lx + cr2, sg.langRowY + cr2, cr2, sel ? 37 : 50, sel ? 99 : 50, sel ? 235 : 52, 255);
+            fillCircle(g_sdlRdr, lx + sg.langSegW/2 - cr2, sg.langRowY + cr2, cr2, sel ? 37 : 50, sel ? 99 : 50, sel ? 235 : 52, 255);
+            if (!sel) {
+                SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 20);
+                SDL_Rect lr1 = {lx + cr2, sg.langRowY, sg.langSegW/2 - cr2*2, sg.langSegH};
+                SDL_RenderDrawRect(g_sdlRdr, &lr1);
+                SDL_Rect lr2 = {lx, sg.langRowY + cr2, sg.langSegW/2, sg.langSegH - cr2*2};
+                SDL_RenderDrawRect(g_sdlRdr, &lr2);
+            }
+            int tw2 = g_text.measureText(langLabels[i], 11);
+            g_text.drawText(lx + (sg.langSegW/2 - tw2) / 2, sg.langRowY + S(4), langLabels[i], 11, sel ? 255 : 150, sel ? 255 : 150, sel ? 255 : 150);
         }
     }
 
@@ -2743,7 +2881,7 @@ wc.style         = CS_DBLCLKS;   // 接收 WM_LBUTTONDBLCLK
         if (idx < 0 || n == 0) return;
 
         if (g_cfg.playMode == 0) {                   // Single：停住
-            showToast("End of track");
+            showToast(i18n::endOfTrack());
         } else if (g_cfg.playMode == 2) {            // Shuffle
             if (n > 1) {
                 int next = idx;
