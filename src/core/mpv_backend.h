@@ -65,6 +65,17 @@ public:
     double loopB() const { return loopB_; }
     bool   looping() const { return loopB_ > 0; }
 
+    // ---- 去色带强度 ----
+    void setDebandLevel(int level);        // 0=关 1=轻 2=中 3=强
+    int  debandLevel() const;
+
+    // ---- 音频均衡器 ----
+    struct EQBand { const char* freq; float gain; };  // gain: -12..+12 dB
+    void setEQBand(int band, float gain);  // band 0-5
+    void setEQEnabled(bool on);
+    bool eqEnabled() const { return eqEnabled_; }
+    float eqGain(int band) const;
+
     State state() const { return state_.load(); }
     double clock() const;
     double duration() const;
@@ -110,4 +121,7 @@ private:
     uint32_t seekbarFreezeEnd_ = 0;         // 速度切换后冻结进度条显示(ms)
     double loopA_ = -1.0;                   // AB 循环 A 点
     double loopB_ = -1.0;                   // AB 循环 B 点
+    int    debandLevel_ = 2;                // 去色带等级 0-3
+    bool   eqEnabled_ = false;              // 均衡器开关
+    float  eqGains_[6] = {};                // 均衡器 6 频段增益
 };

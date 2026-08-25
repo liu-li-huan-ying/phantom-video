@@ -995,6 +995,22 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 showToast(msg);
                 break;
             }
+            case 'D': {  // 去色带强度: 关→轻→中→强→关...
+                int cur = g_mpv->debandLevel();
+                int next = (cur + 1) % 4;
+                g_mpv->setDebandLevel(next);
+                const char* names[] = {"Off", "Light", "Medium", "Strong"};
+                char msg[32];
+                std::snprintf(msg, sizeof(msg), "Deband: %s", names[next]);
+                showToast(msg);
+                break;
+            }
+            case 'E': {  // 音频均衡器: ON/OFF 切换
+                bool on = !g_mpv->eqEnabled();
+                g_mpv->setEQEnabled(on);
+                showToast(on ? "EQ: ON (flat)" : "EQ: OFF");
+                break;
+            }
             case VK_ESCAPE:
                 if (g_ui.speedMenuOpen) g_ui.speedMenuOpen = false;
                 else if (g_ui.volumeSliderOpen) g_ui.volumeSliderOpen = false;

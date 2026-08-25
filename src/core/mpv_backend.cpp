@@ -401,6 +401,67 @@ void MpvBackend::clearLoop() {
     LOG_INFO("MPV", "AB loop cleared");
 }
 
+// ---- 去色带强度 ----
+// 等级: 0=关, 1=轻(iter=1,th=2,rng=16), 2=中(iter=2,th=3,rng=24), 3=强(iter=4,th=4,rng=32)
+void MpvBackend::setDebandLevel(int level) {
+    if (!mpv_) return;
+    if (level < 0) level = 0; if (level > 3) level = 3;
+    debandLevel_ = level;
+    int flag = (level > 0) ? 1 : 0;
+    mpv_set_property(mpv_, "deband", MPV_FORMAT_FLAG, &flag);
+    if (level > 0) {
+        struct { int iter, th, rng; } presets[] = {{1,2,16},{2,3,24},{4,4,32}};
+        auto& p = presets[level - 1];
+        int64_t v;
+        v = p.iter; mpv_set_property(mpv_, "deband-iterations", MPV_FORMAT_INT64, &v);
+        v = p.th;   mpv_set_property(mpv_, "deband-threshold", MPV_FORMAT_INT64, &v);
+        v = p.rng;  mpv_set_property(mpv_, "deband-range", MPV_FORMAT_INT64, &v);
+    }
+    const char* names[] = {"Off","Light","Medium","Strong"};
+    LOG_INFO("MPV", "deband -> %s (iter/th/rng)", names[level]);
+}
+
+int MpvBackend::debandLevel() const {
+    return debandLevel_;
+}
+
+// ---- 音频均衡器 ----
+// 6 频段: 60Hz, 170Hz, 310Hz, 600Hz, 3kHz, 12kHz
+void MpvBackend::setEQBand(int band, float gain) {
+    if (!mpv_ || band < 0 || band > 5) return;
+    if (gain < -12.0f) gain = -12.0f; if (gain > 12.0f) gain = 12.0f;
+    eqGains_[band] = gain;
+    // 重建 af=equalizer 字符串
+    static const char* freqs[] = {"60","170","310","600","3000","12000"};
+    char buf[256];
+    std::snprintf(buf, sizeof(buf),
+        "equalizer=f=%s:t=q:w=1.2:g=%.1f,equalizer=f=%s:t=q:w=1.2:g=%.1f,"
+        "equalizer=f=%s:t=q:w=1.2:g=%.1f,equalizer=f=%s:t=q:w=1.2:g=%.1f,"
+        "equalizer=f=%s:t=q:w=1.2:g=%.1f,equalizer=f=%s:t=q:w=1.2:g=%.1f",
+        freqs[0], eqGains_[0], freqs[1], eqGains_[1],
+        freqs[2], eqGains_[2], freqs[3], eqGains_[3],
+        freqs[4], eqGains_[4], freqs[5], eqGains_[5]);
+    mpv_set_property_string(mpv_, "af", eqEnabled_ ? buf : "");
+    LOG_INFO("MPV", "EQ band %d -> %.1f dB", band, gain);
+}
+
+void MpvBackend::setEQEnabled(bool on) {
+    if (!mpv_) return;
+    eqEnabled_ = on;
+    if (on) {
+        // 重新应用所有频段
+        for (int i = 0; i < 6; ++i) setEQBand(i, eqGains_[i]);
+    } else {
+        mpv_set_property_string(mpv_, "af", "");
+    }
+    LOG_INFO("MPV", "EQ -> %s", on ? "ON" : "OFF");
+}
+
+float MpvBackend::eqGain(int band) const {
+    if (band < 0 || band > 5) return 0.0f;
+    return eqGains_[band];
+}
+
 double MpvBackend::clock() const {
     if (!mpv_) return 0.0;
     std::lock_guard<std::mutex> lock(propMutex_);
