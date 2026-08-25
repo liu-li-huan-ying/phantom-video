@@ -1689,6 +1689,42 @@ settingsGeom 写 rowY[5..7] 越界踩栈，点击 gear 即崩。
   更高分辨率屏幕无碍；若未来加行需考虑分页或两列
 
 验证：`set scale/cscale=ewa_lanczossharp ret=0` ×2 + ini 落盘 ✓
+
+---
+
+## M34a Phase 9: 中文路径拖放修复（2026-08-25）
+
+**用户报告**：拖放视频无法播放/疑似崩溃。
+
+**日志铁证**（WM_DROPFILES 注入复现）：
+```
+[MPV] loaded: G:\影        <- '影视资料' 在首个汉字处截断
+```
+
+根因：Windows ANSI API 族按系统代码页(GBK)处理字符串，而 mpv/
+std::string 链路约定 UTF-8。四个断点全部中招：
+1. `DragQueryFileA` → GBK 字节
+2. `fs::path(窄串)` 构造 → 按 ANSI 解读 UTF-8 字节
+3. `GetOpenFileNameA` → 同 1
+4. 渲染层 `path(...).filename().string()` 双重 ANSI 往返
+
+修复：全链路显式转换——DragQueryFileW/GetOpenFileNameW +
+Utf8ToWide/WideToUtf8 助手；fs::path 一律宽字符构造；
+新增 fileNameOf() 统一安全取名；drop 入口记录字节数日志。
+
+**验证**：注入模拟拖放 → `drop file (41 bytes)` 完整中文路径 →
+`[MPV] loaded: G:\影视资料\X\V_0002....mp4` 播放成功 ✓
+开面板+拖放+缩略图提取组合无崩溃 ✓
+
+**关于"崩溃"**：多轮组合复现（中文路径/开面板/缩略图 worker/
+3604 目录扫描）均未复现崩溃。推断用户感知的"崩溃"为编码截断
+导致的播放失败（画面黑屏无响应）。若仍有真实崩溃需用户提供
+具体文件与操作序列再查。
+
+测试工具链：inject_drop.ps1——GlobalAlloc 构造 DROPFILES(fWide=1)
++ PostMessage(WM_DROPFILES)；注意 PS 的 char→Int16 转换对
+CJK 码点溢出，须走 Encoding.Unicode.GetBytes 字节流写入；
+中文参数经 bash→powershell 会乱码，改由 UTF-8 文件中转。
 - gapless-audio 默认 weak 已满足本地播放
 
 ---
