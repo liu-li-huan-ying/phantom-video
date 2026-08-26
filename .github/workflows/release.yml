@@ -1,0 +1,70 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache w64devkit
+        id: cache-w64
+        uses: actions/cache@v4
+        with:
+          path: w64devkit
+          key: w64devkit-2.0.0
+
+      - name: Download w64devkit
+        if: steps.cache-w64.outputs.cache-hit != 'true'
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/skeeto/w64devkit/releases/download/v2.0.0/w64devkit-2.0.0.zip" -OutFile "w64devkit.zip"
+          Expand-Archive -Path "w64devkit.zip" -DestinationPath "w64devkit"
+          Remove-Item "w64devkit.zip"
+
+      - name: Build
+        run: |
+          $env:PATH = "$pwd\w64devkit\bin;$env:PATH"
+          # w64devkit 的 sh.exe 干扰 MinGW Makefiles
+          if (Test-Path "w64devkit\bin\sh.exe") {
+            Rename-Item "w64devkit\bin\sh.exe" "sh.exe.bak"
+          }
+          cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+          if (Test-Path "w64devkit\bin\sh.exe.bak") {
+            Rename-Item "w64devkit\bin\sh.exe.bak" "sh.exe"
+          }
+
+      - name: Get version
+        id: version
+        shell: bash
+        run: echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Package
+        run: |
+          $ver = "${{ steps.version.outputs.tag }}"
+          $dir = "phantom_video-$ver-win64"
+          New-Item -ItemType Directory -Path $dir -Force | Out-Null
+          # exe + DLLs (CMake 已拷贝到 build/)
+          Copy-Item "build\phantom_video.exe" "$dir\"
+          Get-ChildItem "build\*.dll" | Copy-Item -Destination "$dir\"
+          # 资源
+          if (Test-Path "build\assets") { Copy-Item "build\assets" "$dir\assets" -Recurse }
+          if (Test-Path "build\ico") { Copy-Item "build\ico" "$dir\ico" -Recurse }
+          # 打包
+          Compress-Archive -Path $dir -DestinationPath "$dir.zip"
+          echo "ZIP=$dir.zip" >> $env:GITHUB_ENV
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Phantom Video ${{ steps.version.outputs.tag }}
+          generate_release_notes: true
+          files: ${{ env.ZIP }}
