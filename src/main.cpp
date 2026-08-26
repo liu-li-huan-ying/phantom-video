@@ -962,10 +962,11 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         int panelExtra = (g_ui.playlistOpen && !g_ui.fullscreen) ? U(430) : 0;
         g_ui.winW = rc.right - panelExtra;
         g_ui.winH = rc.bottom;
+        float oldBase = g_uiBase;
         g_uiBase = std::min(g_ui.winW / 1280.0f, g_ui.winH / 720.0f);
         g_uiBase = std::max(0.45f, std::min(g_uiBase, 2.0f));
-        LOG_DBG("MAIN", "WM_SIZE %ux%u wp=%u panelExtra=%d winW=%d",
-                rc.right, rc.bottom, wp, panelExtra, g_ui.winW);
+        LOG_DBG("MAIN", "WM_SIZE %ux%u wp=%u panelExtra=%d winW=%d base=%.2f->%.2f",
+                rc.right, rc.bottom, wp, panelExtra, g_ui.winW, oldBase, g_uiBase);
         if (g_mpvHwnd) MoveWindow(g_mpvHwnd, 0, 0, g_ui.winW, rc.bottom, TRUE);
         if (g_sdlWin) {
             POINT pt = {0,0}; ClientToScreen(hwnd, &pt);
@@ -998,12 +999,14 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     // ---- 焦点管理: 父窗口失去焦点时隐藏 overlay, 避免浮在其他窗口上面 ----
     case WM_ACTIVATEAPP: {
         bool active = (wp != 0);
-        LOG_DBG("MAIN", "WM_ACTIVATEAPP active=%d", active);
+        LOG_DBG("MAIN", "WM_ACTIVATEAPP active=%d mini=%d", active, g_ui.miniMode ? 1 : 0);
         if (g_sdlWin && !g_ui.miniMode) {
             if (active) {
+                LOG_DBG("MAIN", "overlay show (focus gained)");
                 SDL_ShowWindow(g_sdlWin);
                 raiseOverlayAbove();
             } else {
+                LOG_DBG("MAIN", "overlay hide (focus lost)");
                 SDL_HideWindow(g_sdlWin);
             }
         }
@@ -1548,6 +1551,8 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             SetCapture(hwnd);
             g_ui.visible = true;
             g_ui.hideAt = SDL_GetTicks() + ui::CTRLBAR_HIDE_MS;
+            LOG_DBG("SEEK", "seekbar press target=%.2f ratio=%.3f (no pause fallthrough)",
+                    g_ui.seekTarget, ratio);
             return 0;  // seekbar 点击不穿透到视频区
         }
         // --- controlbar row1 命中（与渲染共用 Row1Layout）---
@@ -1711,7 +1716,10 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_LBUTTONUP:
         if (g_ui.seekingDrag) {
             g_ui.seekingDrag = false;
-            if (g_mpv) g_mpv->seek(g_ui.seekTarget);
+            if (g_mpv) {
+                LOG_DBG("SEEK", "seekbar release -> seek(%.2f)", g_ui.seekTarget);
+                g_mpv->seek(g_ui.seekTarget);
+            }
         }
         if (g_ui.volumeDragging) {
             g_ui.volumeDragging = false;
