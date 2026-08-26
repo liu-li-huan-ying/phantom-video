@@ -20,12 +20,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: w64devkit
-          key: w64devkit-2.0.0
+          key: w64devkit-2.9.1
 
       - name: Download w64devkit
         if: steps.cache-w64.outputs.cache-hit != 'true'
         run: |
-          Invoke-WebRequest -Uri "https://github.com/skeeto/w64devkit/releases/download/v2.0.0/w64devkit-2.0.0.zip" -OutFile "w64devkit.zip"
+          Invoke-WebRequest -Uri "https://github.com/skeeto/w64devkit/releases/download/v2.9.1/w64devkit-2.9.1.zip" -OutFile "w64devkit.zip"
           Expand-Archive -Path "w64devkit.zip" -DestinationPath "w64devkit"
           Remove-Item "w64devkit.zip"
 
