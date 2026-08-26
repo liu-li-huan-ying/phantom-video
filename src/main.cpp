@@ -984,6 +984,21 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     }
 
+    // ---- 焦点管理: 父窗口失去焦点时隐藏 overlay, 避免浮在其他窗口上面 ----
+    case WM_ACTIVATEAPP: {
+        bool active = (wp != 0);
+        LOG_DBG("MAIN", "WM_ACTIVATEAPP active=%d", active);
+        if (g_sdlWin && !g_ui.miniMode) {
+            if (active) {
+                SDL_ShowWindow(g_sdlWin);
+                raiseOverlayAbove();
+            } else {
+                SDL_HideWindow(g_sdlWin);
+            }
+        }
+        return 0;
+    }
+
     // ---- keyboard ----
     case WM_KEYDOWN: {
         if (g_mpv) {
