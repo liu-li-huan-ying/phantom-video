@@ -11,52 +11,48 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
     steps:
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-pkg-config
+            mingw-w64-x86_64-SDL2
+            make
+
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Cache w64devkit
-        id: cache-w64
-        uses: actions/cache@v4
-        with:
-          path: w64devkit
-          key: w64devkit-2.9.1
-
-      - name: Download w64devkit
-        if: steps.cache-w64.outputs.cache-hit != 'true'
-        shell: bash
-        run: |
-          curl -L -o w64devkit.7z.exe "https://github.com/skeeto/w64devkit/releases/download/v2.9.1/w64devkit-x64-2.9.1.7z.exe"
-          7z x w64devkit.7z.exe -ow64devkit -y
-          rm w64devkit.7z.exe
-
       - name: Build
-        shell: bash
         run: |
-          export PATH="$PWD/w64devkit/bin:$PATH"
-          # sh.exe 干扰 MinGW Makefiles 生成器
-          [ -f w64devkit/bin/sh.exe ] && mv w64devkit/bin/sh.exe w64devkit/bin/sh.exe.bak
-          cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
+          # MSYS2 的 sh.exe 不干扰（已经是 mingw64 shell）
+          cmake -S . -B build -G "MinGW Makefiles" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=gcc \
+            -DCMAKE_CXX_COMPILER=g++
           cmake --build build
-          [ -f w64devkit/bin/sh.exe.bak ] && mv w64devkit/bin/sh.exe.bak w64devkit/bin/sh.exe
 
       - name: Get version
         id: version
-        shell: bash
         run: echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
       - name: Package
+        shell: pwsh
         run: |
           $ver = "${{ steps.version.outputs.tag }}"
           $dir = "phantom_video-$ver-win64"
           New-Item -ItemType Directory -Path $dir -Force | Out-Null
-          # exe + DLLs (CMake 已拷贝到 build/)
           Copy-Item "build\phantom_video.exe" "$dir\"
           Get-ChildItem "build\*.dll" | Copy-Item -Destination "$dir\"
-          # 资源
           if (Test-Path "build\assets") { Copy-Item "build\assets" "$dir\assets" -Recurse }
           if (Test-Path "build\ico") { Copy-Item "build\ico" "$dir\ico" -Recurse }
-          # 打包
           Compress-Archive -Path $dir -DestinationPath "$dir.zip"
           echo "ZIP=$dir.zip" >> $env:GITHUB_ENV
 
