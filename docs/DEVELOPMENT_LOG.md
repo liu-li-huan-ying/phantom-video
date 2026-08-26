@@ -2036,6 +2036,12 @@ overlay 选了 LWA_COLORKEY（二值透明）而非 UpdateLayeredWindow per-pixe
 2. **software 渲染器必要性**：GPU 渲染器的 ReadPixels 行为不可预测（可能丢 alpha），强制 software 确保一致
 3. **z-order 陷阱**：外部脚本 SetWindowPos(HWND_TOPMOST) 提升 parent 会压住 overlay（同在 topmost 带内按序决定），需同时提升 overlay 到带顶
 4. **SetForegroundWindow 限制**：Windows 不允许非前台进程调用 SetForegroundWindow，需 Alt 键技巧（keybd_event VK_MENU down+up）绕过
+5. **mouse_event 无法穿透前景窗口**：用户正在使用浏览器/IDE 时，mouse_event 发送的点击全部落到了前景窗口，vplayer 完全收不到 → 解决：用户暂停操作 + 截图前先 SetForegroundWindow
+6. **PowerShell `Move` 函数名冲突**：定义的 `Move` 函数被 PowerShell 的 `Move-Item` cmdlet 覆盖，调用 `Move 900 500` 变成 `Move-Item 900 500`（尝试移动路径 "900"）→ step 0 全部失败；后改用 `SetCursorPos` API 直接调用绕过
+7. **PowerShell 内联 Add-Type RECT 结构 typo**：`public intB;` 缺少空格变成 `public intB;`（解析为类型名 `intB` 而非 `int B`），C# 编译失败 → 需在文件脚本中编写，内联单行极易出错
+8. **`Start-Sleep` + 跨 PowerShell 进程调用超时**：`Start-Sleep 600; powershell -File ...` 组合命令被120秒超时截断 → 改为单个 ps1 脚本内部处理所有延迟
+9. **语言切换坐标偏差**：panelY 计算公式 `(H-650)/2` 得到8（正确），但 langRow 偏移 `panelY + 69 + 10*50 + 45 = 622` 算出 screen Y=757，实际按钮在 ~786 → 根因未查明（settings 面板内行高/偏移可能与代码不一致），需后续用精确坐标工具校准
+10. **截图确认无误 ≠ 功能完全正确**：Step 2 语言切换"面板渲染正确但未实际切换"说明 UI 展示与功能逻辑分离——后续需单独验证功能（如切换后截图对比文字变化）
 
 #### 提交
-- 待提交（本轮所有改动）
+- `31deb38` M34a Phase 19: ULW逐像素透明迁移 + 模态弹窗 + i18n双语 + EOF死锁修复
