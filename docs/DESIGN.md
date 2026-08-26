@@ -1,4 +1,4 @@
-# VPlayer 设计文档
+# 幻影视频 设计文档
 
 ## 1. 总体架构
 
@@ -199,6 +199,6 @@ while (true) {
 
 1. **SDL main 宏**：`SDL_main.h` 会把 `main` 宏替换为 `SDL_main`，C++ 下会因符号修饰导致链接错误。本工程统一 `#define SDL_MAIN_HANDLED` 后写普通 `main`，链接时不带 `-lSDL2main`（保留控制台便于调试；发布版可换 `WinMain`）。
 2. **FFmpeg 新版 API**：音频使用新版 `AVChannelLayout`（`ch_layout` 字段）；swr 用 `swr_alloc` + `av_opt_set_*`（`av_opt_set_chlayout`/`av_opt_set_sample_fmt`）配置，不再用旧 API。
-3. **DLL 分发**：运行需要 `F:\dev\ffmpeg-9.0.1-full_build-shared\bin`、`F:\dev\sdl2\x86_64-w64-mingw32\bin` 下的 DLL，CMake 已自动拷贝到 build 目录；发布时需随 exe 分发。
-4. **零第三方模块**：不使用 vcpkg/conan，依赖全部用 pkg-config 定位（本机 `F:\dev`）。
-5. **磁盘约束**：构建产物一律放 F 盘 `build\`，不装任何东西到 C 盘。
+3. **DLL 分发**：运行需要 FFmpeg / SDL2 / libmpv 的运行时 DLL，CMake 已自动拷贝到 build 目录；发布时需随 exe 分发。
+4. **零第三方模块**：不使用 vcpkg/conan，依赖全部用 pkg-config 定位。
+5. **磁盘约束**：构建产物一律放 build 目录，不装任何东西到系统盘。

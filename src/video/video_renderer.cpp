@@ -1389,7 +1389,7 @@ void VideoRenderer::drawWelcome(const std::vector<std::string>& historyNames) {
         { {0,(float)TOPBAR_H}, cBot,{} },
     };
     SDL_RenderGeometry(renderer_, nullptr, grad, 6, nullptr, 0);
-    gdi_.drawText(16, (TOPBAR_H - 18) / 2 + 2, "VPlayer", 14, 255, 255, 255);
+    gdi_.drawText(16, (TOPBAR_H - 18) / 2 + 2, "幻影视频", 14, 255, 255, 255);
 
     // 居中容器
     const int CW = std::min(720, playerW - 40);
@@ -1399,7 +1399,7 @@ void VideoRenderer::drawWelcome(const std::vector<std::string>& historyNames) {
     // Logo
     svgicon::draw(renderer_, "play", cx + CW / 2, cy + 18, 32, 0x25, 0x63, 0xeb, 230);
     cy += 50;
-    gdi_.drawText(cx + CW / 2 - 42, cy, "VPlayer", 20, 255, 255, 255);
+    gdi_.drawText(cx + CW / 2 - 42, cy, "幻影视频", 20, 255, 255, 255);
     cy += 32;
 
     // 副标题

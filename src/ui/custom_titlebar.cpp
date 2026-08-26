@@ -270,7 +270,7 @@ void CustomTitlebar::draw(SDL_Renderer* renderer) {
     SDL_Rect sepLine{ 0, height - 1, winW, 1 };
     SDL_RenderFillRect(renderer, &sepLine);
 
-    // 左侧：logo + "VPlayer"（GDI 渲染）
+    // 左侧：logo + "幻影视频"（GDI 渲染）
     ensureLogo(renderer);
     int logoLeft = 12;
     if (gLogoTex) {
@@ -279,9 +279,9 @@ void CustomTitlebar::draw(SDL_Renderer* renderer) {
         logoLeft += 26;
     }
 
-    // "VPlayer" 标签
+    // "幻影视频" 标签
     int labelW = 0, labelH = 0;
-    SDL_Texture* labelTex = renderTextGDI(renderer, "VPlayer", 14, 200, 200, 200, labelW, labelH);
+    SDL_Texture* labelTex = renderTextGDI(renderer, "幻影视频", 14, 200, 200, 200, labelW, labelH);
     if (labelTex) {
         SDL_Rect dst{ logoLeft, (height - labelH) / 2, labelW, labelH };
         SDL_RenderCopy(renderer, labelTex, nullptr, &dst);

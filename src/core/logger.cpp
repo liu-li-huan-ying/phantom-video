@@ -51,7 +51,7 @@ void Logger::cleanupOldLogs(int keepDays) {
 
 #ifdef _WIN32
     WIN32_FIND_DATAA fd;
-    std::string pattern = logDir_ + "\\vplayer_*.log";
+    std::string pattern = logDir_ + "\\phantom_*.log";
     HANDLE h = FindFirstFileA(pattern.c_str(), &fd);
     if (h == INVALID_HANDLE_VALUE) return;
 
@@ -62,7 +62,7 @@ void Logger::cleanupOldLogs(int keepDays) {
         if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
         std::string name = fd.cFileName;
         if (name.size() < 20) continue;
-        if (name.substr(0, 8) != "vplayer_") continue;
+        if (name.substr(0, 8) != "phantom_") continue;
         std::string dateStr = name.substr(8, 10);
         int y, m, d;
         if (sscanf(dateStr.c_str(), "%d-%d-%d", &y, &m, &d) != 3) continue;

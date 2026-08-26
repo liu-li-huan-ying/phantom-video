@@ -1778,7 +1778,7 @@ static const Uint8 TRANSPARENT_B = 0;
 static bool createOverlay(HWND parent, int w, int h) {
     // 顶层无边框窗口（本系统不支持 WS_EX_LAYERED 子窗口，实测 err=87）
     // 通过 OWNER 关联 + TOOLWINDOW 融入主窗口：不进任务栏/Alt+Tab，随主窗口关闭
-    g_sdlWin = SDL_CreateWindow("VPlayer UI",
+    g_sdlWin = SDL_CreateWindow("Phantom Video",
         SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, w, h,
         SDL_WINDOW_SHOWN | SDL_WINDOW_BORDERLESS);
     if (!g_sdlWin) {
@@ -2085,7 +2085,7 @@ static void renderOverlay() {
         // topbar still visible (glass: 半透明)
         drawGradientBar(g_sdlRdr, 0, 0, 0, w, S(ui::TOPBAR_H), 11, 11, 11, 150, 0);
         // title
-        g_text.drawText(S(20), S(14), "VPlayer", 14, 255, 255, 255);
+        g_text.drawText(S(20), S(14), "幻影视频", 14, 255, 255, 255);
         // topbar icons
         int iconY = S(ui::TOPBAR_H) / 2;
         int rx = w - S(20);
@@ -2095,7 +2095,7 @@ static void renderOverlay() {
 
         // logo
         svgicon::draw(g_sdlRdr, "play", w / 2, h / 2 - S(80), S(64), 37, 99, 235, 255);
-        g_text.drawText(w / 2 - S(40), h / 2 - S(30), "VPlayer", 28, 255, 255, 255);
+        g_text.drawText(w / 2 - S(40), h / 2 - S(30), "幻影视频", 28, 255, 255, 255);
 
         // drop zone (dashed border)
         int dzW = S(400), dzH = S(120);
@@ -2199,7 +2199,7 @@ static void renderOverlay() {
 
         // title (left)
         std::string title = g_mpv->title();
-        if (title.empty()) title = "VPlayer";
+        if (title.empty()) title = "幻影视频";
         if (title.size() > 55) title = title.substr(0, 52) + "...";
         g_text.drawText(S(20), S(14) + topOff, title, 14, 255, 255, 255);
 
@@ -2965,12 +2965,12 @@ int main(int argc, char** argv) {
     enableDpiAwareness();
     (void)argc; (void)argv;
 
-    Logger::instance().init("vplayer", 7);
+    Logger::instance().init("phantom", 7);
     bool diag = false;
     for (int i = 1; i < argc; ++i)
         if (std::string(argv[i]) == "--debug") { diag = true; break; }
     Logger::instance().setLevel(diag ? LogLevel::Trace : LogLevel::Warn);
-    LOG_INFO("MAIN", "vplayer (mpv + SDL2 overlay) starting");
+    LOG_INFO("MAIN", "phantom video (mpv + SDL2 overlay) starting");
 
     loadConfig(configPath(), g_cfg);
 
@@ -2987,7 +2987,7 @@ wc.style         = CS_DBLCLKS;   // 接收 WM_LBUTTONDBLCLK
     wc.lpfnWndProc   = parentProc;
     wc.hInstance      = GetModuleHandleW(nullptr);
     wc.hCursor        = LoadCursor(nullptr, IDC_ARROW);
-    wc.lpszClassName  = L"VPlayerParent";
+    wc.lpszClassName  = L"PhantomParent";
     wc.hbrBackground  = (HBRUSH)GetStockObject(BLACK_BRUSH);
     RegisterClassExW(&wc);
 
@@ -3007,7 +3007,7 @@ wc.style         = CS_DBLCLKS;   // 接收 WM_LBUTTONDBLCLK
         LOG_INFO("MAIN", "restore window pos (%d,%d) %dx%d", winX, winY, winW, winH);
     }
     g_parentHwnd = CreateWindowExW(WS_EX_ACCEPTFILES,
-        wc.lpszClassName, L"VPlayer",
+        wc.lpszClassName, L"幻影视频",
         WS_POPUP | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX,
         winX, winY, winW, winH,
         nullptr, nullptr, wc.hInstance, nullptr);
@@ -3291,6 +3291,6 @@ wc.style         = CS_DBLCLKS;   // 接收 WM_LBUTTONDBLCLK
     DestroyWindow(g_parentHwnd);
     UnregisterClassW(wc.lpszClassName, wc.hInstance);
     SDL_Quit();
-    LOG_INFO("MAIN", "vplayer exiting");
+    LOG_INFO("MAIN", "phantom video exiting");
     return 0;
 }

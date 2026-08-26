@@ -27,9 +27,9 @@ std::string exeDir() {
 
 std::string configPath() {
 #ifdef _WIN32
-    return exeDir() + "vplayer.ini";
+    return exeDir() + "phantom.ini";
 #else
-    return "vplayer.ini";
+    return "phantom.ini";
 #endif
 }
 
@@ -97,7 +97,7 @@ bool loadConfig(const std::string& path, AppConfig& out) {
 bool saveConfig(const std::string& path, const AppConfig& cfg) {
     std::ofstream out(path, std::ios::binary | std::ios::trunc);
     if (!out) return false;
-    out << "# vplayer config (UTF-8)\n";
+    out << "# phantom config (UTF-8)\n";
     out << "volume=" << cfg.volume << "\n";
     out << "speed=" << cfg.speed << "\n";
     out << "last=" << cfg.lastFile << "\n";

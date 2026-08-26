@@ -1,10 +1,10 @@
-VPlayer 进程
-├─ Win32 parent (VPlayerParent, 输入处理 parentProc)
+幻影视频进程
+├─ Win32 parent (PhantomParent, 输入处理 parentProc)
 │   ├─ mpv 子窗口 (STATIC, --wid → D3D11VA 零拷贝)
 │   │    └─ mpvRelayProc: 子类化中继, 鼠标/键盘转发给 parent
 │   └─ (overlay 悬浮其上)
 └─ SDL2 overlay (SDL_app, owned 顶层窗口)
-     ├─ WS_EX_LAYERED + LWA_COLORKEY(品红=穿透) + TOOLWINDOW + TOPMOST
+     ├─ WS_EX_LAYERED + ULW per-pixel alpha + TOOLWINDOW + TOPMOST
      ├─ 渲染: 控制栏/顶栏/弹层/Toast/OSD/列表面板
      ├─ GdiTextCache(GDI 文字→纹理) / svgicon(SVG path 光栅化)
      └─ ThumbWorker 线程(FFmpeg 解码 RGB)
@@ -16,4 +16,4 @@ VPlayer 进程
   playPath() ─> MpvBackend.loadFile() ─> mpv 事件线程 ─> onFileLoaded(续播 seek)
                                         └> onPlaybackEnded(playMode 连播)
   主循环: PeekMessage(Win32) ─> renderOverlay(SDL2) @~60fps
-  配置: vplayer.ini <-> AppConfig (启动加载/退出+变更即时保存)
+  配置: phantom.ini <-> AppConfig (启动加载/退出+变更即时保存)
