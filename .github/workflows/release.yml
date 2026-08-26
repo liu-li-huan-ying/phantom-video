@@ -24,23 +24,21 @@ jobs:
 
       - name: Download w64devkit
         if: steps.cache-w64.outputs.cache-hit != 'true'
+        shell: bash
         run: |
-          Invoke-WebRequest -Uri "https://github.com/skeeto/w64devkit/releases/download/v2.9.1/w64devkit-2.9.1.zip" -OutFile "w64devkit.zip"
-          Expand-Archive -Path "w64devkit.zip" -DestinationPath "w64devkit"
-          Remove-Item "w64devkit.zip"
+          curl -L -o w64devkit.7z.exe "https://github.com/skeeto/w64devkit/releases/download/v2.9.1/w64devkit-x64-2.9.1.7z.exe"
+          7z x w64devkit.7z.exe -ow64devkit -y
+          rm w64devkit.7z.exe
 
       - name: Build
+        shell: bash
         run: |
-          $env:PATH = "$pwd\w64devkit\bin;$env:PATH"
-          # w64devkit 的 sh.exe 干扰 MinGW Makefiles
-          if (Test-Path "w64devkit\bin\sh.exe") {
-            Rename-Item "w64devkit\bin\sh.exe" "sh.exe.bak"
-          }
+          export PATH="$PWD/w64devkit/bin:$PATH"
+          # sh.exe 干扰 MinGW Makefiles 生成器
+          [ -f w64devkit/bin/sh.exe ] && mv w64devkit/bin/sh.exe w64devkit/bin/sh.exe.bak
           cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
           cmake --build build
-          if (Test-Path "w64devkit\bin\sh.exe.bak") {
-            Rename-Item "w64devkit\bin\sh.exe.bak" "sh.exe"
-          }
+          [ -f w64devkit/bin/sh.exe.bak ] && mv w64devkit/bin/sh.exe.bak w64devkit/bin/sh.exe
 
       - name: Get version
         id: version
