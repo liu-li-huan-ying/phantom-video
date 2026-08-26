@@ -1546,6 +1546,9 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             if (ratio < 0) ratio = 0; if (ratio > 1) ratio = 1;
             g_ui.seekTarget = g_mpv->duration() * ratio;
             SetCapture(hwnd);
+            g_ui.visible = true;
+            g_ui.hideAt = SDL_GetTicks() + ui::CTRLBAR_HIDE_MS;
+            return 0;  // seekbar 点击不穿透到视频区
         }
         // --- controlbar row1 命中（与渲染共用 Row1Layout）---
         {
