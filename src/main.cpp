@@ -110,6 +110,9 @@ struct UiState {
     bool   seekingDrag   = false;
     double seekTarget    = 0.0;
 
+    // topbar icon hover (-1=none, 0=close, 1=maximize, ...)
+    int    topbarHover   = -1;
+
     // speed popup
     bool   speedMenuOpen = false;
 
@@ -385,6 +388,7 @@ struct Row1Layout {
 
 static void showToast(const char* msg);
 static const char* qualityLabel();
+static void renderOverlay();
 
 static void layoutRow1(int w, int h, bool volOpen, Row1Layout& L) {
     const int pad = U(16);
@@ -964,11 +968,12 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 rc.right, rc.bottom, wp, panelExtra, g_ui.winW);
         if (g_mpvHwnd) MoveWindow(g_mpvHwnd, 0, 0, g_ui.winW, rc.bottom, TRUE);
         if (g_sdlWin) {
-            // overlay 覆盖整个客户区(含右侧列表区); 视频区布局由 winW 约束
             POINT pt = {0,0}; ClientToScreen(hwnd, &pt);
             SDL_SetWindowPosition(g_sdlWin, pt.x, pt.y);
             SDL_SetWindowSize(g_sdlWin, rc.right, rc.bottom);
         }
+        // 即时重绘 — 不等主循环唤醒
+        renderOverlay();
         return 0;
     }
     case WM_DPICHANGED: {
@@ -1173,6 +1178,9 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         bool onTopbar = (g_ui.mouseY >= 0 && g_ui.mouseY <= curTopH());
         g_ui.visible = true;
         g_ui.hideAt = SDL_GetTicks() + (onTopbar ? 4000 : ui::CTRLBAR_HIDE_MS);
+
+        // topbar icon hover
+        g_ui.topbarHover = onTopbar ? hitTestTopbarIcon(g_ui.mouseX, g_ui.mouseY, g_ui.totalW) : -1;
 
         // 音量滑条 hover 自动展开；离开 1.2s 后收起（拖拽中不收）
         if (inVolumeArea(g_ui.mouseX, g_ui.mouseY)) {
@@ -2027,8 +2035,8 @@ static bool ulwResize(int w, int h) {
 
 static void overlayPresent() {
     if (!g_sdlRdr || !g_sdlWin || !g_overlayHwnd) return;
-    int w, h;
-    SDL_GetWindowSize(g_sdlWin, &w, &h);
+    int w = g_ui.totalW > 0 ? g_ui.totalW : g_ui.winW;
+    int h = g_ui.winH > 0 ? g_ui.winH : 540;
     if (w <= 0 || h <= 0 || !g_ovTex) return;
 
     if (g_ulw.w != w || g_ulw.h != h) {
@@ -2099,8 +2107,9 @@ static void renderOverlay() {
     uploadThumbs(g_sdlRdr);   // 惰性上传就绪的缩略图纹理
 
     // 所有 UI 画入离屏 ARGB 纹理(真 alpha); 后备缓冲不使用
-    int ow, oh;
-    SDL_GetWindowSize(g_sdlWin, &ow, &oh);
+    // 直接用 g_ui.winW/winH (WM_SIZE 已更新), 不走 SDL_GetWindowSize 避免延迟
+    int ow = g_ui.totalW > 0 ? g_ui.totalW : g_ui.winW;
+    int oh = g_ui.winH > 0 ? g_ui.winH : 540;
     if (ow <= 0 || oh <= 0) return;
     if (!ovTexEnsure(ow, oh)) return;
     SDL_SetRenderTarget(g_sdlRdr, g_ovTex);
@@ -2122,9 +2131,9 @@ static void renderOverlay() {
         int iconY = curTopH() / 2;
         int icoSp = U(34);
         int rx = w - U(20);
-        svgicon::draw(g_sdlRdr, "close",    rx, iconY, U(20), 255, 255, 255, 200); rx -= icoSp;
-        svgicon::draw(g_sdlRdr, "maximize", rx, iconY, U(20), ui::ICON_DIM, ui::ICON_DIM, ui::ICON_DIM + 5, 200); rx -= icoSp;
-        svgicon::draw(g_sdlRdr, "minimize", rx, iconY, U(20), ui::ICON_DIM, ui::ICON_DIM, ui::ICON_DIM + 5, 200);
+        svgicon::draw(g_sdlRdr, "close",    rx, iconY, U(20), 255, 255, 255, 240); rx -= icoSp;
+        svgicon::draw(g_sdlRdr, "maximize", rx, iconY, U(20), 235, 235, 235, 240); rx -= icoSp;
+        svgicon::draw(g_sdlRdr, "minimize", rx, iconY, U(20), 235, 235, 235, 240);
 
         // logo
         svgicon::draw(g_sdlRdr, "play", w / 2, h / 2 - U(80), U(64), 37, 99, 235, 255);
@@ -2236,20 +2245,38 @@ static void renderOverlay() {
         if (title.size() > 55) title = title.substr(0, 52) + "...";
         g_text.drawText(U(20), U(14) + topOff, title, T(14), 255, 255, 255);
 
-        // icons (right) - same order as design mockup
+        // icons (right) — 纯白图标 + 悬停高亮背景
         int topH = U(52);
         int iconY = topH / 2 + topOff;
         auto A = [&](Uint8 base) { return (Uint8)(base * fa); };
         int iconSz = U(34);
+        int iconDrawSz = U(20);
+        int hoverR = iconSz / 2 + U(2);
         int rx = w - U(20);
-        svgicon::draw(g_sdlRdr, "close",    rx, iconY, U(20), 255, 255, 255, A(200)); rx -= iconSz;
-        svgicon::draw(g_sdlRdr, "maximize", rx, iconY, U(20), ui::ICON_DIM, ui::ICON_DIM, ui::ICON_DIM + 5, A(200)); rx -= iconSz;
-        svgicon::draw(g_sdlRdr, "minimize", rx, iconY, U(20), ui::ICON_DIM, ui::ICON_DIM, ui::ICON_DIM + 5, A(200)); rx -= iconSz;
-        svgicon::draw(g_sdlRdr, "list",     rx, iconY, U(20), ui::ICON_DIM, ui::ICON_DIM, ui::ICON_DIM + 5, A(200)); rx -= iconSz;
-        svgicon::draw(g_sdlRdr, "pip",      rx, iconY, U(20),
-            g_ui.miniMode ? 37 : ui::ICON_DIM, g_ui.miniMode ? 99 : ui::ICON_DIM,
-            g_ui.miniMode ? 235 : ui::ICON_DIM + 5, A(200)); rx -= iconSz;
-        svgicon::draw(g_sdlRdr, "camera",   rx, iconY, U(20), ui::ICON_DIM, ui::ICON_DIM, ui::ICON_DIM + 5, A(200));
+        struct TopDef { const char* id; };
+        const TopDef topIcons[] = {
+            {"close"}, {"maximize"}, {"minimize"},
+            {"list"}, {"pip"}, {"camera"}
+        };
+        for (int i = 0; i < 6; ++i) {
+            // 悬停背景
+            if (g_ui.topbarHover == i) {
+                SDL_SetRenderDrawBlendMode(g_sdlRdr, SDL_BLENDMODE_BLEND);
+                if (i == 0) {
+                    // close: 红色悬停
+                    SDL_SetRenderDrawColor(g_sdlRdr, 232, 17, 35, A(240));
+                } else {
+                    SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, A(50));
+                }
+                SDL_Rect hrc = {rx - hoverR, iconY - hoverR, hoverR * 2, hoverR * 2};
+                SDL_RenderFillRect(g_sdlRdr, &hrc);
+            }
+            // 纯白图标, 非悬停时略暗
+            Uint8 ic = (g_ui.topbarHover == i) ? 255 : 235;
+            svgicon::draw(g_sdlRdr, topIcons[i].id, rx, iconY, iconDrawSz,
+                          ic, ic, ic, A(255));
+            rx -= iconSz;
+        }
     }
 
     // 控件淡出: 控制栏随 alpha 滑出屏底

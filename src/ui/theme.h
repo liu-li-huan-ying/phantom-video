@@ -17,20 +17,20 @@ constexpr float BORDER_A = 0.10f;   // --border
 constexpr float HOVER_A = 0.08f;    // --hover
 constexpr float ACTIVE_A = 0.14f;   // --active
 
-// ---- 渐变 alpha (增强可见度, 透明视频背景下清晰可辨) ----
-constexpr Uint8 TOPBAR_A0 = 200;    // 顶栏渐变顶部 (78%)
-constexpr Uint8 CTRLBAR_A0 = 210;   // 控制栏渐变顶部 (82%)
-constexpr Uint8 CTRLBAR_A1 = 40;    // 控制栏渐变底部 (16%, 保底可见)
+// ---- 渐变 alpha ----
+constexpr Uint8 TOPBAR_A0 = 210;    // 顶栏渐变顶部 (82%)
+constexpr Uint8 CTRLBAR_A0 = 220;   // 控制栏渐变顶部 (86%)
+constexpr Uint8 CTRLBAR_A1 = 50;    // 控制栏渐变底部 (20%)
 
-// ---- 按钮/文字颜色 (增强对比度) ----
-constexpr Uint8 ICON_BRIGHT = 240;  // 图标亮色 (原 228)
-constexpr Uint8 TEXT_DIM = 210;     // 文字按钮色 (原 200, 偏白)
-constexpr Uint8 ICON_DIM = 190;     // 次要图标色 (原 161)
-constexpr Uint8 TIME_TEXT_R = 190, TIME_TEXT_G = 190, TIME_TEXT_B = 196; // 时间文字 (原 161,161,166)
+// ---- 按钮/文字颜色 (高对比度, 深色背景上清晰可辨) ----
+constexpr Uint8 ICON_BRIGHT = 255;  // 主要图标 (纯白)
+constexpr Uint8 TEXT_DIM = 235;     // 文字按钮 (亮灰白)
+constexpr Uint8 ICON_DIM = 220;     // 次要图标 (亮灰)
+constexpr Uint8 TIME_TEXT_R = 210, TIME_TEXT_G = 210, TIME_TEXT_B = 216; // 时间/次要文字
 
 // ---- seekbar 颜色 ----
-constexpr Uint8 SEEK_TRACK_A = 60;  // 轨道背景 alpha (原 25)
-constexpr Uint8 SEEK_BUF_A = 80;    // 缓冲区 alpha (原 45)
+constexpr Uint8 SEEK_TRACK_A = 70;  // 轨道背景
+constexpr Uint8 SEEK_BUF_A = 90;    // 缓冲区
 
 // ---- 尺寸/圆角 ----
 constexpr int RADIUS_WINDOW = 14;
@@ -44,8 +44,8 @@ constexpr int ICONBTN_MIN = 34;
 constexpr int PLAYBTN_MIN = 42;
 constexpr int TOPBAR_H_MIN = 52;
 constexpr int CTRLBAR_H_MIN = 80;
-constexpr int SEEKBAR_H_MIN = 6;     // 正常高度 (原 4)
-constexpr int SEEKBAR_H_HOVER_MIN = 10; // 悬停高度 (原 6)
+constexpr int SEEKBAR_H_MIN = 6;
+constexpr int SEEKBAR_H_HOVER_MIN = 10;
 constexpr int SEEKTHUMB_D = 13;
 constexpr int VOLSIDER_W = 80;
 constexpr int MARGIN_MIN = 16;
