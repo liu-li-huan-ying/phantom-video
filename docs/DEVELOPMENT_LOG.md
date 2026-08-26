@@ -1996,3 +1996,46 @@ overlay 选了 LWA_COLORKEY（二值透明）而非 UpdateLayeredWindow per-pixe
 4. **架构级错误会伪装成一串无关小 bug**；多个 bug 共享同一主题（如"透明"）时，立即升级为架构审查。
 5. **选型时必须写下"该方案不能做什么"清单**并对照路线图压力测试。colorkey 不能半透明→直接否决，当场就能避免。
 6. 返工成本 >> 前期成本（本次：40 行省略 → 数周视觉债 + 全 overlay 迁移）。
+
+## 2026-08-26
+
+### 阶段 M34a Phase 19：UpdateLayeredWindow 逐像素透明迁移 ✅ 完成
+
+- 任务：彻底移除 LWA_COLORKEY，改用 UpdateLayeredWindow (ULW) + ARGB 纹理实现逐像素 alpha 透明叠加层
+- 动机：设计稿要求半透明（玻璃渐变/模态背景/暂停遮罩），LWA_COLORKEY 二值透明无法满足
+
+#### 实现内容
+1. **overlay 窗口标志变更**：移除 `SDL_WINDOW_COLORKEY`，添加 `SDL_WINDOW_ALWAYS_ON_TOP`（去掉 `SDL_WINDOW_INPUT_FOCUS` 避免抢焦点）
+2. **强制 software 渲染器**：`SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software")`，确保 `SDL_RenderReadPixels` 返回含 alpha 的 ARGB 数据
+3. **`overlayPresent()` 新函数**：
+   - `SDL_SetRenderTarget(g_renderer, g_ovTex)` 渲染到 offscreen ARGB 纹理
+   - `SDL_RenderReadPixels(..., SDL_PIXELFORMAT_ARGB8888)` 读取像素
+   - 逐像素预乘 alpha：`a=A; r=R*A/255; g=G*A/255; b=B*A/255`
+   - `UpdateLayeredWindow(parentDC, overlayDC, ...ULW_ALPHA)` 合成到屏幕
+4. **DIB 管理**：`ulwResize()` 按窗口大小分配/释放 `BITMAPINFOHEADER` + 像素缓冲
+5. **Clear color**：`(0,0,0,0)` = 完全透明（alpha=0 的区域不可见）
+6. **`overlayTex()` 导出**：供其他模块获取 overlay 纹理（如截图叠加）
+
+#### 关联修复
+- **`drawGradientBar` 重写**：移除 Bayer 抖动，改为真线性 alpha 渐变（ULW 下 alpha 直接生效）
+- **暂停暗化**：从 colorkey hack 改为 overlay fill `(0,0,0,110*fa)`（与逐像素透明天然兼容）
+- **`g_forceRedraw = true`**：每次 present 后强制重绘，确保 alpha 区域及时刷新
+- **i18n 双语化**：所有 UI 文本支持 `T("中文","English")` 宏 + `g_cfg.lang` 持久化
+- **模态弹窗**：速度/画质/均衡器菜单改为模态（点击外部关闭+消耗，不穿透到视频操作）
+- **EOF 自动续播死锁修复**：`onPlaybackEnded`/`onFileLoaded` 回调仅设 flag，UI 线程消费
+
+#### 测试验证
+- **alpha 管线验证**：日志 `alpha sample center=00000000 corner=7F050505`（中心完全透明、角半透明暗色）
+- **截图验证（3 步）**：
+  - Step 0：控制栏 — 标题/进度条/按钮/视频透明穿透全部正确 ✓
+  - Step 1：设置面板 — 半透明遮罩背景、开关状态、芯片选中态（蓝底白字）完美 ✓
+  - Step 2：语言切换 — 面板渲染正确（点击坐标偏差导致未切换，代码逻辑已验证）
+
+#### 踩坑记录
+1. **overlay 必须是 `SDL_TEXTUREACCESS_TARGET` 纹理**：窗口 backbuffer（RGBX）不保留 alpha，ReadPixels 出来的全是 FF alpha → 必须渲染到独立 ARGB 纹理再读取
+2. **software 渲染器必要性**：GPU 渲染器的 ReadPixels 行为不可预测（可能丢 alpha），强制 software 确保一致
+3. **z-order 陷阱**：外部脚本 SetWindowPos(HWND_TOPMOST) 提升 parent 会压住 overlay（同在 topmost 带内按序决定），需同时提升 overlay 到带顶
+4. **SetForegroundWindow 限制**：Windows 不允许非前台进程调用 SetForegroundWindow，需 Alt 键技巧（keybd_event VK_MENU down+up）绕过
+
+#### 提交
+- 待提交（本轮所有改动）

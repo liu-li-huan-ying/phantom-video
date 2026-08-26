@@ -425,15 +425,6 @@ static void showToast(const char* msg) {
     g_ui.toastStart = SDL_GetTicks();
 }
 
-// 暂停压暗: 直接调 mpv 的 brightness 让视频画面本身均匀变暗
-// (colorkey overlay 无法做真半透明遮罩; mpv 层压暗画质无损且无噪点)
-static void applyPauseDim(bool paused) {
-    if (!g_mpv || !g_mpv->mpv()) return;
-    int64_t v = paused ? -30 : 0;
-    mpv_set_property(g_mpv->mpv(), "brightness", MPV_FORMAT_INT64, &v);
-    LOG_INFO("MAIN", "pause dim -> %d", paused ? 1 : 0);
-}
-
 static const char* qualityLabel() {
     if (!g_mpv) return "---";
     int h = g_mpv->videoHeight();
@@ -1286,8 +1277,22 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         LOG_TRACE("MAIN", "parent LBUTTONDOWN (%d,%d) barTop=%d settings=%d playlist=%d",
                   mx, my, barTop, g_ui.settingsOpen ? 1 : 0, g_ui.playlistOpen ? 1 : 0);
 
-        // --- topbar icon clicks ---
-        if (my >= 0 && my <= S(ui::TOPBAR_H)) {
+        // --- 播放列表关闭钮: 最高优先级 ---
+        // (y 在 topbar 高度内会被 topbar 分支拦截: 窗口模式变拖拽, 全屏时与
+        //  应用关闭图标重叠导致误关整个程序)
+        if (g_ui.playlistOpen && g_ui.plCloseRect.w > 0 &&
+            mx >= g_ui.plCloseRect.x && mx <= g_ui.plCloseRect.x + g_ui.plCloseRect.w &&
+            my >= g_ui.plCloseRect.y && my <= g_ui.plCloseRect.y + g_ui.plCloseRect.h) {
+            g_ui.playlistOpen = false;
+            LOG_INFO("MAIN", "playlist close btn");
+            if (!g_ui.fullscreen) applyPlaylistWindow(hwnd);
+            else g_dirty.store(true);
+            return 0;
+        }
+
+        // --- topbar icon clicks (列表展开时列表区域不属于 topbar) ---
+        bool inPlaylistArea = (g_ui.playlistOpen && !g_ui.fullscreen && mx >= g_ui.winW);
+        if (my >= 0 && my <= S(ui::TOPBAR_H) && !inPlaylistArea) {
             int icon = hitTestTopbarIcon(mx, my, g_ui.winW);
             LOG_TRACE("MAIN", "topbar click mx=%d my=%d winW=%d icon=%d", mx, my, g_ui.winW, icon);
             switch (icon) {
@@ -1402,6 +1407,97 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;   // 设置打开期间点击不再下传到进度条/控制栏/视频
         }
 
+        // --- 弹出菜单模态层(倍速/画质/EQ): 打开期间任意点击只作用于弹层 ---
+        // 点击菜单项=生效; 点击菜单外=仅关闭。绝不触发视频暂停/进度条/按钮,
+        // 消除"弹层点击穿透作用到后面"的问题。
+        if (g_ui.speedMenuOpen || g_ui.qualityMenuOpen || g_ui.eqMenuOpen) {
+            if (g_ui.speedMenuOpen) {
+                Row1Layout L;
+                layoutRow1(g_ui.winW, g_ui.winH, false, L);
+                int itemH = S(32), menuW = S(132);
+                int menuH = SPEED_PRESET_COUNT * itemH + S(12);
+                int menuX = L.speedBtn.x;
+                int menuY = L.speedBtn.y - menuH - S(6);
+                if (menuY < 0) menuY = L.speedBtn.y + L.speedBtn.h + S(6);
+                if (menuX + menuW > g_ui.winW - S(8)) menuX = g_ui.winW - menuW - S(8);
+                if (mx >= menuX && mx <= menuX + menuW &&
+                    my >= menuY && my <= menuY + menuH - S(12)) {
+                    int idx = (my - menuY) / itemH;
+                    if (idx >= 0 && idx < SPEED_PRESET_COUNT) {
+                        g_mpv->setSpeed(SPEED_PRESETS[idx]);
+                        char msg[32];
+                        std::snprintf(msg, sizeof(msg), "%s: %.2fx", T("倍速", "Speed"), SPEED_PRESETS[idx]);
+                        showToast(msg);
+                    }
+                }
+                g_ui.speedMenuOpen = false;
+            }
+            if (g_ui.qualityMenuOpen) {
+                Row1Layout QL;
+                layoutRow1(g_ui.winW, g_ui.winH, false, QL);
+                int itemH = S(32), menuW = S(140);
+                int menuH = QUALITY_PRESET_COUNT * itemH + S(44);
+                int menuX = QL.qualityBtn.x;
+                int menuY = QL.qualityBtn.y - menuH - S(6);
+                if (menuY < 0) menuY = QL.qualityBtn.y + QL.qualityBtn.h + S(6);
+                if (menuX + menuW > g_ui.winW - S(8)) menuX = g_ui.winW - menuW - S(8);
+                int itemsY = menuY + S(38);
+                if (mx >= menuX && mx <= menuX + menuW &&
+                    my >= itemsY && my <= itemsY + QUALITY_PRESET_COUNT * itemH) {
+                    int idx = (my - itemsY) / itemH;
+                    if (idx >= 0 && idx < QUALITY_PRESET_COUNT) {
+                        applyQualityPreset(idx);
+                        const char* qNames[] = { T("省电", "Power Saving"), T("标准", "Standard"), T("至臻", "Ultimate") };
+                        showToast(qNames[idx]);
+                    }
+                }
+                g_ui.qualityMenuOpen = false;
+            }
+            if (g_ui.eqMenuOpen) {
+                int menuW = S(200), itemH = S(36);
+                int menuH = S(32) + 6 * itemH + S(40);
+                int menuX = g_ui.winW / 2 - menuW / 2;
+                int menuY = g_ui.winH / 2 - menuH / 2;
+                if (mx >= menuX && mx <= menuX + menuW && my >= menuY && my <= menuY + menuH) {
+                    int trackX = menuX + S(60), trackW = S(100);
+                    int baseY = menuY + S(32);
+                    bool hitSlider = false;
+                    for (int i = 0; i < 6; ++i) {
+                        int iy = baseY + i * itemH;
+                        if (mx >= trackX - S(8) && mx <= trackX + trackW + S(8) &&
+                            my >= iy && my <= iy + itemH) {
+                            float norm = (float)(mx - trackX) / trackW;
+                            if (norm < 0.0f) norm = 0.0f; if (norm > 1.0f) norm = 1.0f;
+                            g_mpv->setEQBand(i, norm * 24.0f - 12.0f);
+                            g_ui.eqDraggingBand = i;
+                            SetCapture(hwnd);
+                            hitSlider = true;
+                            break;
+                        }
+                    }
+                    if (!hitSlider) {
+                        int resetY = baseY + 6 * itemH + S(4);
+                        if (mx >= menuX + menuW / 2 - S(30) && mx <= menuX + menuW / 2 + S(30) &&
+                            my >= resetY && my <= resetY + S(26)) {
+                            for (int i = 0; i < 6; ++i) g_mpv->setEQBand(i, 0.0f);
+                            showToast(i18n::eqReset());
+                        }
+                        // 菜单内其他位置: 保持打开
+                        g_ui.visible = true;
+                        g_ui.hideAt = SDL_GetTicks() + ui::CTRLBAR_HIDE_MS;
+                        g_dirty.store(true);
+                        return 0;
+                    }
+                } else {
+                    g_ui.eqMenuOpen = false;   // 菜单外: 关闭
+                }
+            }
+            g_ui.visible = true;
+            g_ui.hideAt = SDL_GetTicks() + ui::CTRLBAR_HIDE_MS;
+            g_dirty.store(true);
+            return 0;   // 弹层打开期间点击一律消费
+        }
+
         // --- seekbar（垂直容差收紧: 下探过深会吃掉用户点按钮/视频的点击）---
         if (g_mpv && my >= barTop - S(8) && my <= barTop + S(12) &&
             mx >= sbLeftX() && mx <= sbRightX() && g_mpv->duration() > 0) {
@@ -1474,93 +1570,6 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             else if (inRc(L.fullBtn)) {
                 toggleFullscreen(hwnd);
             }
-            else if (g_ui.speedMenuOpen) {
-                // 点菜单外任意处 = 关闭菜单（不触发视频暂停）
-                // 但先检查是否点到了菜单项(菜单在视频区, 不在控制栏内)
-                Row1Layout SL;
-                layoutRow1(g_ui.winW, g_ui.winH, false, SL);
-                int itemH = S(32);
-                int menuW = S(132);
-                int menuH = SPEED_PRESET_COUNT * itemH + S(12);
-                int menuX = SL.speedBtn.x;
-                int menuY = SL.speedBtn.y - menuH - S(6);
-                if (menuY < 0) menuY = SL.speedBtn.y + SL.speedBtn.h + S(6);
-                if (menuX + menuW > g_ui.winW - S(8)) menuX = g_ui.winW - menuW - S(8);
-                if (mx >= menuX && mx <= menuX + menuW &&
-                    my >= menuY && my <= menuY + SPEED_PRESET_COUNT * itemH) {
-                    int idx = (my - menuY) / itemH;
-                    if (idx >= 0 && idx < SPEED_PRESET_COUNT) {
-                        g_mpv->setSpeed(SPEED_PRESETS[idx]);
-                        char msg[32];
-                        std::snprintf(msg, sizeof(msg), "%s: %.2fx", T("倍速", "Speed"), SPEED_PRESETS[idx]);
-                        showToast(msg);
-                    }
-                }
-            }
-            else if (g_ui.qualityMenuOpen) {
-                // 画质菜单: 视频区弹出, 先检测项命中
-                Row1Layout QL;
-                layoutRow1(g_ui.winW, g_ui.winH, false, QL);
-                int itemH = S(32);
-                int menuW = S(140);
-                int menuH = QUALITY_PRESET_COUNT * itemH + S(44);  // +info区
-                int menuX = QL.qualityBtn.x;
-                int menuY = QL.qualityBtn.y - menuH - S(6);
-                if (menuY < 0) menuY = QL.qualityBtn.y + QL.qualityBtn.h + S(6);
-                if (menuX + menuW > g_ui.winW - S(8)) menuX = g_ui.winW - menuW - S(8);
-                int itemsY = menuY + S(38);  // 跳过信息区
-                if (mx >= menuX && mx <= menuX + menuW &&
-                    my >= itemsY && my <= itemsY + QUALITY_PRESET_COUNT * itemH) {
-                    int idx = (my - itemsY) / itemH;
-                    if (idx >= 0 && idx < QUALITY_PRESET_COUNT) {
-                        applyQualityPreset(idx);
-                        const char* qNames[] = { T("省电", "Power Saving"), T("标准", "Standard"), T("至臻", "Ultimate") };
-                        showToast(qNames[idx]);
-                    }
-                }
-            }
-            else if (g_ui.eqMenuOpen) {
-                // EQ 菜单: 居中弹出
-                int menuW = S(200);
-                int itemH = S(36);
-                int menuH = S(32) + 6 * itemH + S(40);
-                int menuX = g_ui.winW / 2 - menuW / 2;
-                int menuY = g_ui.winH / 2 - menuH / 2;
-                int trackX = menuX + S(60);
-                int trackW = S(100);
-                int baseY = menuY + S(32);
-                // 检测是否在菜单区域内
-                if (mx >= menuX && mx <= menuX + menuW && my >= menuY && my <= menuY + menuH) {
-                    // 检测滑块点击
-                    for (int i = 0; i < 6; ++i) {
-                        int iy = baseY + i * itemH;
-                        if (mx >= trackX - S(8) && mx <= trackX + trackW + S(8) &&
-                            my >= iy && my <= iy + itemH) {
-                            float norm = (float)(mx - trackX) / trackW;
-                            if (norm < 0.0f) norm = 0.0f; if (norm > 1.0f) norm = 1.0f;
-                            float gain = norm * 24.0f - 12.0f;
-                            g_mpv->setEQBand(i, gain);
-                            g_ui.eqDraggingBand = i;
-                            g_ui.visible = true;
-                            g_ui.hideAt = SDL_GetTicks() + ui::CTRLBAR_HIDE_MS;
-                            return 0;
-                        }
-                    }
-                    // Reset 按钮
-                    int resetY = baseY + 6 * itemH + S(4);
-                    if (mx >= menuX + menuW / 2 - S(30) && mx <= menuX + menuW / 2 + S(30) &&
-                        my >= resetY && my <= resetY + S(26)) {
-                        for (int i = 0; i < 6; ++i) g_mpv->setEQBand(i, 0.0f);
-                        showToast(i18n::eqReset());
-                    }
-                    // 点击在菜单内其他位置: 不关闭
-                    g_ui.visible = true;
-                    g_ui.hideAt = SDL_GetTicks() + ui::CTRLBAR_HIDE_MS;
-                    return 0;
-                }
-                // 点击在菜单外: 关闭
-                g_ui.eqMenuOpen = false;
-            }
             else {
                 goto videoAreaClick;
             }
@@ -1569,30 +1578,9 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         }
     videoAreaClick:;
-        // --- speed popup 选择（与渲染共用几何） ---
-        if (g_ui.speedMenuOpen) {
-            Row1Layout L;
-            layoutRow1(g_ui.winW, g_ui.winH, false, L);
-            int itemH = S(32);
-            int menuW = S(132);
-            int menuH = SPEED_PRESET_COUNT * itemH + S(12);
-            int menuX = L.speedBtn.x;
-            int menuY = L.speedBtn.y - menuH - S(6);  // 向上展开
-            if (menuY < 0) menuY = L.speedBtn.y + L.speedBtn.h + S(6);  // 空间不足时回退向下
-            if (menuX + menuW > g_ui.winW - S(8)) menuX = g_ui.winW - menuW - S(8);
-            if (mx >= menuX && mx <= menuX + menuW && my >= menuY && my <= menuY + SPEED_PRESET_COUNT * itemH) {
-                int idx = (my - menuY) / itemH;
-                if (idx >= 0 && idx < SPEED_PRESET_COUNT) {
-                    g_mpv->setSpeed(SPEED_PRESETS[idx]);
-                    char msg[32];
-                    std::snprintf(msg, sizeof(msg), "%s: %.2fx", T("倍速", "Speed"), SPEED_PRESETS[idx]);
-                    showToast(msg);
-                }
-            }
-            g_ui.speedMenuOpen = false;
-        }
+        // (倍速/画质/EQ 菜单命中已由模态层统一处理, 此处不再可达)
         // --- 音量图标点击：切换静音（滑条由 hover 展开） ---
-        else if (g_mpv && mx >= g_ui.winW - S(68) && mx <= g_ui.winW - S(40) &&
+        if (g_mpv && mx >= g_ui.winW - S(68) && mx <= g_ui.winW - S(40) &&
                  my >= barTop + S(36) && my <= barTop + S(64)) {
             g_mpv->toggleMute();
             showToast(g_mpv->muted() ? i18n::muted() : i18n::unmuted());
@@ -1780,8 +1768,9 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 }
 
 // ---- SDL2 overlay ----
-// 透明键 = 纯黑(0,0,0)。UI 为亮字暗底风格且不含纯黑;
-// 半透明色叠加在黑底上 = 自然变暗, 无品红(colorkey 方案旧缺陷)染色
+// 逐像素 alpha 合成(UpdateLayeredWindow): 渲染结果 ReadPixels 后预乘 alpha,
+// 经 ULW_ALPHA 上屏。支持真半透明(玻璃渐变/压暗遮罩/模态背景), 无 colorkey
+// 二值透明的抖动伪装。点击穿透仍由 WS_EX_TRANSPARENT 保证。
 static const Uint8 TRANSPARENT_R = 0;
 static const Uint8 TRANSPARENT_G = 0;
 static const Uint8 TRANSPARENT_B = 0;
@@ -1809,23 +1798,24 @@ static bool createOverlay(HWND parent, int w, int h) {
     LONG_PTR ex = GetWindowLongPtrW(ov, GWL_EXSTYLE);
     SetWindowLongPtrW(ov, GWL_EXSTYLE,
         ex | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW);
-    SetLayeredWindowAttributes(ov,
-        RGB(TRANSPARENT_R, TRANSPARENT_G, TRANSPARENT_B), 0, LWA_COLORKEY);
+    // 不再使用 LWA_COLORKEY: 改由 UpdateLayeredWindow 提供逐像素 alpha
 
     // 设为 parent 的 Owned 窗口：置顶于父、父最小化时联动、无独立任务栏项
     SetWindowLongPtrW(ov, GWLP_HWNDPARENT, (LONG_PTR)parent);
     SetWindowPos(ov, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 
-    g_sdlRdr = SDL_CreateRenderer(g_sdlWin, -1,
-        SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-    if (!g_sdlRdr) {
-        LOG_WARN("MAIN", "accelerated renderer failed (%s), trying software", SDL_GetError());
-        g_sdlRdr = SDL_CreateRenderer(g_sdlWin, -1, 0);
-    }
+    // 必须用软件渲染器: D3D11 交换链后备缓冲不保留 alpha(读回恒为 255),
+    // 会让 ULW 整层变不透明黑板。软件渲染器后备缓冲是真 alpha Surface。
+    // UI 按需重绘, 软件渲染性能足够。
+    SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software");
+    g_sdlRdr = SDL_CreateRenderer(g_sdlWin, -1, 0);
     if (!g_sdlRdr) {
         LOG_ERROR("MAIN", "SDL_CreateRenderer: %s", SDL_GetError());
         return false;
     }
+    SDL_RendererInfo rinfo{};
+    if (SDL_GetRendererInfo(g_sdlRdr, &rinfo) == 0)
+        LOG_INFO("MAIN", "overlay renderer: %s", rinfo.name);
     SDL_SetRenderDrawBlendMode(g_sdlRdr, SDL_BLENDMODE_BLEND);
 
     g_text.init(g_sdlRdr);
@@ -1923,12 +1913,6 @@ static void drawDitherDim(SDL_Renderer* r, int x, int y, int w, int h,
 
 static void drawGradientBar(SDL_Renderer* r, int slot, int x, int y, int w, int h,
                              Uint8 cr, Uint8 cg, Uint8 cb, Uint8 aTop, Uint8 aBot) {
-    static const int bayer[4][4] = {
-        {  0, 136,  34, 170},
-        {204,  68, 238, 102},
-        { 51, 187,  17, 153},
-        {255, 119, 221,  85}
-    };
     if (w <= 0 || h <= 0) return;
     GradKey key{ w, h, cr, cg, cb, aTop, aBot };
 
@@ -1942,13 +1926,10 @@ static void drawGradientBar(SDL_Renderer* r, int slot, int x, int y, int w, int 
         if (SDL_LockTexture(tex, nullptr, (void**)&pixels, &pitch) == 0) {
             Uint32 rgb = ((Uint32)cr << 16) | ((Uint32)cg << 8) | cb;
             for (int dy = 0; dy < h; ++dy) {
-                int a = aTop + ((int)(aBot - aTop)) * dy / h;
-                int by = dy % 4;
+                int a = aTop + ((int)(aBot - aTop)) * dy / h;   // 线性 alpha, 平滑无抖动
                 Uint32* row = (Uint32*)((Uint8*)pixels + dy * pitch);
                 for (int dx = 0; dx < w; ++dx) {
-                    row[dx] = (a > bayer[by][dx % 4])
-                            ? (0xFF000000u | rgb)
-                            : 0x00000000u;   // 透明键兼容
+                    row[dx] = ((Uint32)a << 24) | rgb;
                 }
             }
             SDL_UnlockTexture(tex);
@@ -1961,12 +1942,138 @@ static void drawGradientBar(SDL_Renderer* r, int slot, int x, int y, int w, int 
 }
 
 // ---- rendering ----
+
+// 逐像素 alpha 上屏: UI 画入离屏 ARGB 纹理(真 alpha) → ReadPixels →
+// 预乘 alpha → UpdateLayeredWindow。
+// 注意: 窗口后备缓冲(RGBX)不保留 alpha, 必须经离屏纹理中转。
+struct UlwCtx {
+    HDC memDC = nullptr;
+    HBITMAP dib = nullptr;
+    void* bits = nullptr;
+    int w = 0, h = 0;
+};
+static UlwCtx g_ulw;
+static SDL_Texture* g_ovTex = nullptr;   // UI 离屏画布(真 alpha)
+static int g_ovTexW = 0, g_ovTexH = 0;
+
+static bool ovTexEnsure(int w, int h) {
+    if (g_ovTex && g_ovTexW == w && g_ovTexH == h) return true;
+    if (g_ovTex) { SDL_DestroyTexture(g_ovTex); g_ovTex = nullptr; }
+    g_ovTex = SDL_CreateTexture(g_sdlRdr, SDL_PIXELFORMAT_ARGB8888,
+                                SDL_TEXTUREACCESS_TARGET, w, h);
+    if (!g_ovTex) {
+        LOG_ERROR("MAIN", "ovTex create: %s", SDL_GetError());
+        return false;
+    }
+    g_ovTexW = w; g_ovTexH = h;
+    return true;
+}
+
+static void ulwDestroy() {
+    if (g_ulw.dib) { DeleteObject(g_ulw.dib); g_ulw.dib = nullptr; }
+    if (g_ulw.memDC) { DeleteDC(g_ulw.memDC); g_ulw.memDC = nullptr; }
+    g_ulw.bits = nullptr; g_ulw.w = g_ulw.h = 0;
+}
+
+static bool ulwResize(int w, int h) {
+    ulwDestroy();
+    BITMAPINFO bi{};
+    bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bi.bmiHeader.biWidth = w;
+    bi.bmiHeader.biHeight = -h;          // top-down
+    bi.bmiHeader.biPlanes = 1;
+    bi.bmiHeader.biBitCount = 32;
+    bi.bmiHeader.biCompression = BI_RGB;
+    g_ulw.dib = CreateDIBSection(nullptr, &bi, DIB_RGB_COLORS, &g_ulw.bits, nullptr, 0);
+    if (!g_ulw.dib) { LOG_ERROR("MAIN", "CreateDIBSection failed"); return false; }
+    g_ulw.memDC = CreateCompatibleDC(nullptr);
+    if (!g_ulw.memDC) { LOG_ERROR("MAIN", "CreateCompatibleDC failed"); return false; }
+    SelectObject(g_ulw.memDC, g_ulw.dib);
+    g_ulw.w = w; g_ulw.h = h;
+    return true;
+}
+
+static void overlayPresent() {
+    if (!g_sdlRdr || !g_sdlWin || !g_overlayHwnd) return;
+    int w, h;
+    SDL_GetWindowSize(g_sdlWin, &w, &h);
+    if (w <= 0 || h <= 0 || !g_ovTex) return;
+
+    if (g_ulw.w != w || g_ulw.h != h) {
+        if (!ulwResize(w, h)) return;
+    }
+
+    // 1. 从离屏 ARGB 纹理回读 (真 alpha)
+    if (SDL_SetRenderTarget(g_sdlRdr, g_ovTex) != 0) return;
+    static std::vector<Uint32> px;
+    px.resize((size_t)w * h);
+    SDL_Rect rr = {0, 0, w, h};
+    if (SDL_RenderReadPixels(g_sdlRdr, &rr, SDL_PIXELFORMAT_ARGB8888,
+                             px.data(), w * 4) != 0) {
+        LOG_ERROR("MAIN", "RenderReadPixels: %s", SDL_GetError());
+        SDL_SetRenderTarget(g_sdlRdr, nullptr);
+        return;
+    }
+    SDL_SetRenderTarget(g_sdlRdr, nullptr);
+
+    // 2. 预乘 alpha (ULW 要求 premultiplied BGRA)
+    const Uint32* src = px.data();
+    Uint32* dst = (Uint32*)g_ulw.bits;
+    const size_t n = (size_t)w * h;
+    for (size_t i = 0; i < n; ++i) {
+        Uint32 p = src[i];
+        Uint32 a = p >> 24;
+        if (a == 0)        dst[i] = 0;
+        else if (a == 255) dst[i] = p | 0xFF000000u;
+        else {
+            Uint32 r = ((p >> 16) & 255) * a / 255;
+            Uint32 gg = ((p >> 8) & 255) * a / 255;
+            Uint32 b = (p & 255) * a / 255;
+            dst[i] = (a << 24) | (r << 16) | (gg << 8) | b;
+        }
+    }
+
+    // 诊断: 首帧采样视频区中心 alpha(应为 0=透明; 255=alpha 通路失效)
+    {
+        static bool sampled = false;
+        if (!sampled) {
+            sampled = true;
+            Uint32 s1 = src[(size_t)(h / 2) * w + w / 2];
+            Uint32 s2 = src[(size_t)10 * w + 10];
+            LOG_INFO("MAIN", "alpha sample center=%08X corner=%08X (expect A=00)",
+                     s1, s2);
+        }
+    }
+
+    // 3. ULW 上屏 (位置跟随 parent 客户区原点)
+    POINT pt = {0, 0};
+    ClientToScreen(g_parentHwnd, &pt);
+    POINT srcPt = {0, 0};
+    SIZE sz = {w, h};
+    BLENDFUNCTION bf = {AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
+    HDC scr = GetDC(nullptr);
+    BOOL ok = UpdateLayeredWindow(g_overlayHwnd, scr, &pt, &sz,
+                                  g_ulw.memDC, &srcPt, 0, &bf, ULW_ALPHA);
+    ReleaseDC(nullptr, scr);
+    if (!ok) {
+        static bool warned = false;
+        if (!warned) { LOG_ERROR("MAIN", "UpdateLayeredWindow failed err=%lu", GetLastError()); warned = true; }
+    }
+}
+
 static void renderOverlay() {
-    if (!g_sdlRdr) return;
+    if (!g_sdlRdr || !g_sdlWin) return;
 
     uploadThumbs(g_sdlRdr);   // 惰性上传就绪的缩略图纹理
 
-    SDL_SetRenderDrawColor(g_sdlRdr, TRANSPARENT_R, TRANSPARENT_G, TRANSPARENT_B, 255);
+    // 所有 UI 画入离屏 ARGB 纹理(真 alpha); 后备缓冲不使用
+    int ow, oh;
+    SDL_GetWindowSize(g_sdlWin, &ow, &oh);
+    if (ow <= 0 || oh <= 0) return;
+    if (!ovTexEnsure(ow, oh)) return;
+    SDL_SetRenderTarget(g_sdlRdr, g_ovTex);
+
+    SDL_SetRenderDrawColor(g_sdlRdr, 0, 0, 0, 0);   // 全透明底(per-pixel alpha)
     SDL_RenderClear(g_sdlRdr);
 
     int w = g_ui.winW, h = g_ui.winH, totalW = g_ui.totalW;
@@ -2057,7 +2164,7 @@ static void renderOverlay() {
                         T("空格=播放/暂停  左/右=快进退  F=全屏  M=静音  [/]=倍速", "Space=Play/Pause  Left/Right=Seek  F=Fullscreen  M=Mute  [/]=Speed"),
                         10, 80, 80, 80);
 
-        SDL_RenderPresent(g_sdlRdr);
+        overlayPresent();
         return;
     }
 
@@ -2113,10 +2220,13 @@ static void renderOverlay() {
     // 控件淡出: 控制栏随 alpha 滑出屏底
     int barTop = sbTopY() + (int)((1.0f - fa) * S(CONTROL_BAR_H) + 0.5f);
 
-    // --- 暂停状态: 视频本身通过 mpv brightness 压暗(见主循环 applyPauseDim), 此处仅画中央播放图标 ---
+    // --- 暂停压暗遮罩 + 中央播放图标 (per-pixel alpha 真半透明, 全画面均匀) ---
     if (fa > 0.01f && g_mpv->state() == MpvBackend::State::Paused) {
-        int top = 0;
-        int ccx = w / 2, ccy = top + (barTop - top) / 2;
+        SDL_SetRenderDrawBlendMode(g_sdlRdr, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(g_sdlRdr, 0, 0, 0, (Uint8)(110 * fa));
+        SDL_Rect dim = {0, 0, w, h};
+        SDL_RenderFillRect(g_sdlRdr, &dim);
+        int ccx = w / 2, ccy = h / 2;
         svgicon::draw(g_sdlRdr, "play", ccx, ccy, S(30),
                       255, 255, 255, (Uint8)(200 * fa));
     }
@@ -2645,7 +2755,12 @@ static void renderOverlay() {
     if (g_ui.settingsOpen) {
         SettingsGeom sg = settingsGeom(w, h);
 
-        // 无全屏遮挡 — 视频在面板周围保持可见 (Apple/Google 浮动面板风格)
+        // 模态背景: 真半透明压暗(per-pixel alpha), 视频隐约可见
+        SDL_SetRenderDrawBlendMode(g_sdlRdr, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(g_sdlRdr, 0, 0, 0, 140);
+        SDL_Rect fullRc = {0, 0, w, h};
+        SDL_RenderFillRect(g_sdlRdr, &fullRc);
+
         // 面板阴影（柔和扩散）
         for (int i = 4; i >= 1; --i) {
             Uint8 sha = (Uint8)(12 * i);
@@ -2709,53 +2824,43 @@ static void renderOverlay() {
             fillCircle(g_sdlRdr, thumbX + (sg.swH - S(4))/2, ry + S(10), (sg.swH - S(4))/2, 255, 255, 255, 255);
         }
 
-        // playback mode row
+        // playback mode row (选中=蓝色胶囊, 未选中=纯文字无边框)
         g_text.drawText(sg.panelX + S(20), sg.modeRowY + S(3), i18n::playbackMode(), 13, 200, 200, 200);
         const char* modes[] = { i18n::modeSingle(), i18n::modeLoop(), i18n::modeShuffle() };
         for (int i = 0; i < 3; ++i) {
             int lx = sg.swX - S(180) + i * (sg.chipW + S(6));
             bool sel = (g_cfg.playMode == i);
-            int cr2 = S(6);
-            SDL_SetRenderDrawColor(g_sdlRdr, sel ? 37 : 55, sel ? 99 : 55, sel ? 235 : 58, 255);
-            SDL_Rect lr = {lx + cr2, sg.chipY, sg.chipW - cr2*2, sg.chipH};
-            SDL_RenderFillRect(g_sdlRdr, &lr);
-            SDL_Rect lh = {lx, sg.chipY + cr2, sg.chipW, sg.chipH - cr2*2};
-            SDL_RenderFillRect(g_sdlRdr, &lh);
-            fillCircle(g_sdlRdr, lx + cr2, sg.chipY + cr2, cr2, sel ? 37 : 55, sel ? 99 : 55, sel ? 235 : 58, 255);
-            fillCircle(g_sdlRdr, lx + sg.chipW - cr2, sg.chipY + cr2, cr2, sel ? 37 : 55, sel ? 99 : 55, sel ? 235 : 58, 255);
-            if (!sel) {
-                SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 25);
-                SDL_Rect mr1 = {lx + cr2, sg.chipY, sg.chipW - cr2*2, sg.chipH};
-                SDL_RenderDrawRect(g_sdlRdr, &mr1);
-                SDL_Rect mr2 = {lx, sg.chipY + cr2, sg.chipW, sg.chipH - cr2*2};
-                SDL_RenderDrawRect(g_sdlRdr, &mr2);
+            if (sel) {
+                int cr2 = sg.chipH / 2;
+                SDL_SetRenderDrawColor(g_sdlRdr, 37, 99, 235, 255);
+                SDL_Rect lr = {lx + cr2, sg.chipY, sg.chipW - cr2*2, sg.chipH};
+                SDL_RenderFillRect(g_sdlRdr, &lr);
+                fillCircle(g_sdlRdr, lx + cr2, sg.chipY + cr2, cr2, 37, 99, 235, 255);
+                fillCircle(g_sdlRdr, lx + sg.chipW - cr2, sg.chipY + cr2, cr2, 37, 99, 235, 255);
             }
-            g_text.drawText(lx + S(8), sg.chipY + S(4), modes[i], 11, sel ? 255 : 150, sel ? 255 : 150, sel ? 255 : 150);
+            int tw = g_text.measureText(modes[i], 11);
+            g_text.drawText(lx + (sg.chipW - tw) / 2, sg.chipY + S(4), modes[i], 11,
+                            sel ? 255 : 150, sel ? 255 : 150, sel ? 255 : 150);
         }
 
-        // 语言切换行
+        // 语言切换行 (同风格: 选中=蓝色胶囊, 未选中=纯文字)
         g_text.drawText(sg.panelX + S(20), sg.langRowY + S(3), i18n::language(), 13, 200, 200, 200);
         const char* langLabels[] = { i18n::chinese(), i18n::english() };
         for (int i = 0; i < 2; ++i) {
             int lx = sg.langSegX + i * (sg.langSegW / 2);
             bool sel = (g_cfg.lang == i);
-            int cr2 = S(6);
-            SDL_SetRenderDrawColor(g_sdlRdr, sel ? 37 : 50, sel ? 99 : 50, sel ? 235 : 52, 255);
-            SDL_Rect lr = {lx + cr2, sg.langRowY, sg.langSegW/2 - cr2*2, sg.langSegH};
-            SDL_RenderFillRect(g_sdlRdr, &lr);
-            SDL_Rect lh = {lx, sg.langRowY + cr2, sg.langSegW/2, sg.langSegH - cr2*2};
-            SDL_RenderFillRect(g_sdlRdr, &lh);
-            fillCircle(g_sdlRdr, lx + cr2, sg.langRowY + cr2, cr2, sel ? 37 : 50, sel ? 99 : 50, sel ? 235 : 52, 255);
-            fillCircle(g_sdlRdr, lx + sg.langSegW/2 - cr2, sg.langRowY + cr2, cr2, sel ? 37 : 50, sel ? 99 : 50, sel ? 235 : 52, 255);
-            if (!sel) {
-                SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 20);
-                SDL_Rect lr1 = {lx + cr2, sg.langRowY, sg.langSegW/2 - cr2*2, sg.langSegH};
-                SDL_RenderDrawRect(g_sdlRdr, &lr1);
-                SDL_Rect lr2 = {lx, sg.langRowY + cr2, sg.langSegW/2, sg.langSegH - cr2*2};
-                SDL_RenderDrawRect(g_sdlRdr, &lr2);
+            int halfW = sg.langSegW / 2;
+            if (sel) {
+                int cr2 = sg.langSegH / 2;
+                SDL_SetRenderDrawColor(g_sdlRdr, 37, 99, 235, 255);
+                SDL_Rect lr = {lx + cr2, sg.langRowY, halfW - cr2*2, sg.langSegH};
+                SDL_RenderFillRect(g_sdlRdr, &lr);
+                fillCircle(g_sdlRdr, lx + cr2, sg.langRowY + cr2, cr2, 37, 99, 235, 255);
+                fillCircle(g_sdlRdr, lx + halfW - cr2, sg.langRowY + cr2, cr2, 37, 99, 235, 255);
             }
             int tw2 = g_text.measureText(langLabels[i], 11);
-            g_text.drawText(lx + (sg.langSegW/2 - tw2) / 2, sg.langRowY + S(4), langLabels[i], 11, sel ? 255 : 150, sel ? 255 : 150, sel ? 255 : 150);
+            g_text.drawText(lx + (halfW - tw2) / 2, sg.langRowY + S(4), langLabels[i], 11,
+                            sel ? 255 : 150, sel ? 255 : 150, sel ? 255 : 150);
         }
     }
 
@@ -2837,7 +2942,7 @@ static void renderOverlay() {
         }
     }
 
-    SDL_RenderPresent(g_sdlRdr);
+    overlayPresent();
 }
 
 // ---- DPI awareness ----
@@ -3049,18 +3154,11 @@ wc.style         = CS_DBLCLKS;   // 接收 WM_LBUTTONDBLCLK
         Uint32 now = SDL_GetTicks();
 
         // 播放状态轮询：进度秒变 / 播放状态切换 -> dirty
-        {
-            static bool dimOn = false;
-            bool wantDim = false;
-            if (g_mpv && g_mpv->hasMedia()) {
-                double pos = g_mpv->clock();
-                if ((int)pos != lastPosSec) { lastPosSec = (int)pos; g_dirty.store(true); }
-                auto st = g_mpv->state();
-                if (st != lastState) { lastState = st; g_dirty.store(true); }
-                wantDim = (st == MpvBackend::State::Paused);
-            }
-            // 暂停/恢复/换片 时切换 mpv 亮度压暗
-            if (wantDim != dimOn) { dimOn = wantDim; applyPauseDim(wantDim); }
+        if (g_mpv && g_mpv->hasMedia()) {
+            double pos = g_mpv->clock();
+            if ((int)pos != lastPosSec) { lastPosSec = (int)pos; g_dirty.store(true); }
+            auto st = g_mpv->state();
+            if (st != lastState) { lastState = st; g_dirty.store(true); }
         }
 
         // EOF 自动连播: 消费事件线程投递的下一曲(UI 线程安全点执行)

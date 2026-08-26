@@ -151,6 +151,7 @@ void Logger::log(LogLevel level, const char* module, const char* fmt, ...) {
     va_end(ap);
 
     fputc('\n', file_);
+    fflush(file_);   // 逐行落盘: 崩溃/僵死时日志不丢, 诊断可实时 tail
 
     // M32g.2: 每行都 fflush 在 --debug 海量日志下会让音频/解码线程
     // 周期性卡在磁盘刷写上(表现为播放每1~2秒冻结一两秒)。
