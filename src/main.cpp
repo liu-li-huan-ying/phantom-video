@@ -460,7 +460,6 @@ static void layoutRow1(int w, int h, bool volOpen, Row1Layout& L) {
     };
     placeRight(L.fullBtn, iconSz);
     placeRight(L.setBtn, g_text.measureText(i18n::settings(), T(12)) + U(26));
-    L.volSliderW = volOpen ? U(80) : 0;
     placeRight(L.qualityBtn, g_text.measureText(i18n::quality(), T(12)) + g_text.measureText(qualityLabel(), T(11)) + U(22));
     {
         char spd[16];
@@ -469,10 +468,16 @@ static void layoutRow1(int w, int h, bool volOpen, Row1Layout& L) {
         else             std::snprintf(spd, sizeof(spd), "%.2fx", s);
         placeRight(L.speedBtn, g_text.measureText(spd, T(12)) + g_text.measureText(i18n::speed(), T(12)) + U(24));
     }
-        placeRight(L.subBtn, g_text.measureText(i18n::subtitles(), T(12)) + U(26));
-    // 音量 wrap: slider(open) + icon
+    placeRight(L.subBtn, g_text.measureText(i18n::subtitles(), T(12)) + U(26));
+    // 音量: 先放滑条(展开态), 再放图标; 滑条在图标右侧
+    L.volSliderW = volOpen ? U(80) : 0;
+    if (volOpen) {
+        xr -= U(80);
+        L.volSliderX = xr;
+        xr -= U(4);  // 滑条与图标间距
+    }
     L.volIconCx = xr - U(17);
-    if (volOpen) { L.volSliderX = xr - U(34) - U(80) + U(5); xr -= U(84); }
+    xr -= U(34);
 }
 
 static void showToast(const char* msg) {
