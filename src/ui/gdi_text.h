@@ -8,7 +8,7 @@ public:
     void init(SDL_Renderer* renderer);
     void shutdown();
     void drawText(int x, int y, const std::string& utf8, int ptSize = 12,
-                  int r = 200, int g = 200, int b = 200);
+                  int r = 200, int g = 200, int b = 200, int a = 255);
     int  measureText(const std::string& utf8, int ptSize);   // 像素宽(不绘制)
 
 private:

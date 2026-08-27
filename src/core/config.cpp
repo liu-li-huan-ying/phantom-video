@@ -83,11 +83,20 @@ bool loadConfig(const std::string& path, AppConfig& out) {
                 out.posX = x; out.posY = y; out.posW = w; out.posH = h;
             }
         } else if (line.rfind("hist=", 0) == 0) {
+            // M36: hist=<path>\t<pos>[\t<dur>[\t<lastPlayed>]] — 旧格式兼容
             std::size_t tab = line.find('\t', 5);
             if (tab != std::string::npos) {
                 std::string p = line.substr(5, tab - 5);
-                double pos = std::atof(line.c_str() + tab + 1);
-                if (!p.empty()) out.history[p] = pos;
+                HistoryEntry e;
+                e.pos = std::atof(line.c_str() + tab + 1);
+                std::size_t tab2 = line.find('\t', tab + 1);
+                if (tab2 != std::string::npos) {
+                    e.dur = std::atof(line.c_str() + tab2 + 1);
+                    std::size_t tab3 = line.find('\t', tab2 + 1);
+                    if (tab3 != std::string::npos)
+                        e.lastPlayed = std::atoll(line.c_str() + tab3 + 1);
+                }
+                if (!p.empty()) out.history[p] = e;
             }
         }
     }
@@ -116,7 +125,9 @@ bool saveConfig(const std::string& path, const AppConfig& cfg) {
     if (cfg.posX != AppConfig::INVALID_POS && cfg.posW > 0)
         out << "pos=" << cfg.posX << "," << cfg.posY << "," << cfg.posW << "," << cfg.posH << "\n";
     for (const auto& kv : cfg.history) {
-        out << "hist=" << kv.first << "\t" << kv.second << "\n";
+        out << "hist=" << kv.first << "\t" << kv.second.pos
+            << "\t" << kv.second.dur
+            << "\t" << kv.second.lastPlayed << "\n";
     }
     return true;
 }

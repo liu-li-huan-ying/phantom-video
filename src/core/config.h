@@ -2,11 +2,18 @@
 #include <map>
 #include <string>
 
+// M36: 历史条目元数据 (继续观看行需要时长+时间戳排序)
+struct HistoryEntry {
+    double pos = 0;            // 上次观看位置(秒)
+    double dur = 0;            // 时长(秒), 0=未知
+    long long lastPlayed = 0;  // 最后播放 Unix 时间戳(秒)
+};
+
 struct AppConfig {
     float volume = 0.8f;
     float speed = 1.0f;
     std::string lastFile;
-    std::map<std::string, double> history;
+    std::map<std::string, HistoryEntry> history;
     int playMode = 1;  // PlayMode: 0=Single 1=Loop 2=Shuffle
     int resume = 0;    // 0=打开时从头播放 1=从上次位置续播
     int subAutoLoad = 1;   // 字幕自动加载

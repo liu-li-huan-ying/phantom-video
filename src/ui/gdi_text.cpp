@@ -58,7 +58,8 @@ SDL_Texture* GdiTextCache::renderText(const std::string& utf8, int ptSize,
     HGDIOBJ oldBmp = SelectObject(memDC, hBmp);
 
     SetBkMode(memDC, TRANSPARENT);
-    SetTextColor(memDC, RGB(r, g, b));
+    // 恒用白色渲染: 亮度=覆盖率, 输出时再替换为请求色 (luma-alpha 标准技法)
+    SetTextColor(memDC, RGB(255, 255, 255));
     DrawTextW(memDC, wbuf.data(), -1, &rc, DT_LEFT | DT_SINGLELINE);
 
     // 转 SDL_Texture
@@ -68,17 +69,17 @@ SDL_Texture* GdiTextCache::renderText(const std::string& utf8, int ptSize,
         SDL_LockSurface(surf);
         Uint32* dst = (Uint32*)surf->pixels;
         Uint32* src = (Uint32*)bits;
+        // 亮度即 alpha, 颜色统一为请求色 — 抗锯齿平滑, 无二值描边锯齿
+        Uint8 cr = (Uint8)r, cg = (Uint8)g, cb = (Uint8)b;
         for (int y = 0; y < outH; ++y) {
             for (int x = 0; x < outW; ++x) {
                 Uint32 px = src[y * outW + x];
-                Uint8 a = (px >> 24) & 0xFF;
                 Uint8 sr = (px >> 16) & 0xFF;
                 Uint8 sg = (px >> 8) & 0xFF;
                 Uint8 sb = px & 0xFF;
-                // 非黑像素 alpha=255，黑像素 alpha=0（透明）
-                if (sr > 5 || sg > 5 || sb > 5) a = 255;
-                else a = 0;
-                dst[y * surf->w + x] = (a << 24) | (sr << 16) | (sg << 8) | sb;
+                Uint8 a = sr; if (sg > a) a = sg; if (sb > a) a = sb;
+                dst[y * surf->w + x] = ((Uint32)a << 24) | ((Uint32)cr << 16) |
+                                       ((Uint32)cg << 8) | cb;
             }
         }
         SDL_UnlockSurface(surf);
@@ -125,14 +126,16 @@ int GdiTextCache::measureText(const std::string& utf8, int ptSize) {
 }
 
 void GdiTextCache::drawText(int x, int y, const std::string& utf8, int ptSize,
-                             int r, int g, int b) {
+                             int r, int g, int b, int a) {
     // 查缓存（哈希表 O(1)；旧实现 vector 线性扫描每帧数千次字符串比较）
     std::string key = utf8 + "|" + std::to_string(ptSize) + "|" +
                       std::to_string(r) + "," + std::to_string(g) + "," + std::to_string(b);
     auto it = cache_.find(key);
     if (it != cache_.end()) {
         SDL_Rect dst{ x, y, it->second.w, it->second.h };
+        if (a < 255) SDL_SetTextureAlphaMod(it->second.tex, (Uint8)a);
         SDL_RenderCopy(renderer_, it->second.tex, nullptr, &dst);
+        if (a < 255) SDL_SetTextureAlphaMod(it->second.tex, 255);   // 复位, 缓存共享
         return;
     }
 
@@ -152,5 +155,7 @@ void GdiTextCache::drawText(int x, int y, const std::string& utf8, int ptSize,
     }
 
     SDL_Rect dst{ x, y, w, h };
+    if (a < 255) SDL_SetTextureAlphaMod(tex, (Uint8)a);
     SDL_RenderCopy(renderer_, tex, nullptr, &dst);
+    if (a < 255) SDL_SetTextureAlphaMod(tex, 255);
 }
