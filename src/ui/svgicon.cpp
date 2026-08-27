@@ -1,6 +1,7 @@
-// M32a: SVG path 光标化图标系统实现。
-// 解析器支持: M m L l H h V v Z z A a(含命令后隐式重复坐标对)，
-// 覆盖效果图全部 Material 图标；圆弧端点参数化转三次贝塞尔后扁平化。
+// SVG path rasterizer icon system.
+// Material Design 24x24 filled icons, parsed from the original design HTML.
+// Scanline nonzero-winding fill with 3x supersampled AA.
+// Arcs flattened to cubic Beziers, quadratic Beziers tessellated.
 
 #include "ui/svgicon.h"
 
@@ -14,7 +15,7 @@
 
 namespace svgicon {
 
-// ---------------- 图标库(逐字取自效果图 HTML) ----------------
+// Material Design filled icons (24x24 viewBox, taken from design HTML)
 static const Def kDefs[] = {
     { "play",    "M8 5v14l11-7z" },
     { "pause",   "M6 4h4v16H6zM14 4h4v16h-4z" },
@@ -44,7 +45,7 @@ const Def* find(const char* id) {
     return nullptr;
 }
 
-// ---------------- 路径解析 ----------------
+// ---------------- Path parser ----------------
 struct Vec2 { float x, y; };
 
 static bool isCmdChar(char c) {
@@ -124,7 +125,7 @@ static void arcToCubics(float curX, float curY, float rx, float ry, float rotDeg
     }
 }
 
-// path → 多边形子路径集合（单位 = 24 视图框）
+// Parse SVG path d attribute into polygon subpaths (units = 24 viewBox)
 static std::vector<std::vector<Vec2>> parsePath(const char* d) {
     std::vector<std::vector<Vec2>> polys;
     std::vector<Vec2> cur;
@@ -175,6 +176,19 @@ static std::vector<std::vector<Vec2>> parsePath(const char* d) {
                         a[3] != 0, a[4] != 0, ex, ey, cur);
             pt = Vec2{ ex, ey };
             break; }
+        case 'Q': case 'q': {
+            if (tk.num(a, 4) < 4) goto done;
+            float cx = (float)a[0], cy = (float)a[1];
+            float ex = (float)a[2], ey = (float)a[3];
+            if (cmd == 'q') { cx += pt.x; cy += pt.y; ex += pt.x; ey += pt.y; }
+            for (int s = 1; s <= 8; ++s) {
+                float u = s / 8.f, v = 1 - u;
+                float bx = v*v*pt.x + 2*v*u*cx + u*u*ex;
+                float by = v*v*pt.y + 2*v*u*cy + u*u*ey;
+                cur.push_back({ bx, by });
+            }
+            pt = Vec2{ ex, ey };
+            break; }
         default:
             ++tk.p;
             break;
@@ -185,14 +199,13 @@ done:
     return polys;
 }
 
-// ---------------- 扫描线光栅化（非零环绕，3x 超采样 AA） ----------------
+// ---------------- Scanline rasterizer (nonzero winding, 3x supersampled AA) ----------------
 static SDL_Texture* rasterize(SDL_Renderer* r,
                               const std::vector<std::vector<Vec2>>& polys,
                               int size, Uint8 cr, Uint8 cg, Uint8 cb, Uint8 ca) {
     const int SS = 3;
     int W = size * SS;
     if (W <= 0) return nullptr;
-    // M32a.2 关键修复：path 坐标是 24 视图框单位，必须缩放到目标尺寸！
     const float k = (float)W / 24.f;
 
     struct Edge { float x0, y0, x1, y1; };
@@ -221,8 +234,6 @@ static SDL_Texture* rasterize(SDL_Renderer* r,
         if (xs.size() < 2) continue;
         std::sort(xs.begin(), xs.end());
         Uint8* row = &cov[(size_t)py * W];
-        // 非零环绕等价化：Material 图标的镂空子路径方向相反，
-        // 成对交点的奇偶区间即最终覆盖（实测与浏览器渲染一致）
         for (size_t i = 0; i + 1 < xs.size(); i += 2) {
             int xa = (int)std::ceil(xs[i] - 0.5f);
             int xb = (int)std::floor(xs[i + 1] - 0.5f);
@@ -233,7 +244,7 @@ static SDL_Texture* rasterize(SDL_Renderer* r,
     }
 
     std::vector<Uint32> pixels((size_t)size * size, 0);
-    float inv = 1.f / (SS * SS) * ca;
+    float inv = 1.f / (SS * SS * 255) * ca;
     for (int y = 0; y < size; ++y) {
         for (int x = 0; x < size; ++x) {
             int sum = 0;
@@ -254,9 +265,7 @@ static SDL_Texture* rasterize(SDL_Renderer* r,
     return tex;
 }
 
-// ---------------- 缓存与绘制 ----------------
-// 注意：缓存键不含 alpha（淡入动画每帧 alpha 不同，会导致缓存爆炸）。
-// 纹理恒以全 alpha 光栅化，绘制时用 SDL_SetTextureAlphaMod 调制。
+// ---------------- Cache and draw ----------------
 struct CacheKey {
     std::string id;
     int size;
@@ -271,6 +280,62 @@ struct KeyHash {
     }
 };
 static std::unordered_map<CacheKey, SDL_Texture*, KeyHash> g_cache;
+
+// Debug: save icon textures to BMP for inspection
+static int g_dumpCount = 0;
+static const char* g_dumpIds[] = {"close","play","pause","volume","gear","prev","next","full","exitfull","minimize","list","cc",nullptr};
+static void dumpTextureToBMP(SDL_Texture* tex, const char* id, int size) {
+    bool shouldDump = false;
+    for (int i = 0; g_dumpIds[i]; ++i) {
+        if (strcmp(id, g_dumpIds[i]) == 0) { shouldDump = true; break; }
+    }
+    if (!shouldDump || !tex) return;
+    if (g_dumpCount++ > 20) return;
+    int w = 0, h = 0;
+    SDL_QueryTexture(tex, nullptr, nullptr, &w, &h);
+    std::vector<Uint32> pixels(w * h);
+    void* px = nullptr;
+    int pitch = 0;
+    SDL_LockTexture(tex, nullptr, &px, &pitch);
+    // Copy pixels while texture is locked
+    for (int y = 0; y < h; ++y) {
+        memcpy(&pixels[y * w], (Uint8*)px + y * pitch, w * sizeof(Uint32));
+    }
+    SDL_UnlockTexture(tex);
+    char path[256];
+    snprintf(path, sizeof(path), "icon_debug_%s_%dx%d.bmp", id, w, h);
+    FILE* f = fopen(path, "wb");
+    if (!f) return;
+    int rowSize = ((w * 3 + 3) / 4) * 4;
+    int imgSize = rowSize * h;
+    int fileSize = 54 + imgSize;
+    Uint8 header[54] = {};
+    header[0] = 'B'; header[1] = 'M';
+    header[2] = fileSize; header[3] = fileSize >> 8; header[4] = fileSize >> 16; header[5] = fileSize >> 24;
+    header[10] = 54;
+    header[14] = 40;
+    header[18] = w; header[19] = w >> 8; header[20] = w >> 16; header[21] = w >> 24;
+    header[22] = h; header[23] = h >> 8; header[24] = h >> 16; header[25] = h >> 24;
+    header[26] = 1; header[28] = 24;
+    header[34] = imgSize; header[35] = imgSize >> 8; header[36] = imgSize >> 16; header[37] = imgSize >> 24;
+    fwrite(header, 1, 54, f);
+    std::vector<Uint8> row(rowSize, 0);
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            Uint32 p = pixels[(h - 1 - y) * w + x];
+            Uint8 a = (p >> 24) & 0xFF;
+            Uint8 r = (p >> 16) & 0xFF;
+            Uint8 g = (p >> 8) & 0xFF;
+            Uint8 b = p & 0xFF;
+            float af = a / 255.f;
+            row[x * 3 + 0] = (Uint8)(b * af);
+            row[x * 3 + 1] = (Uint8)(g * af);
+            row[x * 3 + 2] = (Uint8)(r * af);
+        }
+        fwrite(row.data(), 1, rowSize, f);
+    }
+    fclose(f);
+}
 
 void draw(SDL_Renderer* r, const char* id, int cx, int cy, int size,
           Uint8 cr, Uint8 cg, Uint8 cb, Uint8 ca) {
@@ -287,6 +352,7 @@ void draw(SDL_Renderer* r, const char* id, int cx, int cy, int size,
         tex = rasterize(r, parsePath(def->path), size, cr, cg, cb, 255);
         if (!tex) return;
         g_cache[key] = tex;
+        dumpTextureToBMP(tex, id, size);
     }
     SDL_SetTextureAlphaMod(tex, ca);
     SDL_Rect dst{ cx - size / 2, cy - size / 2, size, size };

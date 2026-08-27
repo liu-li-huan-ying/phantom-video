@@ -993,9 +993,9 @@ static bool inVolumeArea(int mx, int my) {
 static int hitTestTopbarIcon(int mx, int my, int winW) {
     if (my < 0 || my > curTopH()) return -1;
     int iconY = curTopH() / 2;
-    int iconHalf = U(12);
+    int iconHalf = U(21);
     int rx = winW - U(20);
-    int icoSp = U(34);
+    int icoSp = U(42);
     struct IDef { const char* id; int idIdx; };
     static const IDef icons[] = {
         {"close", 0}, {"maximize", 1}, {"minimize", 2},
