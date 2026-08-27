@@ -2301,8 +2301,8 @@ static void drawThumbCover(const std::string& path, SDL_Rect rc, int rad) {
         SDL_SetRenderDrawColor(g_sdlRdr, ui::SURFACE1_R, ui::SURFACE1_G,
                                ui::SURFACE1_B, 255);
         SDL_RenderFillRect(g_sdlRdr, &rc);
-        svgicon::draw(g_sdlRdr, "play", rc.x + rc.w / 2, rc.y + rc.h / 2, U(16),
-                      70, 70, 76, 255);
+        svgicon::draw(g_sdlRdr, "play", rc.x + rc.w / 2, rc.y + rc.h / 2, U(20),
+                      255, 255, 255, 255);
     } else {
         int tw = 0, th = 0;
         SDL_QueryTexture(it->second, nullptr, nullptr, &tw, &th);
@@ -2382,7 +2382,7 @@ static void renderOverlay() {
                     SDL_RenderFillRect(g_sdlRdr, &hrc);
                 }
                 Uint8 ic = (g_ui.topbarHover == i) ? 255 : 235;
-                svgicon::draw(g_sdlRdr, ids[i], rx, iconY, U(20), ic, ic, ic, A8(255));
+                svgicon::draw(g_sdlRdr, ids[i], rx, iconY, U(28), 255, 255, 255, A8(255));
                 rx -= iconSz;
             }
         }
@@ -2659,8 +2659,9 @@ static void renderOverlay() {
         int topH = U(52);
         int iconY = topH / 2 + topOff;
         auto A = [&](Uint8 base) { return (Uint8)(base * fa); };
-        int iconSz = U(34);
-        int iconDrawSz = U(20);
+        int iconSz = U(42);
+        int iconDrawSz = U(28);
+
         int hoverR = iconSz / 2 + U(2);
         int rx = w - U(20);
         struct TopDef { const char* id; };
@@ -2681,10 +2682,9 @@ static void renderOverlay() {
                 SDL_Rect hrc = {rx - hoverR, iconY - hoverR, hoverR * 2, hoverR * 2};
                 SDL_RenderFillRect(g_sdlRdr, &hrc);
             }
-            // 纯白图标, 非悬停时略暗
-            Uint8 ic = (g_ui.topbarHover == i) ? 255 : 235;
+            // 纯白图标, 放大加粗
             svgicon::draw(g_sdlRdr, topIcons[i].id, rx, iconY, iconDrawSz,
-                          ic, ic, ic, A(255));
+                          255, 255, 255, A(255));
             rx -= iconSz;
         }
     }
@@ -2700,8 +2700,8 @@ static void renderOverlay() {
         SDL_Rect dim = {0, 0, w, h};
         SDL_RenderFillRect(g_sdlRdr, &dim);
         int ccx = w / 2, ccy = h / 2;
-        svgicon::draw(g_sdlRdr, "play", ccx, ccy, U(30),
-                      255, 255, 255, (Uint8)(200 * fa));
+        svgicon::draw(g_sdlRdr, "play", ccx, ccy, U(52),
+                      255, 255, 255, (Uint8)(220 * fa));
     }
 
     // --- gradient background (效果图: 单层渐变 底部→顶部全透) ---
@@ -2781,18 +2781,18 @@ static void renderOverlay() {
         const int iconC = ui::ICON_BRIGHT, text2 = ui::ICON_DIM;
 
         // prev
-        int ctrlIconSz = U(34);
-        svgicon::draw(g_sdlRdr, "prev", L.prev.x + ctrlIconSz / 2, L.prev.y + ctrlIconSz / 2, U(18),
-                      iconC, iconC, 231, A(255));
+        int ctrlIconSz = U(42);
+        svgicon::draw(g_sdlRdr, "prev", L.prev.x + ctrlIconSz / 2, L.prev.y + ctrlIconSz / 2, U(28),
+                      255, 255, 255, A(255));
         // PLAY 白图标
         {
             const char* pi = (g_mpv->state() == MpvBackend::State::Paused) ? "play" : "pause";
             svgicon::draw(g_sdlRdr, pi, L.play.x + L.play.w / 2, L.play.y + L.play.h / 2,
-                          U(18), iconC, iconC, 231, A(255));
+                          U(28), 255, 255, 255, A(255));
         }
         // next
-        svgicon::draw(g_sdlRdr, "next", L.next.x + ctrlIconSz / 2, L.next.y + ctrlIconSz / 2, U(18),
-                      iconC, iconC, 231, A(255));
+        svgicon::draw(g_sdlRdr, "next", L.next.x + ctrlIconSz / 2, L.next.y + ctrlIconSz / 2, U(28),
+                      255, 255, 255, A(255));
         // time（tabular 观感: 等宽由字体保证）
         {
             char cur[32], tot[32], ts[80];
@@ -2808,12 +2808,12 @@ static void renderOverlay() {
             int tw = g_text.measureText(label, T(12));
             int tx = rc.x + U(8);
             g_text.drawText(tx, rc.y + U(10), label, T(12), ui::TEXT_DIM, ui::TEXT_DIM, ui::TEXT_DIM + 5);
-            svgicon::draw(g_sdlRdr, iconId, tx + tw + U(9), rc.y + U(17), U(15),
+            svgicon::draw(g_sdlRdr, iconId, tx + tw + U(9), rc.y + U(17), U(22),
                           ir, ig, ib, A(255));
         };
         // 字幕
         {
-            Uint8 ic = g_mpv->subVisible() ? 235 : 110;
+            Uint8 ic = g_mpv->subVisible() ? 255 : 110;
             drawTextBtn(L.subBtn, i18n::subtitles(), "cc", ic, ic, ic);
         }
         // 倍速
@@ -2837,15 +2837,15 @@ static void renderOverlay() {
         // 音量图标
         {
             const char* vid = g_mpv->muted() ? "mute" : "volume";
-            svgicon::draw(g_sdlRdr, vid, L.volIconCx, L.cy, U(18),
-                          iconC, iconC, 231, A(255));
+            svgicon::draw(g_sdlRdr, vid, L.volIconCx, L.cy, U(28),
+                          255, 255, 255, A(255));
         }
         // 设置(文字+gear)
-        drawTextBtn(L.setBtn, i18n::settings(), "gear", ui::TEXT_DIM, ui::TEXT_DIM, ui::TEXT_DIM + 5);
+        drawTextBtn(L.setBtn, i18n::settings(), "gear", 255, 255, 255);
         // 全屏
         const char* fid = g_ui.fullscreen ? "exitfull" : "full";
-        svgicon::draw(g_sdlRdr, fid, L.fullBtn.x + ctrlIconSz / 2, L.fullBtn.y + ctrlIconSz / 2, U(18),
-                      iconC, iconC, 231, A(255));
+        svgicon::draw(g_sdlRdr, fid, L.fullBtn.x + ctrlIconSz / 2, L.fullBtn.y + ctrlIconSz / 2, U(28),
+                      255, 255, 255, A(255));
 
         // 音量滑条(展开态, 在 Row1Layout 内用 L.volIconCx 定位)
         if (volOpen && L.volSliderW > 0) {
@@ -2863,11 +2863,6 @@ static void renderOverlay() {
                 SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 255);
                 SDL_RenderFillRect(g_sdlRdr, &fl);
             }
-        }
-
-        // HW 徽标(顶栏右侧下方小字, 效果图无此项但保留信息)
-        if (g_mpv->hwDecodeActive()) {
-            g_text.drawText(w - U(60), barTop - U(2), "[HW]", T(10), ui::ACCENT2_R, ui::ACCENT2_G, ui::ACCENT2_B);
         }
     }
 
@@ -3071,8 +3066,8 @@ static void renderOverlay() {
         int closeX = panelX + panelW - U(40);
         int closeY = panelY + U(10);
         SDL_Rect closeRc = {closeX, closeY, U(28), U(28)};
-        svgicon::draw(g_sdlRdr, "close", closeX + U(14), closeY + U(14), U(14),
-                      212, 212, 216, 255);
+        svgicon::draw(g_sdlRdr, "close", closeX + U(14), closeY + U(14), U(22),
+                      255, 255, 255, 255);
         g_ui.plCloseRect = closeRc;
 
         // items from playlist queue（卡片化: thumb100×56+dur角标+title+state）
@@ -3114,8 +3109,8 @@ static void renderOverlay() {
             if (texIt != g_thumbTex.end()) {
                 SDL_RenderCopy(g_sdlRdr, texIt->second, nullptr, &thRc);
             } else {
-                svgicon::draw(g_sdlRdr, "play", thRc.x + U(50), thRc.y + U(28), U(20),
-                              255, 255, 255, 64);
+                svgicon::draw(g_sdlRdr, "play", thRc.x + U(50), thRc.y + U(28), U(24),
+                              255, 255, 255, 255);
             }
             // dur 角标(right4 bottom4 黑.72)
             {
@@ -3264,7 +3259,7 @@ static void renderOverlay() {
 
         // title + close
         g_text.drawText(sg.panelX + U(20), sg.panelY + U(16), i18n::settingsTitle(), T(16), 255, 255, 255);
-        svgicon::draw(g_sdlRdr, "close", sg.closeCx, sg.closeCy, U(18), ui::ICON_DIM, ui::ICON_DIM, ui::ICON_DIM + 5, 200);
+        svgicon::draw(g_sdlRdr, "close", sg.closeCx, sg.closeCy, U(26), 255, 255, 255, 200);
 
         // toggle rows
         int toggleVals[SET_ROW_COUNT] = { g_cfg.hwDecode, g_cfg.volNorm,
