@@ -281,61 +281,7 @@ struct KeyHash {
 };
 static std::unordered_map<CacheKey, SDL_Texture*, KeyHash> g_cache;
 
-// Debug: save icon textures to BMP for inspection
-static int g_dumpCount = 0;
-static const char* g_dumpIds[] = {"close","play","pause","volume","gear","prev","next","full","exitfull","minimize","list","cc",nullptr};
-static void dumpTextureToBMP(SDL_Texture* tex, const char* id, int size) {
-    bool shouldDump = false;
-    for (int i = 0; g_dumpIds[i]; ++i) {
-        if (strcmp(id, g_dumpIds[i]) == 0) { shouldDump = true; break; }
-    }
-    if (!shouldDump || !tex) return;
-    if (g_dumpCount++ > 20) return;
-    int w = 0, h = 0;
-    SDL_QueryTexture(tex, nullptr, nullptr, &w, &h);
-    std::vector<Uint32> pixels(w * h);
-    void* px = nullptr;
-    int pitch = 0;
-    SDL_LockTexture(tex, nullptr, &px, &pitch);
-    // Copy pixels while texture is locked
-    for (int y = 0; y < h; ++y) {
-        memcpy(&pixels[y * w], (Uint8*)px + y * pitch, w * sizeof(Uint32));
-    }
-    SDL_UnlockTexture(tex);
-    char path[256];
-    snprintf(path, sizeof(path), "icon_debug_%s_%dx%d.bmp", id, w, h);
-    FILE* f = fopen(path, "wb");
-    if (!f) return;
-    int rowSize = ((w * 3 + 3) / 4) * 4;
-    int imgSize = rowSize * h;
-    int fileSize = 54 + imgSize;
-    Uint8 header[54] = {};
-    header[0] = 'B'; header[1] = 'M';
-    header[2] = fileSize; header[3] = fileSize >> 8; header[4] = fileSize >> 16; header[5] = fileSize >> 24;
-    header[10] = 54;
-    header[14] = 40;
-    header[18] = w; header[19] = w >> 8; header[20] = w >> 16; header[21] = w >> 24;
-    header[22] = h; header[23] = h >> 8; header[24] = h >> 16; header[25] = h >> 24;
-    header[26] = 1; header[28] = 24;
-    header[34] = imgSize; header[35] = imgSize >> 8; header[36] = imgSize >> 16; header[37] = imgSize >> 24;
-    fwrite(header, 1, 54, f);
-    std::vector<Uint8> row(rowSize, 0);
-    for (int y = 0; y < h; ++y) {
-        for (int x = 0; x < w; ++x) {
-            Uint32 p = pixels[(h - 1 - y) * w + x];
-            Uint8 a = (p >> 24) & 0xFF;
-            Uint8 r = (p >> 16) & 0xFF;
-            Uint8 g = (p >> 8) & 0xFF;
-            Uint8 b = p & 0xFF;
-            float af = a / 255.f;
-            row[x * 3 + 0] = (Uint8)(b * af);
-            row[x * 3 + 1] = (Uint8)(g * af);
-            row[x * 3 + 2] = (Uint8)(r * af);
-        }
-        fwrite(row.data(), 1, rowSize, f);
-    }
-    fclose(f);
-}
+
 
 void draw(SDL_Renderer* r, const char* id, int cx, int cy, int size,
           Uint8 cr, Uint8 cg, Uint8 cb, Uint8 ca) {
@@ -352,7 +298,6 @@ void draw(SDL_Renderer* r, const char* id, int cx, int cy, int size,
         tex = rasterize(r, parsePath(def->path), size, cr, cg, cb, 255);
         if (!tex) return;
         g_cache[key] = tex;
-        dumpTextureToBMP(tex, id, size);
     }
     SDL_SetTextureAlphaMod(tex, ca);
     SDL_Rect dst{ cx - size / 2, cy - size / 2, size, size };
