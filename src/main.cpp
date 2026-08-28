@@ -1817,7 +1817,7 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             }
             if (g_ui.eqMenuOpen) {
                 int menuW = U(200), itemH = U(36);
-                int menuH = U(32) + 6 * itemH + U(40);
+                int menuH = U(32) + 6 * itemH + U(40) + U(50);
                 int menuX = g_ui.winW / 2 - menuW / 2;
                 int menuY = g_ui.winH / 2 - menuH / 2;
                 if (mx >= menuX && mx <= menuX + menuW && my >= menuY && my <= menuY + menuH) {
@@ -1844,6 +1844,27 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                             for (int i = 0; i < 6; ++i) g_mpv->setEQBand(i, 0.0f);
                             showToast(i18n::eqReset());
                         }
+                        // P1-6: EQ 预设点击
+                        struct EqPreset { const char* name; float bands[6]; };
+                        static const EqPreset presets[] = {
+                            { "Flat",    { 0,  0,  0,  0,  0,  0 } },
+                            { "Bass",    { 6,  4,  1, -1, -2, -3 } },
+                            { "Treble",  {-3, -2, -1,  1,  4,  6 } },
+                            { "Vocal",   {-2, -1,  3,  4,  2, -1 } },
+                            { "Rock",    { 5,  3, -1, -1,  3,  5 } },
+                        };
+                        int presetY = resetY + U(30) + U(14);
+                        int presetBtnW = (menuW - U(20)) / 5;
+                        for (int i = 0; i < 5; ++i) {
+                            int bx = menuX + U(10) + i * presetBtnW;
+                            int bw = presetBtnW - U(4);
+                            if (mx >= bx && mx <= bx + bw && my >= presetY && my <= presetY + U(22)) {
+                                for (int b = 0; b < 6; ++b)
+                                    g_mpv->setEQBand(b, presets[i].bands[b]);
+                                showToast(presets[i].name);
+                                break;
+                            }
+                        }
                         // 菜单内其他位置: 保持打开
                         g_ui.visible = true;
                         g_ui.hideAt = SDL_GetTicks() + ui::CTRLBAR_HIDE_MS;
@@ -1851,7 +1872,7 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                         return 0;
                     }
                 } else {
-                    g_ui.eqMenuOpen = false;   // 菜单外: 关闭
+                    g_ui.eqMenuOpen = false;
                 }
             }
             // --- 字幕轨选择菜单 ---
@@ -3361,7 +3382,7 @@ static void renderOverlay() {
         int sliderW = U(100);
         int itemH = U(36);
         int menuW = U(200);
-        int menuH = U(32) + 6 * itemH + U(40);  // title + 6 bands + reset button
+        int menuH = U(32) + 6 * itemH + U(40) + U(50);  // title + 6 bands + reset + presets
         int menuX = w / 2 - menuW / 2;           // 居中显示
         int menuY = h / 2 - menuH / 2;
 
@@ -3416,6 +3437,39 @@ static void renderOverlay() {
         SDL_SetRenderDrawColor(g_sdlRdr, 58, 58, 62, 255);
         SDL_RenderFillRect(g_sdlRdr, &resetRc);
         g_text.drawText(resetRc.x + U(14), resetRc.y + U(5), i18n::reset(), T(11), ui::ICON_BRIGHT, ui::ICON_BRIGHT, 231);
+
+        // P1-6: EQ 预设按钮
+        struct EqPreset { const char* name; float bands[6]; };
+        static const EqPreset presets[] = {
+            { "Flat",    { 0,  0,  0,  0,  0,  0 } },
+            { "Bass",    { 6,  4,  1, -1, -2, -3 } },
+            { "Treble",  {-3, -2, -1,  1,  4,  6 } },
+            { "Vocal",   {-2, -1,  3,  4,  2, -1 } },
+            { "Rock",    { 5,  3, -1, -1,  3,  5 } },
+        };
+        static const int kPresetCount = (int)(sizeof(presets) / sizeof(presets[0]));
+        int presetY = resetY + U(30);
+        int presetBtnW = (menuW - U(20)) / kPresetCount;
+        g_text.drawText(menuX + U(10), presetY - U(2), T("预设:", "Presets:"), T(10), 140, 140, 148);
+        for (int i = 0; i < kPresetCount; ++i) {
+            int bx = menuX + U(10) + i * presetBtnW;
+            int by = presetY + U(14);
+            int bw = presetBtnW - U(4);
+            int bh = U(22);
+            // 检查是否当前匹配
+            bool match = true;
+            for (int b = 0; b < 6; ++b) {
+                if (std::abs(g_mpv->eqGain(b) - presets[i].bands[b]) > 0.5f) { match = false; break; }
+            }
+            SDL_SetRenderDrawColor(g_sdlRdr, match ? 59 : 48, match ? 130 : 48, match ? 246 : 52, 255);
+            SDL_Rect btnRc = {bx, by, bw, bh};
+            SDL_RenderFillRect(g_sdlRdr, &btnRc);
+            g_text.drawText(bx + U(4), by + U(4), presets[i].name, T(9),
+                            match ? 255 : 180, match ? 255 : 180, match ? 255 : 186);
+            // 存储按钮区域
+            static SDL_Rect s_presetRects[5];
+            s_presetRects[i] = btnRc;
+        }
     }
     // --- subtitle track popup menu ---
     if (g_ui.subMenuOpen) {
