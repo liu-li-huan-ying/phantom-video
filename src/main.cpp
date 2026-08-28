@@ -254,8 +254,9 @@ struct UiState {
     int    eqDraggingBand = -1; // 正在拖动的频段, -1=无
 
     // subtitle/audio track popup
-    bool   subMenuOpen = false;
-    bool   audioMenuOpen = false;
+    bool subMenuOpen = false;
+    bool audioMenuOpen = false;
+    bool chapterMenuOpen = false;
 
     // volume slider
     bool   volumeSliderOpen = false;
@@ -334,6 +335,7 @@ static const char* T(const char* zh, const char* en) {
 namespace i18n {
     inline const char* subtitles()  { return T("字幕", "Subtitles"); }
     inline const char* audioTrack() { return T("音轨", "Audio"); }
+    inline const char* chapName()   { return T("章节", "Chapters"); }
     inline const char* speed()      { return T("倍速", "Speed"); }
     inline const char* quality()    { return T("画质", "Quality"); }
     inline const char* settings()   { return T("设置", "Settings"); }
@@ -524,7 +526,7 @@ static void saveWindowPos(HWND hwnd) {
 struct Row1Layout {
     SDL_Rect prev, play, next;         // 按钮
     int timeX;                          // 时间文本左缘
-    SDL_Rect subBtn, audioBtn, speedBtn, qualityBtn, setBtn, fullBtn;
+    SDL_Rect subBtn, audioBtn, chapterBtn, speedBtn, qualityBtn, setBtn, fullBtn;
     int volIconCx;                      // 音量图标中心
     int volSliderX, volSliderW;        // 滑条(展开态)
     int cy;                             // 行中心 y
@@ -575,6 +577,7 @@ static void layoutRow1(int w, int barTopY, bool volOpen, Row1Layout& L) {
     }
     placeRight(L.subBtn, g_text.measureText(i18n::subtitles(), T(12)) + U(26));
     placeRight(L.audioBtn, g_text.measureText(i18n::audioTrack(), T(12)) + U(26));
+    placeRight(L.chapterBtn, g_text.measureText(i18n::chapName(), T(12)) + U(26));
     // 音量: 先放滑条(展开态), 再放图标; 滑条在图标右侧
     L.volSliderW = volOpen ? U(80) : 0;
     if (volOpen) {
@@ -1864,6 +1867,32 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 }
                 g_ui.audioMenuOpen = false;
             }
+            // --- 章节选择菜单 ---
+            if (g_ui.chapterMenuOpen) {
+                auto chs = g_mpv->chapters();
+                Row1Layout L;
+                layoutRow1(g_ui.winW, sbTopY(), false, L);
+                int itemH = U(32), menuW = U(240);
+                int menuH = (int)chs.size() * itemH + U(12);
+                int menuX = L.chapterBtn.x;
+                int menuY = L.chapterBtn.y - menuH - U(6);
+                if (menuY < 0) menuY = L.chapterBtn.y + L.chapterBtn.h + U(6);
+                if (menuX + menuW > g_ui.winW - U(8)) menuX = g_ui.winW - menuW - U(8);
+                if (mx >= menuX && mx <= menuX + menuW &&
+                    my >= menuY && my <= menuY + menuH - U(12)) {
+                    int idx = (my - menuY - U(6)) / itemH;
+                    if (idx >= 0 && idx < (int)chs.size()) {
+                        g_mpv->seekToChapter(idx);
+                        const char* name = chs[idx].title.empty()
+                            ? T("无标题", "Untitled") : chs[idx].title.c_str();
+                        char msg[128];
+                        std::snprintf(msg, sizeof(msg), "%s %d: %s",
+                                      T("章节", "Chapter"), idx + 1, name);
+                        showToast(msg);
+                    }
+                }
+                g_ui.chapterMenuOpen = false;
+            }
             g_ui.visible = true;
             g_ui.hideAt = SDL_GetTicks() + ui::CTRLBAR_HIDE_MS;
             g_dirty.store(true);
@@ -1922,6 +1951,7 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     // 多字幕轨: 打开选择菜单
                     g_ui.subMenuOpen = !g_ui.subMenuOpen;
                     g_ui.audioMenuOpen = false;
+                    g_ui.chapterMenuOpen = false;
                 } else {
                     // 单轨/无轨: 直接切换可见性
                     bool vis = !g_mpv->subVisible();
@@ -1938,20 +1968,33 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 g_ui.speedMenuOpen = !g_ui.speedMenuOpen;
                 g_ui.subMenuOpen = false;
                 g_ui.audioMenuOpen = false;
+                g_ui.chapterMenuOpen = false;
             }
             else if (inRc(L.audioBtn)) {
                 auto tracks = g_mpv->audioTracks();
                 if (tracks.size() > 1) {
                     g_ui.audioMenuOpen = !g_ui.audioMenuOpen;
                     g_ui.subMenuOpen = false;
+                    g_ui.chapterMenuOpen = false;
                 } else {
                     showToast(i18n::audioTrack());
+                }
+            }
+            else if (inRc(L.chapterBtn)) {
+                auto chs = g_mpv->chapters();
+                if (!chs.empty()) {
+                    g_ui.chapterMenuOpen = !g_ui.chapterMenuOpen;
+                    g_ui.subMenuOpen = false;
+                    g_ui.audioMenuOpen = false;
+                } else {
+                    showToast(T("无章节信息", "No chapters"));
                 }
             }
             else if (inRc(L.qualityBtn)) {
                 g_ui.qualityMenuOpen = !g_ui.qualityMenuOpen;
                 g_ui.subMenuOpen = false;
                 g_ui.audioMenuOpen = false;
+                g_ui.chapterMenuOpen = false;
             }
             else if (mx >= L.volIconCx - U(17) && mx <= L.volIconCx + U(17) &&
                      my >= L.cy - U(17) && my <= L.cy + U(17)) {
@@ -3084,6 +3127,11 @@ static void renderOverlay() {
             Uint8 ic = g_mpv->audioTracks().size() > 1 ? 255 : 110;
             drawTextBtn(L.audioBtn, i18n::audioTrack(), "cc", ic, ic, ic);
         }
+        // 章节 (文字按钮)
+        {
+            Uint8 ic = g_mpv->chapters().size() > 1 ? 255 : 110;
+            drawTextBtn(L.chapterBtn, i18n::chapName(), "list", ic, ic, ic);
+        }
         // 倍速
         {
             char spd[16];
@@ -3406,6 +3454,44 @@ static void renderOverlay() {
             bool sel = (tracks[i].id == curAudioId);
             Uint8 tr = sel ? 59 : 228, tg = sel ? 130 : 228, tb = sel ? 246 : 231;
             g_text.drawText(menuX + U(10), iy + U(6), tracks[i].desc.c_str(), T(13), tr, tg, tb);
+        }
+    }
+    // --- chapter popup menu ---
+    if (g_ui.chapterMenuOpen) {
+        auto chs = g_mpv->chapters();
+        Row1Layout L;
+        layoutRow1(w, barTop, g_ui.volumeSliderOpen || g_ui.volumeDragging, L);
+        int itemH = U(32), menuW = U(240);
+        int menuH = (int)chs.size() * itemH + U(12);
+        int menuX = L.chapterBtn.x;
+        int menuY = L.chapterBtn.y - menuH - U(6);
+        if (menuY < 0) menuY = L.chapterBtn.y + L.chapterBtn.h + U(6);
+        if (menuX + menuW > w - U(8)) menuX = w - menuW - U(8);
+        int cr = U(8);
+        SDL_Rect bgRc = {menuX + cr, menuY, menuW - cr * 2, menuH};
+        SDL_SetRenderDrawColor(g_sdlRdr, 24, 24, 26, 255);
+        SDL_RenderFillRect(g_sdlRdr, &bgRc);
+        SDL_Rect midH2 = {menuX, menuY + cr, menuW, menuH - cr * 2};
+        SDL_RenderFillRect(g_sdlRdr, &midH2);
+        fillCircle(g_sdlRdr, menuX + cr, menuY + cr, cr, 24, 24, 26, 255);
+        fillCircle(g_sdlRdr, menuX + menuW - cr, menuY + cr, cr, 24, 24, 26, 255);
+        fillCircle(g_sdlRdr, menuX + cr, menuY + menuH - cr, cr, 24, 24, 26, 255);
+        fillCircle(g_sdlRdr, menuX + menuW - cr, menuY + menuH - cr, cr, 24, 24, 26, 255);
+        SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 26);
+        SDL_RenderDrawLine(g_sdlRdr, menuX + cr, menuY, menuX + menuW - cr, menuY);
+        SDL_RenderDrawLine(g_sdlRdr, menuX + cr, menuY + menuH, menuX + menuW - cr, menuY + menuH);
+        SDL_RenderDrawLine(g_sdlRdr, menuX, menuY + cr, menuX, menuY + menuH - cr);
+        SDL_RenderDrawLine(g_sdlRdr, menuX + menuW, menuY + cr, menuX + menuW, menuY + menuH - cr);
+        int curCh = g_mpv->currentChapter();
+        for (int i = 0; i < (int)chs.size(); ++i) {
+            int iy = menuY + U(6) + i * itemH;
+            bool sel = (i == curCh);
+            Uint8 tr = sel ? 59 : 228, tg = sel ? 130 : 228, tb = sel ? 246 : 231;
+            const char* name = chs[i].title.empty()
+                ? T("无标题", "Untitled") : chs[i].title.c_str();
+            char label[128];
+            std::snprintf(label, sizeof(label), "%d. %s", i + 1, name);
+            g_text.drawText(menuX + U(10), iy + U(6), label, T(13), tr, tg, tb);
         }
     }
     if (g_ui.playlistOpen) {
