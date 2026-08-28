@@ -990,8 +990,8 @@ static void playIndex(int idx, bool relative = false) {
 static bool inVolumeArea(int mx, int my) {
     int barTop = sbTopY();
     int row1Off = U(50);
-    return my >= barTop + row1Off - U(17) && my <= barTop + row1Off + U(17) &&
-           mx >= g_ui.winW - U(170) && mx <= g_ui.winW - U(38);
+    return my >= barTop + row1Off - U(22) && my <= barTop + row1Off + U(22) &&
+           mx >= g_ui.winW - U(200) && mx <= g_ui.winW - U(38);
 }
 
 // ---- topbar icon hit test ----
@@ -1259,7 +1259,7 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             }
             g_ui.volHoverAt = SDL_GetTicks();
         } else if (g_ui.volumeSliderOpen && !g_ui.volumeDragging &&
-                   SDL_GetTicks() > g_ui.volHoverAt + 1200) {
+                   SDL_GetTicks() > g_ui.volHoverAt + 500) {
             g_ui.volumeSliderOpen = false;
             LOG_DBG("MAIN", "volume slider auto-collapse");
         }
@@ -1307,7 +1307,7 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         if (g_ui.volumeDragging && g_mpv) {
             Row1Layout L;
             layoutRow1(g_ui.winW, g_ui.winH, true, L);
-            float ratio = (float)(g_ui.mouseX - L.volSliderX) / U(70);
+            float ratio = (float)(g_ui.mouseX - L.volSliderX) / U(80);
             if (ratio < 0) ratio = 0; if (ratio > 1) ratio = 1;
             g_mpv->setVolume(ratio);
         }
@@ -1668,12 +1668,12 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             auto inRc = [&](const SDL_Rect& r) {
                 return mx >= r.x && mx <= r.x + r.w && my >= r.y && my <= r.y + r.h;
             };
-            // 音量滑条(展开时)拖拽起点 —— 先于图标判定
+            // 音量滑条(展开时)拖拽起点 —— 先于图标判定; 扩大上下热区到 ±U(20)
             if (volOpen && mx >= L.volSliderX - U(6) &&
-                mx <= L.volSliderX + U(76) &&
-                my >= L.cy - U(12) && my <= L.cy + U(12)) {
+                mx <= L.volSliderX + U(86) &&
+                my >= L.cy - U(20) && my <= L.cy + U(20)) {
                 g_ui.volumeDragging = true;
-                float ratio = (float)(mx - L.volSliderX) / U(70);
+                float ratio = (float)(mx - L.volSliderX) / U(80);
                 if (ratio < 0) ratio = 0; if (ratio > 1) ratio = 1;
                 g_mpv->setVolume(ratio);
                 SetCapture(hwnd);
@@ -1882,7 +1882,7 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             else if (contentH <= viewH) g_ui.playlistScroll = 0;
         }
         else if (g_mpv) {
-            g_mpv->setVolume(g_mpv->volume() + (d > 0 ? 0.05f : -0.05f));
+            g_mpv->setVolume(g_mpv->volume() + (d > 0 ? 0.02f : -0.02f));
             char msg[24];
             std::snprintf(msg, sizeof(msg), "%s %d%%", T("音量", "Volume"), (int)(g_mpv->volume() * 100 + 0.5f));
             showToast(msg);
@@ -2852,22 +2852,29 @@ static void renderOverlay() {
         svgicon::draw(g_sdlRdr, fid, L.fullBtn.x + ctrlIconSz / 2, L.fullBtn.y + ctrlIconSz / 2, U(28),
                       255, 255, 255, A(255));
 
-        // 音量滑条(展开态, 在 Row1Layout 内用 L.volIconCx 定位)
+        // 音量滑条(展开态)
         if (volOpen && L.volSliderW > 0) {
-            int sldW = U(70);
+            int sldW = U(80);
             int sx = L.volSliderX;
-            int sy = L.cy - U(2);
             int slH = U(4);
-            SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 51);
+            int sy = L.cy - slH / 2;
+            // 背景轨道
+            SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 40);
             SDL_Rect trk = {sx, sy, sldW, slH};
             SDL_RenderFillRect(g_sdlRdr, &trk);
+            // 已填充
             float v = g_mpv->volume();
             int fw = (int)(sldW * v);
-            if (fw > 0) {
+            if (fw > 1) {
                 SDL_Rect fl = {sx, sy, fw, slH};
                 SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 255);
                 SDL_RenderFillRect(g_sdlRdr, &fl);
             }
+            // 圆形 thumb
+            int thumbR = U(6);
+            int tx = sx + fw;
+            int ty = L.cy;
+            fillCircle(g_sdlRdr, tx, ty, thumbR, 255, 255, 255, 255);
         }
     }
 
@@ -3707,7 +3714,7 @@ wc.style         = CS_DBLCLKS;   // 接收 WM_LBUTTONDBLCLK
             }
         }
         if (g_ui.volumeSliderOpen && !g_ui.volumeDragging &&
-            now > g_ui.volHoverAt + 1200) {
+            now > g_ui.volHoverAt + 500) {
             g_ui.volumeSliderOpen = false;
             LOG_DBG("MAIN", "volume slider auto-collapse (idle)");
             g_dirty.store(true);
@@ -3734,7 +3741,7 @@ wc.style         = CS_DBLCLKS;   // 接收 WM_LBUTTONDBLCLK
             if (deadline > now && deadline - now < wait) wait = deadline - now;
         };
         upd(g_ui.hideAt);
-        if (g_ui.volumeSliderOpen) upd(g_ui.volHoverAt + 1200);
+        if (g_ui.volumeSliderOpen) upd(g_ui.volHoverAt + 500);
         if (g_ui.toastActive)      upd(g_ui.toastStart + ui::TOAST_MS + 60);
         if (g_ui.osdActive)        upd(g_ui.osdStart + 8050);
         // AB 循环检测: 播放到 B 点时跳回 A 点
