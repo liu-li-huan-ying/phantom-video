@@ -2252,18 +2252,31 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     // ---- drag-drop ----
     case WM_DROPFILES: {
         HDROP hDrop = (HDROP)wp;
-        wchar_t wpath[MAX_PATH * 2];
-        if (DragQueryFileW(hDrop, 0, wpath, (UINT)(MAX_PATH * 2)) > 0) {
-            // ANSI 版会返回 GBK 字节, mpv 按 UTF-8 解析 -> 中文路径截断乱码
-            int u8len = WideCharToMultiByte(CP_UTF8, 0, wpath, -1,
-                                            nullptr, 0, nullptr, nullptr);
-            std::string path(u8len > 0 ? u8len - 1 : 0, '\0');
-            if (u8len > 1)
-                WideCharToMultiByte(CP_UTF8, 0, wpath, -1,
-                                    path.data(), u8len, nullptr, nullptr);
-            LOG_INFO("MAIN", "drop file (%zu bytes): %s", path.size(), path.c_str());
-            buildPlaylistAround(path);
-            playPath(path);
+        UINT fileCount = DragQueryFileW(hDrop, 0xFFFFFFFF, NULL, 0);
+        std::string firstPath;
+        std::vector<std::string> droppedFiles;
+        for (UINT i = 0; i < fileCount; ++i) {
+            wchar_t wpath[MAX_PATH * 2];
+            if (DragQueryFileW(hDrop, i, wpath, (UINT)(MAX_PATH * 2)) > 0) {
+                int u8len = WideCharToMultiByte(CP_UTF8, 0, wpath, -1,
+                                                nullptr, 0, nullptr, nullptr);
+                std::string path(u8len > 0 ? u8len - 1 : 0, '\0');
+                if (u8len > 1)
+                    WideCharToMultiByte(CP_UTF8, 0, wpath, -1,
+                                        path.data(), u8len, nullptr, nullptr);
+                droppedFiles.push_back(path);
+                if (firstPath.empty()) firstPath = path;
+            }
+        }
+        LOG_INFO("MAIN", "drop %zu files, first: %s", droppedFiles.size(), firstPath.c_str());
+        if (droppedFiles.size() == 1) {
+            buildPlaylistAround(firstPath);
+            playPath(firstPath);
+        } else if (droppedFiles.size() > 1) {
+            // 多文件: 构建播放列表, 播放第一个
+            g_playlist = droppedFiles;
+            playPath(firstPath);
+            if (!g_ui.playlistOpen) g_ui.playlistOpen = true;
         }
         DragFinish(hDrop);
         return 0;
