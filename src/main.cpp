@@ -680,7 +680,7 @@ static SettingsGeom settingsGeom(int w, int h) {
     }
     g.closeCx = g.panelX + g.panelW - U(22);
     g.closeCy = g.panelY + U(22);
-    g.closeR = U(12);
+    g.closeR = U(18);
     g.swX = g.panelX + g.panelW - U(60);
     g.swW = U(40); g.swH = U(20);
     for (int i = 0; i < SET_ROW_COUNT; ++i)
@@ -923,18 +923,44 @@ static void thumbCacheCleanup(int keepDays) {
     FILETIME now;
     GetSystemTimeAsFileTime(&now);
     ULARGE_INTEGER ulNow = {{now.dwLowDateTime, now.dwHighDateTime}};
-    int removed = 0;
+
+    // 收集所有文件
+    struct ThumbFile { std::string name; ULARGE_INTEGER mtime; };
+    std::vector<ThumbFile> files;
     do {
         if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
         ULARGE_INTEGER ulFile = {{fd.ftLastWriteTime.dwLowDateTime, fd.ftLastWriteTime.dwHighDateTime}};
-        long long ageDays = (long long)(ulNow.QuadPart - ulFile.QuadPart) / (10000000LL * 86400);
-        if (ageDays > keepDays) {
-            DeleteFileA((dir + "\\" + fd.cFileName).c_str());
-            ++removed;
-        }
+        files.push_back({fd.cFileName, ulFile});
     } while (FindNextFileA(h, &fd));
     FindClose(h);
-    if (removed) LOG_INFO("MAIN", "thumb cache cleanup: removed %d files", removed);
+
+    int removed = 0;
+    // 1) 删除过期文件
+    for (auto& f : files) {
+        long long ageDays = (long long)(ulNow.QuadPart - f.mtime.QuadPart) / (10000000LL * 86400);
+        if (ageDays > keepDays) {
+            DeleteFileA((dir + "\\" + f.name).c_str());
+            f.name.clear();  // 标记已删
+            ++removed;
+        }
+    }
+    // 2) 数量上限 300: 按时间排序淘汰最旧的
+    static const int kMaxThumbs = 300;
+    files.erase(std::remove_if(files.begin(), files.end(),
+        [](const ThumbFile& f) { return f.name.empty(); }), files.end());
+    if ((int)files.size() > kMaxThumbs) {
+        std::sort(files.begin(), files.end(),
+            [](const ThumbFile& a, const ThumbFile& b) {
+                return a.mtime.QuadPart < b.mtime.QuadPart;
+            });
+        int excess = (int)files.size() - kMaxThumbs;
+        for (int i = 0; i < excess; ++i) {
+            DeleteFileA((dir + "\\" + files[i].name).c_str());
+            ++removed;
+        }
+    }
+    if (removed) LOG_INFO("MAIN", "thumb cache cleanup: removed %d files (%zu remaining)",
+                          removed, files.size() - (files.size() > 0 ? 0 : 0));
 }
 
 static uint64_t fnv1a64(const std::string& s) {
@@ -1064,6 +1090,17 @@ static void recordHistory(const std::string& path, double pos, double dur) {
     e.pos = pos;
     if (dur > 0) e.dur = dur;
     e.lastPlayed = (long long)std::time(nullptr);
+    // P2: 历史上限 500 条, 淘汰最旧的
+    static const size_t kMaxHistory = 500;
+    if (g_cfg.history.size() > kMaxHistory) {
+        // 找 lastPlayed 最小的条目淘汰
+        auto oldest = g_cfg.history.begin();
+        for (auto it = g_cfg.history.begin(); it != g_cfg.history.end(); ++it) {
+            if (it->second.lastPlayed < oldest->second.lastPlayed)
+                oldest = it;
+        }
+        g_cfg.history.erase(oldest);
+    }
 }
 static void playPath(const std::string& path) {
     if (!g_mpv || path.empty()) return;
@@ -1602,6 +1639,11 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         // --- 播放列表关闭钮: 最高优先级 ---
         // (y 在 topbar 高度内会被 topbar 分支拦截: 窗口模式变拖拽, 全屏时与
         //  应用关闭图标重叠导致误关整个程序)
+        if (g_ui.playlistOpen && g_ui.plCloseRect.w > 0) {
+            LOG_DBG("MAIN", "plCloseRect(%d,%d,%d,%d) mx=%d my=%d",
+                    g_ui.plCloseRect.x, g_ui.plCloseRect.y,
+                    g_ui.plCloseRect.w, g_ui.plCloseRect.h, mx, my);
+        }
         if (g_ui.playlistOpen && g_ui.plCloseRect.w > 0 &&
             mx >= g_ui.plCloseRect.x && mx <= g_ui.plCloseRect.x + g_ui.plCloseRect.w &&
             my >= g_ui.plCloseRect.y && my <= g_ui.plCloseRect.y + g_ui.plCloseRect.h) {
@@ -1710,6 +1752,8 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             }
             else if (std::abs(mx - sg.closeCx) <= sg.closeR &&
                      std::abs(my - sg.closeCy) <= sg.closeR) {
+                LOG_DBG("MAIN", "settings close hit: mx=%d my=%d cx=%d cy=%d R=%d",
+                        mx, my, sg.closeCx, sg.closeCy, sg.closeR);
                 g_ui.settingsOpen = false;
                 saveConfig(configPath(), g_cfg);
             }
@@ -2848,15 +2892,23 @@ static void renderOverlay() {
         // ---- 继续观看行 (YouTube 缩略图卡片) ----
         int contentY = hintY + U(22) + (compact ? U(24) : U(40));
         struct CWItem { std::string path; double pos, dur; long long ts; };
-        std::vector<CWItem> cw;
-        for (const auto& kv : g_cfg.history) {
-            const HistoryEntry& e = kv.second;
-            if (e.pos > 1.0 && (e.dur <= 0 || e.pos < e.dur * 0.95))
-                cw.push_back({kv.first, e.pos, e.dur, e.lastPlayed});
+        static std::vector<CWItem> cw;
+        static uint32_t cwBuildTick = 0;
+        uint32_t nowTick = SDL_GetTicks();
+        if (nowTick - cwBuildTick > 2000 || cwBuildTick == 0) {
+            cw.clear();
+            for (const auto& kv : g_cfg.history) {
+                const HistoryEntry& e = kv.second;
+                if (e.pos > 1.0 && (e.dur <= 0 || e.pos < e.dur * 0.95))
+                    cw.push_back({kv.first, e.pos, e.dur, e.lastPlayed});
+            }
+            if (!cw.empty()) {
+                std::sort(cw.begin(), cw.end(),
+                          [](const CWItem& a, const CWItem& b) { return a.ts > b.ts; });
+            }
+            cwBuildTick = nowTick;
         }
         if (!cw.empty()) {
-            std::sort(cw.begin(), cw.end(),
-                      [](const CWItem& a, const CWItem& b) { return a.ts > b.ts; });
             int cardW = compact ? U(150) : U(180);
             int gap = U(14);
             int maxCards = std::max(1, (totalW - margin * 2 + gap) / (cardW + gap));
@@ -3632,10 +3684,10 @@ static void renderOverlay() {
 
         // title + 关闭钮（效果图 .pl-head）
         g_text.drawText(panelX + U(14), panelY + U(16), i18n::playlist(), T(13), 255, 255, 255);
-        int closeX = panelX + panelW - U(40);
-        int closeY = panelY + U(10);
-        SDL_Rect closeRc = {closeX, closeY, U(28), U(28)};
-        svgicon::draw(g_sdlRdr, "close", closeX + U(14), closeY + U(14), U(22),
+        int closeX = panelX + panelW - U(44);
+        int closeY = panelY + U(8);
+        SDL_Rect closeRc = {closeX, closeY, U(36), U(36)};
+        svgicon::draw(g_sdlRdr, "close", closeX + U(18), closeY + U(18), U(22),
                       255, 255, 255, 255);
         g_ui.plCloseRect = closeRc;
 
