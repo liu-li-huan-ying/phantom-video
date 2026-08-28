@@ -16,7 +16,7 @@ public:
     MpvBackend() = default;
     ~MpvBackend();
 
-    bool init(HWND hwnd = nullptr);
+    bool init(HWND hwnd = nullptr, bool enableZeroCopy = false);
     void shutdown();
 
     bool loadFile(const std::string& path);
@@ -82,6 +82,8 @@ public:
     bool hasMedia() const { return hasMedia_.load(); }
     std::string path() const { return path_; }
     bool hwDecodeActive() const { return hwDecode_.load(); }
+    const char* hwdecCurrent() const { return hwdecCurrent_.c_str(); }
+    int  hwdecRetryCount() const { return hwdecRetryCount_; }
     bool seekbarFrozen() const;
 
     int videoWidth() const { return videoWidth_.load(); }
@@ -98,6 +100,8 @@ public:
 private:
     void eventLoop();
     void handlePropertyChange(const char* name, mpv_event_property* prop);
+    void retryWithHwdecFallback();
+    const char* nextHwdecLevel();
 
     mpv_handle* mpv_ = nullptr;
     std::thread eventThread_;
@@ -109,6 +113,9 @@ private:
     std::atomic<float> volume_{ 0.8f };
     std::atomic<float> speed_{ 1.0f };
     std::atomic<bool> hwDecode_{ false };
+    std::string hwdecCurrent_;          // mpv 报告的实际 hwdec 值
+    int hwdecRetryCount_ = 0;           // 当前文件重试计数(上限 2)
+    std::string hwdecRetryPath_;        // 正在重试的文件路径(换文件重置)
     std::atomic<int> videoWidth_{ 0 };
     std::atomic<int> videoHeight_{ 0 };
 

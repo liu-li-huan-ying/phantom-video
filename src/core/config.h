@@ -20,6 +20,7 @@ struct AppConfig {
     int thumbCache = 1;    // 缩略图磁盘缓存
     float subScale = 1.0f; // 字幕缩放系数
     int hwDecode = 1;      // 硬件解码
+    int enableZeroCopy = 0; // D3D11VA 零拷贝 (默认关, 需要手动启用; 有驱动风险)
     int volNorm = 0;       // 音量标准化(loudnorm)
     int nightMode = 0;     // 夜间模式(acompressor 动态压缩)
     int audioExclusive = 0;// WASAPI 独占输出

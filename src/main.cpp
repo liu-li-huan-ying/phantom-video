@@ -591,7 +591,7 @@ static SettingsGeom settingsGeom(int w, int h) {
 
 // 应用设置变更到 mpv（开关翻转时调用）
 static void applySetting(const char* key, int value) {
-    if      (std::strcmp(key, "hw") == 0)      mpvSetOpt("hwdec", value ? "auto-safe" : "no");
+    if      (std::strcmp(key, "hw") == 0)      mpvSetOpt("hwdec", value ? (g_cfg.enableZeroCopy ? "auto-safe" : "auto-copy-safe") : "no");
     else if (std::strcmp(key, "sub") == 0)     mpvSetOpt("sub-auto", value ? "fuzzy" : "no");
     else if (std::strcmp(key, "excl") == 0)    mpvSetOpt("audio-exclusive", value ? "yes" : "no");
     else if (std::strcmp(key, "vol") == 0 ||
@@ -3414,7 +3414,7 @@ static void renderOverlay() {
             std::string ach    = mpvStr("audio-params/channel-count");
             int vw = g_mpv->videoWidth(), vh = g_mpv->videoHeight();
 
-            char line1[128] = {}, line2[64] = {}, line3[96] = {};
+            char line1[128] = {}, line2[64] = {}, line3[96] = {}, line4[64] = {};
             if (!vfmt.empty())
                 std::snprintf(line1, sizeof(line1), "%s  %dx%d%s%s",
                     vfmt.c_str(), vw, vh,
@@ -3427,12 +3427,17 @@ static void renderOverlay() {
                     sr > 0 ? asr.c_str() : "?",
                     ach.empty() ? "?" : ach.c_str());
             }
+            const char* hwPath = g_mpv->hwdecCurrent();
+            if (hwPath && hwPath[0] && std::strcmp(hwPath, "no") != 0)
+                std::snprintf(line4, sizeof(line4), "hwdec: %s%s", hwPath,
+                              g_mpv->hwdecRetryCount() > 0 ? " (fallback)" : "");
 
             // 面板尺寸随内容
             int lines = 0;
             if (line1[0]) ++lines;
             if (line2[0]) ++lines;
             if (line3[0]) ++lines;
+            if (line4[0]) ++lines;
             if (lines > 0) {
                 int padX = U(14), padY = U(10), lineH = U(22);
                 int boxW = U(340), boxH = padY * 2 + lines * lineH;
@@ -3445,8 +3450,9 @@ static void renderOverlay() {
 
                 int ty = boxY + padY;
                 if (line1[0]) { g_text.drawText(boxX + padX, ty, line1, T(12), 255, 255, 255); ty += lineH; }
-if (line2[0]) { g_text.drawText(boxX + padX, ty, line2, T(12), ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B); ty += lineH; }
-        if (line3[0]) { g_text.drawText(boxX + padX, ty, line3, T(12), ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B); }
+                if (line2[0]) { g_text.drawText(boxX + padX, ty, line2, T(12), ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B); ty += lineH; }
+                if (line3[0]) { g_text.drawText(boxX + padX, ty, line3, T(12), ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B); ty += lineH; }
+                if (line4[0]) { g_text.drawText(boxX + padX, ty, line4, T(12), 0, 200, 120); }
             }
         }
     }
@@ -3599,10 +3605,10 @@ wc.style         = CS_DBLCLKS;   // 接收 WM_LBUTTONDBLCLK
         }
     };
 
-    if (!mpv.init(g_mpvHwnd)) { LOG_ERROR("MAIN", "mpv init failed"); return 1; }
+    if (!mpv.init(g_mpvHwnd, g_cfg.enableZeroCopy != 0)) { LOG_ERROR("MAIN", "mpv init failed"); return 1; }
 
     // 按配置应用运行时选项
-    mpvSetOpt("hwdec", g_cfg.hwDecode ? "auto-safe" : "no");
+    mpvSetOpt("hwdec", g_cfg.hwDecode ? (g_cfg.enableZeroCopy ? "auto-safe" : "auto-copy-safe") : "no");
     mpvSetOpt("sub-auto", g_cfg.subAutoLoad ? "fuzzy" : "no");
     mpvSetOpt("audio-exclusive", g_cfg.audioExclusive ? "yes" : "no");
     rebuildAudioFilters();

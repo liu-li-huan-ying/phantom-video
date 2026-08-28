@@ -9,7 +9,7 @@ MpvBackend::~MpvBackend() {
     shutdown();
 }
 
-bool MpvBackend::init(HWND hwnd) {
+bool MpvBackend::init(HWND hwnd, bool enableZeroCopy) {
     mpv_ = mpv_create();
     if (!mpv_) {
         LOG_ERROR("MPV", "mpv_create failed");
@@ -21,7 +21,9 @@ bool MpvBackend::init(HWND hwnd) {
     mpv_set_option_string(mpv_, "ao", "wasapi");
     mpv_set_option_string(mpv_, "vo", "gpu-next");
     mpv_set_option_string(mpv_, "gpu-context", "d3d11");
-    mpv_set_option_string(mpv_, "hwdec", "auto-safe");
+    // 四级 hwdec 降级链首: auto-copy-safe(最稳基线, 禁用 zero-copy)
+    // enableZeroCopy=true 时直接用 auto-safe(允许 zero-copy)
+    mpv_set_option_string(mpv_, "hwdec", enableZeroCopy ? "auto-safe" : "auto-copy-safe");
     mpv_set_option_string(mpv_, "audio-pitch-correction", "yes");
     mpv_set_option_string(mpv_, "sub-auto", "fuzzy");
     mpv_set_option_string(mpv_, "volume", "80");
@@ -96,7 +98,8 @@ bool MpvBackend::init(HWND hwnd) {
     running_.store(true);
     eventThread_ = std::thread(&MpvBackend::eventLoop, this);
 
-    LOG_INFO("MPV", "mpv backend initialized");
+    LOG_INFO("MPV", "mpv backend initialized, hwdec=%s zero_copy=%d",
+             enableZeroCopy ? "auto-safe" : "auto-copy-safe", enableZeroCopy);
     return true;
 }
 
@@ -133,6 +136,11 @@ bool MpvBackend::loadFile(const std::string& path) {
     hasMedia_.store(true);
     state_.store(State::Playing);
     eofFired_.store(false);
+    // 换文件重置 hwdec 重试计数
+    if (path != hwdecRetryPath_) {
+        hwdecRetryCount_ = 0;
+        hwdecRetryPath_ = path;
+    }
     LOG_INFO("MPV", "loaded: %s", path.c_str());
     return true;
 }
@@ -525,8 +533,19 @@ void MpvBackend::eventLoop() {
                 LOG_INFO("MPV", "playback ended (EOF)");
             } else if (end->reason == MPV_END_FILE_REASON_ERROR) {
                 const char* es = mpv_error_string(end->error);
-                LOG_ERROR("MPV", "playback FAILED: %s (%d)", es ? es : "?", end->error);
+                LOG_ERROR("MPV", "playback FAILED: %s (%d) hwdec=%s",
+                          es ? es : "?", end->error, hwdecCurrent_.c_str());
                 state_.store(State::Ended);
+
+                // hwdec 降级触发条件:
+                // 1. 确实尝试过硬件解码 (hwdecCurrent_ 非空且非 "no")
+                // 2. 同一文件重试未超限 (上限 2 次)
+                // 3. 当前文件路径与重试路径一致 (换文件重置)
+                if (!hwdecCurrent_.empty() && hwdecCurrent_ != "no" &&
+                    hwdecRetryPath_ == path_ && hwdecRetryCount_ < 2) {
+                    retryWithHwdecFallback();
+                }
+
                 if (onPlaybackEnded) onPlaybackEnded();
             } else if (end->reason == MPV_END_FILE_REASON_STOP) {
                 LOG_DBG("MPV", "playback stopped");
@@ -571,7 +590,9 @@ void MpvBackend::handlePropertyChange(const char* name, mpv_event_property* prop
     }
     else if (std::strcmp(name, "hwdec-current") == 0 && prop->format == MPV_FORMAT_STRING) {
         const char* hw = *(char**)prop->data;
-        hwDecode_ = (hw && std::strlen(hw) > 0 && std::strcmp(hw, "no") != 0);
+        hwdecCurrent_ = hw ? hw : "";
+        hwDecode_ = (!hwdecCurrent_.empty() && hwdecCurrent_ != "no");
+        LOG_INFO("MPV", "hwdec-current=%s active=%d", hwdecCurrent_.c_str(), hwDecode_.load());
     }
     else if (std::strcmp(name, "width") == 0 && prop->format == MPV_FORMAT_INT64) {
         videoWidth_.store((int)*(int64_t*)prop->data);
@@ -595,5 +616,48 @@ void MpvBackend::handlePropertyChange(const char* name, mpv_event_property* prop
         } else if (!*(int*)prop->data) {
             eofFired_ = false;   // 新文件加载后复位
         }
+    }
+}
+
+// ---- hwdec 四级降级链 ----
+// auto-copy-safe → auto-safe → d3d11va → no
+
+const char* MpvBackend::nextHwdecLevel() {
+    if (hwdecCurrent_.empty() || hwdecCurrent_ == "no" ||
+        hwdecCurrent_ == "auto-copy-safe") {
+        return "auto-safe";
+    } else if (hwdecCurrent_ == "auto-safe") {
+        return "d3d11va";
+    } else if (hwdecCurrent_ == "d3d11va") {
+        return "no";
+    }
+    return nullptr;
+}
+
+void MpvBackend::retryWithHwdecFallback() {
+    const char* next = nextHwdecLevel();
+    if (!next) {
+        LOG_WARN("MPV", "hwdec fallback exhausted");
+        return;
+    }
+
+    hwdecRetryCount_++;
+    LOG_INFO("MPV", "hwdec fallback: #%d %s -> %s (file=%s)",
+             hwdecRetryCount_, hwdecCurrent_.c_str(), next, path_.c_str());
+
+    mpv_set_property_string(mpv_, "hwdec", next);
+
+    const char* stopCmd[] = { "stop", NULL };
+    mpv_command(mpv_, stopCmd);
+
+    const char* loadCmd[] = { "loadfile", path_.c_str(), NULL };
+    int ret = mpv_command(mpv_, loadCmd);
+    if (ret < 0) {
+        LOG_ERROR("MPV", "hwdec fallback reload failed: %s", mpv_error_string(ret));
+    } else {
+        int unpaused = 0;
+        mpv_set_property(mpv_, "pause", MPV_FORMAT_FLAG, &unpaused);
+        state_.store(State::Playing);
+        eofFired_.store(false);
     }
 }

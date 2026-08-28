@@ -59,6 +59,8 @@ bool loadConfig(const std::string& path, AppConfig& out) {
             out.thumbCache = std::atoi(line.c_str() + 11) != 0 ? 1 : 0;
         } else if (line.rfind("hwdecode=", 0) == 0) {
             out.hwDecode = std::atoi(line.c_str() + 9) != 0 ? 1 : 0;
+        } else if (line.rfind("zerocopy=", 0) == 0) {
+            out.enableZeroCopy = std::atoi(line.c_str() + 9) != 0 ? 1 : 0;
         } else if (line.rfind("volnorm=", 0) == 0) {
             out.volNorm = std::atoi(line.c_str() + 8) != 0 ? 1 : 0;
         } else if (line.rfind("nightmode=", 0) == 0) {
@@ -115,6 +117,7 @@ bool saveConfig(const std::string& path, const AppConfig& cfg) {
     out << "subautoload=" << cfg.subAutoLoad << "\n";
     out << "thumbcache=" << cfg.thumbCache << "\n";
     out << "hwdecode=" << cfg.hwDecode << "\n";
+    out << "zerocopy=" << cfg.enableZeroCopy << "\n";
     out << "volnorm=" << cfg.volNorm << "\n";
     out << "nightmode=" << cfg.nightMode << "\n";
     out << "audioexcl=" << cfg.audioExclusive << "\n";

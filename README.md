@@ -1,10 +1,11 @@
 # 幻影视频 (Phantom Video)
 
-自研 Windows 视频播放器 —— **libmpv 解码渲染（D3D11VA 零拷贝硬解）+ SDL2 UI 叠加层**，C++17 / Win32。
+自研 Windows 视频播放器 —— **libmpv 硬件加速解码 + Win32 ULW 透明 UI 覆盖层**，C++17 / Win32。
 
 ## 特性
 
-- **零拷贝硬件解码**：mpv `gpu-next` + `d3d11` 上下文，`hwdec=auto-safe`
+- **硬件加速解码**：mpv `gpu-next` + D3D11，`hwdec=auto-copy-safe`（默认禁用零拷贝），四级降级链自动兜底
+- **四级 hwdec 降级链**：auto-copy-safe → auto-safe → d3d11va → no，同一文件最多重试 2 次
 - **文件夹播放队列**：打开/拖入任意视频自动扫描同目录（14 种扩展名、按名排序、上限 2000）
 - **进度记忆与续播**：每 3 秒落盘观看位置；`resume=1` 时重开自动跳转
 - **三种播放模式**：Single / Loop / Shuffle
@@ -86,10 +87,10 @@ lang=0            # 0=中文 1=English
 ```
 幻影视频进程
 ├─ Win32 parent（输入处理 WndProc）
-│   └─ mpv 子窗口 STATIC (--wid → D3D11VA)
+│   └─ mpv 子窗口 STATIC (--wid → mpv 内部 D3D11 device + swapchain)
 │       └─ mpvRelayProc: 输入中继转发给 parent
-└─ SDL2 overlay（owned 顶层窗, WS_EX_LAYERED+ULW per-pixel alpha+TOOLWINDOW）
-    ├─ 逐像素 alpha 透明穿透显示视频
+└─ ULW 分层覆盖窗（owned 顶层, WS_EX_LAYERED + per-pixel alpha）
+    ├─ SDL2 软件渲染器: UI 元素（进度条/按钮/列表/面板）
     ├─ GdiTextCache 文字 / svgicon 光栅化图标
     └─ ThumbWorker(FFmpeg) ──mutex──> 渲染线程惰性上传纹理
 ```
@@ -103,4 +104,14 @@ lang=0            # 0=中文 1=English
 
 ## 许可证
 
-MIT License
+GPL-3.0。依赖许可明细：
+
+| 组件 | 许可 | 链接方式 |
+|------|------|----------|
+| libmpv | LGPL-2.1+ | 动态链接 |
+| FFmpeg 9.0.1 | GPL-3.0 (gyan.dev full build) | 动态链接 |
+| SDL2 | Zlib | 动态链接 |
+| Sonic | LGPL | 静态链接 (源码内嵌) |
+
+FFmpeg 的 GPL 组件（x264/x265）要求本项目以 GPL-3.0 发行。
+如需 LGPL-only 分发，须替换为 LGPL 编译的 FFmpeg build。
