@@ -270,6 +270,48 @@ double MpvBackend::subDelay() const {
     return v;
 }
 
+std::vector<MpvBackend::TrackInfo> MpvBackend::subTracks() const {
+    std::vector<TrackInfo> result;
+    if (!mpv_) return result;
+    mpv_node list;
+    if (mpv_get_property(mpv_, "track-list", MPV_FORMAT_NODE, &list) < 0) return result;
+    if (list.format != MPV_FORMAT_NODE_ARRAY) { mpv_free_node_contents(&list); return result; }
+    for (int i = 0; i < list.u.list->num; ++i) {
+        mpv_node* node = &list.u.list->values[i];
+        if (node->format != MPV_FORMAT_NODE_MAP) continue;
+        const char* type = nullptr;
+        int id = 0;
+        const char* desc = "";
+        for (int j = 0; j < node->u.list->num; ++j) {
+            const char* key = node->u.list->keys[j];
+            mpv_node* val = &node->u.list->values[j];
+            if (std::strcmp(key, "type") == 0 && val->format == MPV_FORMAT_STRING)
+                type = val->u.string;
+            else if (std::strcmp(key, "id") == 0 && val->format == MPV_FORMAT_INT64)
+                id = (int)val->u.int64;
+            else if (std::strcmp(key, "desc") == 0 && val->format == MPV_FORMAT_STRING)
+                desc = val->u.string;
+        }
+        if (type && std::strcmp(type, "sub") == 0)
+            result.push_back({id, desc ? desc : ""});
+    }
+    mpv_free_node_contents(&list);
+    return result;
+}
+
+int MpvBackend::currentSubId() const {
+    if (!mpv_) return -1;
+    int64_t v = -1;
+    mpv_get_property(mpv_, "sid", MPV_FORMAT_INT64, &v);
+    return (int)v;
+}
+
+void MpvBackend::setSubtitle(int id) {
+    if (!mpv_) return;
+    int64_t v = id;
+    mpv_set_property(mpv_, "sid", MPV_FORMAT_INT64, &v);
+}
+
 // ---- 字幕样式 ----
 void MpvBackend::setSubFontSize(int size) {
     if (!mpv_) return;

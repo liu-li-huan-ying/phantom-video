@@ -32,10 +32,16 @@ public:
     void setSpeed(float s);
     float speed() const { return speed_.load(std::memory_order_relaxed); }
 
+    // ---- 通用轨道信息 ----
+    struct TrackInfo { int id; std::string desc; };
+
     // ---- 字幕 ----
     bool subVisible() const;
     void setSubVisibility(bool vis);
     std::string currentSubTrack() const;   // 当前字幕轨描述(无则空)
+    std::vector<TrackInfo> subTracks() const; // 所有字幕轨
+    int  currentSubId() const;             // 当前字幕轨 ID(无则-1)
+    void setSubtitle(int id);              // 切换字幕轨
     void addSubDelay(double delta);        // 秒
     double subDelay() const;
 
@@ -46,7 +52,6 @@ public:
     void setSubPos(int pos);               // 垂直位置(0-100, 底部=100)
 
     // ---- 音轨 ----
-    struct TrackInfo { int id; std::string desc; };
     std::vector<TrackInfo> audioTracks() const;
     int  currentAudioTrack() const;
     void setAudioTrack(int id);
