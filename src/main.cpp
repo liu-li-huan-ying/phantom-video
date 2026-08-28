@@ -103,6 +103,89 @@ static std::string openSubtitleDialog(HWND hwnd) {
     return "";
 }
 
+// P0-3: URL 输入对话框 (纯代码 Win32 popup + modal message loop)
+static std::string openUrlDialog(HWND hwnd) {
+    struct Ctx { bool ok; std::string url; } ctx{false, ""};
+
+    RECT rc; GetWindowRect(hwnd, &rc);
+    int dw = 440, dh = 100;
+    int cx = (rc.left + rc.right - dw) / 2;
+    int cy = (rc.top + rc.bottom - dh) / 2;
+    int pad = 10, labelW = 40, editW = 320, btnW = 60;
+    int editH = 22, btnH = 24;
+
+    WNDCLASSEXW wc = {};
+    wc.cbSize = sizeof(wc);
+    wc.lpfnWndProc = [](HWND w, UINT m, WPARAM wp, LPARAM lp) -> LRESULT {
+        auto* c = reinterpret_cast<Ctx*>(GetWindowLongPtrW(w, GWLP_USERDATA));
+        switch (m) {
+        case WM_COMMAND:
+            if (LOWORD(wp) == 1 && c) {
+                wchar_t buf[2048] = {};
+                GetWindowTextW(GetDlgItem(w, 1002), buf, 2048);
+                c->ok = true; c->url = WideToUtf8(buf);
+                DestroyWindow(w);
+            }
+            if (LOWORD(wp) == 2 && c) {
+                DestroyWindow(w);
+            }
+            return 0;
+        case WM_CLOSE:
+            if (c) DestroyWindow(w);
+            return 0;
+        }
+        return DefWindowProcW(w, m, wp, lp);
+    };
+    wc.hInstance = GetModuleHandleW(NULL);
+    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    wc.lpszClassName = L"PhantomUrlInput";
+    wc.hCursor = LoadCursorW(NULL, L"IDC_ARROW");
+    RegisterClassExW(&wc);
+
+    HWND dlg = CreateWindowExW(
+        WS_EX_DLGMODALFRAME | WS_EX_TOPMOST,
+        L"PhantomUrlInput", L"Open URL",
+        WS_POPUP | WS_CAPTION | WS_SYSMENU,
+        cx, cy, dw, dh, hwnd, 0, GetModuleHandleW(0), 0);
+    SetWindowLongPtrW(dlg, GWLP_USERDATA, (LONG_PTR)&ctx);
+
+    HFONT hf = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+
+    HWND hLabel = CreateWindowExW(0, L"STATIC", L"URL:",
+        WS_CHILD | WS_VISIBLE, pad, pad + 2, labelW, 20, dlg, 0, 0, 0);
+    HWND hEdit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"https://",
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
+        pad + labelW, pad, editW, editH, dlg, (HMENU)1002, 0, 0);
+    HWND hOk = CreateWindowExW(0, L"BUTTON", L"Play",
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON,
+        dw - pad - btnW * 2 - 8, dh - pad - btnH, btnW, btnH, dlg, (HMENU)1, 0, 0);
+    HWND hCancel = CreateWindowExW(0, L"BUTTON", L"Cancel",
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+        dw - pad - btnW, dh - pad - btnH, btnW, btnH, dlg, (HMENU)2, 0, 0);
+
+    SendMessageW(hLabel, WM_SETFONT, (WPARAM)hf, TRUE);
+    SendMessageW(hEdit, WM_SETFONT, (WPARAM)hf, TRUE);
+    SendMessageW(hOk, WM_SETFONT, (WPARAM)hf, TRUE);
+    SendMessageW(hCancel, WM_SETFONT, (WPARAM)hf, TRUE);
+
+    SendMessageW(hEdit, EM_SETSEL, 0, -1);
+    SetFocus(hEdit);
+    ShowWindow(dlg, SW_SHOW);
+
+    MSG m;
+    while (IsWindow(dlg)) {
+        while (PeekMessageW(&m, NULL, 0, 0, PM_REMOVE)) {
+            if (m.message == WM_QUIT) break;
+            if (!IsDialogMessageW(dlg, &m)) {
+                TranslateMessage(&m);
+                DispatchMessageW(&m);
+            }
+        }
+        if (IsWindow(dlg)) WaitMessage();
+    }
+    return ctx.url;
+}
+
 // M36: 文件夹选择 (SHBrowseForFolderW + NEWDIALOGSTYLE 可调大小/新建按钮)
 // 注: w64devkit 的 shobjidl.h 只前置声明 IFileDialog(无完整 vtable),
 //     IFileDialog 方案不可用, 故用经典 API
@@ -278,6 +361,7 @@ namespace i18n {
     inline const char* emptyPlaylist()  { return T("无文件", "No files"); }
     inline const char* dropHint()       { return T("拖入视频文件", "Drop video here"); }
     inline const char* ctrlOHint()      { return T("或按 Ctrl+O", "or press Ctrl+O"); }
+    inline const char* ctrlUHint()      { return T("或按 Ctrl+U 打开 URL", "or press Ctrl+U for URL"); }
     inline const char* equalizer()      { return T("均衡器", "Equalizer"); }
     inline const char* reset()          { return T("重置", "Reset"); }
     inline const char* muted()          { return T("已静音", "Muted"); }
@@ -1271,6 +1355,14 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 if (GetKeyState(VK_CONTROL) & 0x8000) {
                     std::string f = openFileDialog(hwnd);
                     if (!f.empty()) { buildPlaylistAround(f); playPath(f); }
+                }
+                break;
+            case 'U':
+                if (GetKeyState(VK_CONTROL) & 0x8000) {
+                    std::string url = openUrlDialog(hwnd);
+                    if (!url.empty()) {
+                        playPath(url);
+                    }
                 }
                 break;
             }
