@@ -41,6 +41,13 @@ constexpr Uint8 HINT_TEXT = 130;    // 键盘提示等三级文字 (原 80)
 constexpr Uint8 SEEK_TRACK_A = 70;
 constexpr Uint8 SEEK_BUF_A = 90;
 
+// ---- seekbar thumb 尺寸 ----
+constexpr int THUMB_R_DEFAULT = 3;   // 默认小圆点半径
+constexpr int THUMB_R_HOVER = 6;     // hover/drag 放大半径
+constexpr int THUMB_GLOW_R = 4;      // 光晕额外半径
+constexpr int SEEK_TRACK_H = 6;      // 默认轨道高度
+constexpr int SEEK_TRACK_H_HOVER = 8;// hover/drag 轨道高度
+
 // ---- 字阶 (Apple 式层级, pt 值经 T() 缩放后使用) ----
 constexpr int T_DISPLAY = 32;   // Hero 产品名
 constexpr int T_TITLE = 20;     // 区块标题

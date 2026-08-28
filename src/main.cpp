@@ -2741,7 +2741,8 @@ static void renderOverlay() {
     if (dur > 0) {
         int tx = sbLeftX(), tw = sbWidth();
         int ty = barTop + U(9);
-        int th = g_ui.seekbarHover ? U(10) : U(6);
+        bool thumbActive = g_ui.seekbarHover || g_ui.seekingDrag;
+        int th = thumbActive ? ui::SEEK_TRACK_H_HOVER : ui::SEEK_TRACK_H;
 
         // track background
         SDL_Rect bgRc = {tx, ty, tw, th};
@@ -2765,13 +2766,25 @@ static void renderOverlay() {
             SDL_RenderFillRect(g_sdlRdr, &prRc);
         }
 
-        // thumb (on hover or drag) + 时间预览气泡
-        if (g_ui.seekbarHover || g_ui.seekingDrag) {
-            int cx = tx + progW;
-            int cy = ty + th / 2;
-            int r = std::max(U(6), (int)(g_ui.winW * 0.006f));  // thumb 半径, 按窗口缩放
-            // 圆形 thumb
-            fillCircle(g_sdlRdr, cx, cy, r, 255, 255, 255, 255);
+        // --- seekbar thumb (always-visible small dot + hover/drag enlarged glow) ---
+        int cx = tx + progW;
+        int cy = ty + th / 2;
+        // 默认态: 小圆点 (品牌色)
+        int rDefault = std::max(ui::THUMB_R_DEFAULT, (int)(g_ui.winW * 0.003f));
+        fillCircle(g_sdlRdr, cx, cy, rDefault,
+                   ui::ACCENT_R_, ui::ACCENT_G_, ui::ACCENT_B_, 255);
+        // hover/drag 态: 放大白圆 + 半透明光晕
+        if (thumbActive) {
+            int rHov = std::max(ui::THUMB_R_HOVER, (int)(g_ui.winW * 0.006f));
+            // 外圈光晕 (同色半透明)
+            fillCircle(g_sdlRdr, cx, cy, rHov + ui::THUMB_GLOW_R,
+                       ui::ACCENT_R_, ui::ACCENT_G_, ui::ACCENT_B_, 50);
+            // 白色实心圆
+            fillCircle(g_sdlRdr, cx, cy, rHov, 255, 255, 255, 255);
+        }
+
+        // 时间预览气泡 (hover/drag only)
+        if (thumbActive) {
 
             // 预览时间戳气泡
             double hoverPos = dur * ((double)(g_ui.mouseX - tx) / tw);
@@ -2897,10 +2910,14 @@ static void renderOverlay() {
                 SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 255);
                 SDL_RenderFillRect(g_sdlRdr, &fl);
             }
-            // 圆形 thumb (hover 时稍大)
-            int thumbR = hov ? U(7) : U(6);
+            // 圆形 thumb (hover 时加光晕)
             int tx = sx + fw;
             int ty = L.cy;
+            int thumbR = hov ? U(7) : U(6);
+            if (hov) {
+                // 光晕
+                fillCircle(g_sdlRdr, tx, ty, thumbR + U(3), 255, 255, 255, 40);
+            }
             fillCircle(g_sdlRdr, tx, ty, thumbR, 255, 255, 255, 255);
         }
     }
@@ -3729,9 +3746,9 @@ wc.style         = CS_DBLCLKS;   // 接收 WM_LBUTTONDBLCLK
             g_dirty.store(true);
         }
 
-        // 控件淡入淡出（ease-out 缓动 + 效果图 cb-opacity 最低 0.25）
+        // 控件淡入淡出（ease-out 缓动）
         {
-            float target = g_ui.visible ? 1.0f : 0.25f;
+            float target = g_ui.visible ? 1.0f : 0.0f;
             float cur = g_ui.ctrlAlpha;
             if (std::abs(target - cur) > 0.001f) {
                 // ease-out: 接近目标时减速
