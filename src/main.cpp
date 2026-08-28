@@ -430,11 +430,11 @@ static void showToast(const char* msg);
 static const char* qualityLabel();
 static void renderOverlay();
 
-static void layoutRow1(int w, int h, bool volOpen, Row1Layout& L) {
+static void layoutRow1(int w, int barTopY, bool volOpen, Row1Layout& L) {
     const int pad = U(16);
     const int iconSz = U(34);
     const int playSz = U(42);
-    int cy = h - U(80) + U(50);
+    int cy = barTopY + U(50);
     L.cy = cy;
     int x = pad;
     auto iconBtn = [&](SDL_Rect& rc) {
@@ -990,7 +990,7 @@ static void playIndex(int idx, bool relative = false) {
 // ---- 音量交互区（图标+滑条范围, 用动态布局） ----
 static bool inVolumeArea(int mx, int my) {
     Row1Layout L;
-    layoutRow1(g_ui.totalW > 0 ? g_ui.totalW : g_ui.winW, g_ui.winH, true, L);
+    layoutRow1(g_ui.totalW > 0 ? g_ui.totalW : g_ui.winW, sbTopY(), true, L);
     int barTop = sbTopY();
     int row1Off = U(50);
     int cy = barTop + row1Off;
@@ -1252,6 +1252,16 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                      g_ui.mouseX >= sbLeftX()   && g_ui.mouseX <= sbRightX());
         g_ui.seekbarHover = onSB;
 
+        // seekbar 拖拽: 持续更新 seekTarget
+        if (g_ui.seekingDrag && g_mpv && g_mpv->duration() > 0) {
+            double ratio = (double)(g_ui.mouseX - sbLeftX()) / sbWidth();
+            if (ratio < 0) ratio = 0; if (ratio > 1) ratio = 1;
+            g_ui.seekTarget = g_mpv->duration() * ratio;
+            g_ui.visible = true;
+            g_ui.hideAt = SDL_GetTicks() + 5000;
+            g_dirty.store(true);
+        }
+
         bool onTopbar = (g_ui.mouseY >= 0 && g_ui.mouseY <= curTopH());
         g_ui.visible = true;
         g_ui.hideAt = SDL_GetTicks() + (onTopbar ? 4000 : ui::CTRLBAR_HIDE_MS);
@@ -1273,19 +1283,16 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             LOG_DBG("MAIN", "volume slider auto-collapse");
         }
 
-        // 音量滑条 hover-to-adjust: 展开时鼠标在滑条轨道上直接调节
+        // 音量滑条 hover 高亮 (仅视觉, 不改音量; 音量调节只在点击拖拽时)
         g_ui.volumeSliderHover = false;
-        if (g_ui.volumeSliderOpen && !g_ui.volumeDragging && g_mpv) {
+        if (g_ui.volumeSliderOpen && !g_ui.volumeDragging) {
             Row1Layout L;
-            layoutRow1(g_ui.totalW > 0 ? g_ui.totalW : g_ui.winW, g_ui.winH, true, L);
+    layoutRow1(g_ui.totalW > 0 ? g_ui.totalW : g_ui.winW, sbTopY(), true, L);
             if (L.volSliderW > 0 &&
                 g_ui.mouseX >= L.volSliderX - U(4) && g_ui.mouseX <= L.volSliderX + L.volSliderW + U(4) &&
                 g_ui.mouseY >= L.cy - U(14) && g_ui.mouseY <= L.cy + U(14)) {
                 g_ui.volumeSliderHover = true;
-                float ratio = (float)(g_ui.mouseX - L.volSliderX) / U(80);
-                if (ratio < 0) ratio = 0; if (ratio > 1) ratio = 1;
-                g_mpv->setVolume(ratio);
-                g_ui.volHoverAt = SDL_GetTicks();  // 滑条上停留不触发收起
+                g_ui.volHoverAt = SDL_GetTicks();
             }
         }
 
@@ -1331,7 +1338,7 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         // volume slider drag
         if (g_ui.volumeDragging && g_mpv) {
             Row1Layout L;
-            layoutRow1(g_ui.winW, g_ui.winH, true, L);
+            layoutRow1(g_ui.winW, sbTopY(), true, L);
             float ratio = (float)(g_ui.mouseX - L.volSliderX) / U(80);
             if (ratio < 0) ratio = 0; if (ratio > 1) ratio = 1;
             g_mpv->setVolume(ratio);
@@ -1358,7 +1365,7 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     }
     case WM_MOUSELEAVE:
-        g_ui.seekbarHover = false;
+        if (!g_ui.seekingDrag) g_ui.seekbarHover = false;
         g_ui.mouseX = g_ui.mouseY = -1;
         return 0;
 
@@ -1586,7 +1593,7 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         if (g_ui.speedMenuOpen || g_ui.qualityMenuOpen || g_ui.eqMenuOpen) {
             if (g_ui.speedMenuOpen) {
                 Row1Layout L;
-                layoutRow1(g_ui.winW, g_ui.winH, false, L);
+                layoutRow1(g_ui.winW, sbTopY(), false, L);
                 int itemH = U(32), menuW = U(132);
                 int menuH = SPEED_PRESET_COUNT * itemH + U(12);
                 int menuX = L.speedBtn.x;
@@ -1607,7 +1614,7 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             }
             if (g_ui.qualityMenuOpen) {
                 Row1Layout QL;
-                layoutRow1(g_ui.winW, g_ui.winH, false, QL);
+                layoutRow1(g_ui.winW, sbTopY(), false, QL);
                 int itemH = U(32), menuW = U(140);
                 int menuH = QUALITY_PRESET_COUNT * itemH + U(44);
                 int menuX = QL.qualityBtn.x;
@@ -1689,7 +1696,7 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         {
             bool volOpen = (g_ui.volumeSliderOpen || g_ui.volumeDragging);
             Row1Layout L;
-            layoutRow1(g_ui.winW, g_ui.winH, volOpen, L);
+            layoutRow1(g_ui.winW, sbTopY(), volOpen, L);
             auto inRc = [&](const SDL_Rect& r) {
                 return mx >= r.x && mx <= r.x + r.w && my >= r.y && my <= r.y + r.h;
             };
@@ -2819,7 +2826,7 @@ static void renderOverlay() {
     {
         Row1Layout L;
         bool volOpen = (g_ui.volumeSliderOpen || g_ui.volumeDragging);
-        layoutRow1(w, h, volOpen, L);
+        layoutRow1(w, barTop, volOpen, L);
         auto A = [&](Uint8 base) { return (Uint8)(base * fa); };
         const int iconC = ui::ICON_BRIGHT, text2 = ui::ICON_DIM;
 
@@ -2930,7 +2937,7 @@ static void renderOverlay() {
     // --- speed popup menu（效果图规格: 圆角r8/向上展开/k标注） ---
     if (g_ui.speedMenuOpen) {
         Row1Layout L;
-        layoutRow1(w, h, g_ui.volumeSliderOpen || g_ui.volumeDragging, L);
+        layoutRow1(w, barTop, g_ui.volumeSliderOpen || g_ui.volumeDragging, L);
         int itemH = U(32);
         int menuW = U(132);
         int menuH = SPEED_PRESET_COUNT * itemH + U(12);
@@ -2982,7 +2989,7 @@ static void renderOverlay() {
     // --- quality popup menu (画质: 视频信息 + 三档预设) ---
     if (g_ui.qualityMenuOpen) {
         Row1Layout L;
-        layoutRow1(w, h, g_ui.volumeSliderOpen || g_ui.volumeDragging, L);
+        layoutRow1(w, barTop, g_ui.volumeSliderOpen || g_ui.volumeDragging, L);
         int itemH = U(32);
         int menuW = U(140);
         int infoH = U(38);
@@ -3035,7 +3042,7 @@ static void renderOverlay() {
     // --- EQ popup menu (6频段均衡器) ---
     if (g_ui.eqMenuOpen) {
         Row1Layout L;
-        layoutRow1(w, h, g_ui.volumeSliderOpen || g_ui.volumeDragging, L);
+        layoutRow1(w, barTop, g_ui.volumeSliderOpen || g_ui.volumeDragging, L);
         static const char* bandNames[] = {"60Hz","170Hz","310Hz","600Hz","3kHz","12kHz"};
         int sliderW = U(100);
         int itemH = U(36);
