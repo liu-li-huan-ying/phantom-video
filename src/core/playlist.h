@@ -37,6 +37,22 @@ public:
     bool empty() const { return files_.empty(); }
     const std::string& fileAt(int displayIndex) const { return files_[order_[displayIndex]]; }
 
+    // P1-5: 动态增删
+    void add(const std::string& file) {
+        files_.push_back(file);
+        rebuildOrder();
+    }
+    bool remove(int displayIndex) {
+        if (displayIndex < 0 || displayIndex >= (int)files_.size()) return false;
+        int realIdx = order_[displayIndex];
+        files_.erase(files_.begin() + realIdx);
+        if (files_.empty()) { idx_ = -1; order_.clear(); return true; }
+        rebuildOrder();
+        // 修正当前索引
+        if (idx_ >= (int)files_.size()) idx_ = (int)files_.size() - 1;
+        return true;
+    }
+
 private:
     int currentIndex() const;
     void rebuildOrder();

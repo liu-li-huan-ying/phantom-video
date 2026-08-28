@@ -882,6 +882,14 @@ static bool buildPlaylistFromFolder(const std::string& dirUtf8) {
     return !g_playlist.empty();
 }
 
+// P1-5: 从播放列表移除指定索引，若移除的是当前播放项则自动跳转下一个
+static void removeFromPlaylist(int idx);  // forward decl
+
+// P1-5: 添加文件到播放列表
+static void addToPlaylist(const std::string& file) {
+    g_playlist.push_back(file);
+}
+
 static int playlistIndexOf(const std::string& path) {
     for (size_t i = 0; i < g_playlist.size(); ++i)
         if (g_playlist[i] == path) return (int)i;
@@ -1092,6 +1100,19 @@ static void playIndex(int idx, bool relative = false) {
     }
     if (idx < 0 || idx >= (int)g_playlist.size()) return;
     playPath(g_playlist[idx]);
+}
+
+// P1-5: 从播放列表移除指定索引，若移除的是当前播放项则自动跳转下一个
+static void removeFromPlaylist(int idx) {
+    if (idx < 0 || idx >= (int)g_playlist.size()) return;
+    std::string curPath = g_mpv ? g_mpv->path() : "";
+    bool isCurrent = (g_playlist[idx] == curPath);
+    g_playlist.erase(g_playlist.begin() + idx);
+    if (g_playlist.empty()) return;
+    if (isCurrent) {
+        int newIdx = idx < (int)g_playlist.size() ? idx : 0;
+        playPath(g_playlist[newIdx]);
+    }
 }
 
 
@@ -1368,8 +1389,35 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     }
                 }
                 break;
+            case VK_INSERT: {
+                // Insert: 添加文件到播放列表
+                if (g_mpv && g_mpv->hasMedia()) {
+                    std::string f = openFileDialog(hwnd);
+                    if (!f.empty()) {
+                        addToPlaylist(f);
+                        if (!g_ui.playlistOpen) g_ui.playlistOpen = true;
+                        showToast(T("已添加到播放列表", "Added to playlist"));
+                    }
+                }
+                break;
             }
-        }
+            case VK_DELETE: {
+                // Delete: 从播放列表移除当前项
+                if (g_mpv && g_mpv->hasMedia() && g_playlist.size() > 1) {
+                    int curIdx = playlistIndexOf(g_mpv->path());
+                    if (curIdx >= 0) {
+                        std::string fn = fileNameOf(g_playlist[curIdx]);
+                        removeFromPlaylist(curIdx);
+                        char msg[128];
+                        std::snprintf(msg, sizeof(msg), "%s: %s",
+                                      T("已移除", "Removed"), fn.c_str());
+                        showToast(msg);
+                    }
+                }
+                break;
+            }
+            } // switch (wp)
+        } // if (g_mpv)
         g_ui.visible = true;
         g_ui.hideAt = SDL_GetTicks() + ui::CTRLBAR_HIDE_MS;
         return 0;

@@ -499,6 +499,18 @@ void PlaylistPanel::draw(int currentIndex, int winW, int winH) {
         headerText += " (" + std::to_string(playlist_->size()) + ")";
     textCache_.drawText(panelX + 14, panelTop + 13, headerText, 13, 255, 255, 255);
     {
+        // P1-5: 删除选中按钮 (在关闭按钮左侧)
+        int delX = panelX + pw - 14 - 28 - 28 - 8;
+        int delY = panelTop + 8;
+        deleteRect_ = SDL_Rect{ delX, delY, 28, 28 };
+        bool delHover = (mx_ >= delX && mx_ < delX + 28 && my_ >= delY && my_ < delY + 28);
+        if (delHover)
+            fillRR(renderer_, delX, delY, 28, 28, 7, 255, 60, 60, 40);
+        svgicon::draw(renderer_, "delete", delX + 14, delY + 14, 16,
+                      delHover ? 255 : 212, delHover ? 100 : 160,
+                      delHover ? 100 : 160, 220);
+    }
+    {
         int bx = panelX + pw - 14 - 28, by = panelTop + 8;
         closeRect_ = SDL_Rect{ bx, by, 28, 28 };
         bool closeHover = (mx_ >= bx && mx_ < bx + 28 && my_ >= by && my_ < by + 28);
@@ -685,6 +697,13 @@ bool PlaylistPanel::handleMouseDown(int mx, int my, int winW, int winH) {
             my >= closeRect_.y - 6 && my < closeRect_.y + closeRect_.h + 6) {
             toggleRequested_ = true;
             LOG_INFO("UI", "playlist close button pressed -> toggle request");
+            return true;
+        }
+        // P1-5: 删除按钮
+        if (open_ &&
+            mx >= deleteRect_.x - 6 && mx < deleteRect_.x + deleteRect_.w + 6 &&
+            my >= deleteRect_.y - 6 && my < deleteRect_.y + deleteRect_.h + 6) {
+            deleteClicked_ = true;
             return true;
         }
         // 拖拽调整宽度

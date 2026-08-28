@@ -36,6 +36,7 @@ public:
 
     int clickedIndex() const { return clickedIdx_; }
     void clearClick() { clickedIdx_ = -1; }
+    bool consumeDeleteClick() { bool v = deleteClicked_; deleteClicked_ = false; return v; }
 
     void clearThumbnailCache();
     void evictOldThumbnails();
@@ -66,6 +67,8 @@ private:
     bool toggleRequested_ = false;
     bool shrinkPending_ = false;   // M32f.9: 关闭动画期间保持宽度
     SDL_Rect closeRect_{ 0,0,0,0 };   // M32f.6: 实绘矩形（命中以此为准）
+    SDL_Rect deleteRect_{ 0,0,0,0 };  // P1-5: 删除按钮矩形
+    bool deleteClicked_ = false;      // P1-5: 删除按钮被点击
     SDL_Rect listClip_{ 0,0,0,0 };    // M32f.9: 列表区裁剪（drawItem 内恢复用）
 
     const Playlist* playlist_ = nullptr;
