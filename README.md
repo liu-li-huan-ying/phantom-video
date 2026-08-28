@@ -11,13 +11,15 @@
 - **三种播放模式**：Single / Loop / Shuffle
 - **PIP 置顶迷你窗**：一键悬浮小窗，状态天然同步
 - **字幕控制**：cc 图标开关 + C/X/Z 快捷键（显示/延迟 ±0.5s）
-- **OSD 信息面板**：I 键查看 codec/分辨率/帧率/码率/音轨
+- **OSD 信息面板**：I 键查看 codec/分辨率/帧率/码率/音轨/hwdec 路径
 - **列表缩略图**：后台逐项提取 + 磁盘缓存（7 天过期），二次打开零解码
 - **拖拽排序**：列表面板内直接拖动调整顺序
 - **完整 DPI 支持**：Per-Monitor V2，125%+ 缩放下像素精确、文字锐利
 - **ULW 逐像素透明**：UpdateLayeredWindow + ARGB 纹理，半透明 UI 叠加层
 - **i18n 双语**：中文 / English 一键切换
 - **6 段音频均衡器 + 降噪**：运动插值、夜间模式、独占音频等高级选项
+- **进度条拖拽 + Thumb 视觉**：品牌色小圆点常驻，hover 放大白圆+光晕，拖拽实时跟踪
+- **音量点击拖拽**：hover 高亮，点击调节，不再路过误改
 
 ## 构建
 
@@ -25,7 +27,7 @@
 
 - [w64devkit](https://github.com/skeeto/w64devkit)（g++ MinGW）
 - CMake ≥ 3.16
-- 依赖已随仓库置于 `dev/`：SDL2 / SDL2_image / SDL2_ttf / FFmpeg 9.0.1 shared / libmpv / Sonic
+- 依赖已随仓库置于 `dev/`：SDL2 / FFmpeg 9.0.1 shared / libmpv / Sonic
 
 ### 编译
 
@@ -74,6 +76,7 @@ playmode=1        # 0=Single 1=Loop 2=Shuffle
 subautoload=1     # 同名字幕自动加载 (fuzzy)
 thumbcache=1      # 缩略图磁盘缓存
 hwdecode=1        # 硬件解码
+zerocopy=0        # D3D11VA 零拷贝 (默认关, 有驱动风险)
 volnorm=0         # loudnorm 音量标准化
 pos=x,y,w,h       # 窗口位置记忆
 hist=<path>\t<秒>  # 每文件观看位置
