@@ -158,6 +158,7 @@ struct UiState {
     // volume slider
     bool   volumeSliderOpen = false;
     bool   volumeDragging   = false;
+    bool   volumeSliderHover = false;  // mouse over slider track (hover-to-adjust)
 
     // toast
     bool   toastActive = false;
@@ -986,12 +987,19 @@ static void playIndex(int idx, bool relative = false) {
 }
 
 
-// ---- 音量交互区（图标+滑条范围） ----
+// ---- 音量交互区（图标+滑条范围, 用动态布局） ----
 static bool inVolumeArea(int mx, int my) {
+    Row1Layout L;
+    layoutRow1(g_ui.totalW > 0 ? g_ui.totalW : g_ui.winW, g_ui.winH, true, L);
     int barTop = sbTopY();
     int row1Off = U(50);
-    return my >= barTop + row1Off - U(22) && my <= barTop + row1Off + U(22) &&
-           mx >= g_ui.winW - U(200) && mx <= g_ui.winW - U(38);
+    int cy = barTop + row1Off;
+    // Y: 行中心 ± 24px
+    if (my < cy - U(24) || my > cy + U(24)) return false;
+    // X: 从音量图标左缘-8 到滑条右缘+8
+    int x0 = L.volIconCx - U(25);
+    int x1 = L.volSliderW > 0 ? L.volSliderX + L.volSliderW + U(8) : L.volIconCx + U(25);
+    return mx >= x0 && mx <= x1;
 }
 
 // ---- topbar icon hit test ----
@@ -1251,7 +1259,7 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         // topbar icon hover
         g_ui.topbarHover = onTopbar ? hitTestTopbarIcon(g_ui.mouseX, g_ui.mouseY, g_ui.totalW) : -1;
 
-        // 音量滑条 hover 自动展开；离开 1.2s 后收起（拖拽中不收）
+        // 音量滑条 hover 自动展开；离开 0.5s 后收起（拖拽中不收）
         if (inVolumeArea(g_ui.mouseX, g_ui.mouseY)) {
             if (!g_ui.volumeSliderOpen) {
                 g_ui.volumeSliderOpen = true;
@@ -1261,7 +1269,24 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         } else if (g_ui.volumeSliderOpen && !g_ui.volumeDragging &&
                    SDL_GetTicks() > g_ui.volHoverAt + 500) {
             g_ui.volumeSliderOpen = false;
+            g_ui.volumeSliderHover = false;
             LOG_DBG("MAIN", "volume slider auto-collapse");
+        }
+
+        // 音量滑条 hover-to-adjust: 展开时鼠标在滑条轨道上直接调节
+        g_ui.volumeSliderHover = false;
+        if (g_ui.volumeSliderOpen && !g_ui.volumeDragging && g_mpv) {
+            Row1Layout L;
+            layoutRow1(g_ui.totalW > 0 ? g_ui.totalW : g_ui.winW, g_ui.winH, true, L);
+            if (L.volSliderW > 0 &&
+                g_ui.mouseX >= L.volSliderX - U(4) && g_ui.mouseX <= L.volSliderX + L.volSliderW + U(4) &&
+                g_ui.mouseY >= L.cy - U(14) && g_ui.mouseY <= L.cy + U(14)) {
+                g_ui.volumeSliderHover = true;
+                float ratio = (float)(g_ui.mouseX - L.volSliderX) / U(80);
+                if (ratio < 0) ratio = 0; if (ratio > 1) ratio = 1;
+                g_mpv->setVolume(ratio);
+                g_ui.volHoverAt = SDL_GetTicks();  // 滑条上停留不触发收起
+            }
         }
 
         // 列表滚动条: hover 高亮 + 拖拽滚动
@@ -1882,7 +1907,7 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             else if (contentH <= viewH) g_ui.playlistScroll = 0;
         }
         else if (g_mpv) {
-            g_mpv->setVolume(g_mpv->volume() + (d > 0 ? 0.02f : -0.02f));
+            g_mpv->setVolume(g_mpv->volume() + (d > 0 ? 0.05f : -0.05f));
             char msg[24];
             std::snprintf(msg, sizeof(msg), "%s %d%%", T("音量", "Volume"), (int)(g_mpv->volume() * 100 + 0.5f));
             showToast(msg);
@@ -2856,10 +2881,12 @@ static void renderOverlay() {
         if (volOpen && L.volSliderW > 0) {
             int sldW = U(80);
             int sx = L.volSliderX;
-            int slH = U(4);
+            bool hov = g_ui.volumeSliderHover || g_ui.volumeDragging;
+            int slH = hov ? U(5) : U(4);
             int sy = L.cy - slH / 2;
             // 背景轨道
-            SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 40);
+            Uint8 trackA = hov ? 65 : 40;
+            SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, trackA);
             SDL_Rect trk = {sx, sy, sldW, slH};
             SDL_RenderFillRect(g_sdlRdr, &trk);
             // 已填充
@@ -2870,8 +2897,8 @@ static void renderOverlay() {
                 SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 255);
                 SDL_RenderFillRect(g_sdlRdr, &fl);
             }
-            // 圆形 thumb
-            int thumbR = U(6);
+            // 圆形 thumb (hover 时稍大)
+            int thumbR = hov ? U(7) : U(6);
             int tx = sx + fw;
             int ty = L.cy;
             fillCircle(g_sdlRdr, tx, ty, thumbR, 255, 255, 255, 255);
