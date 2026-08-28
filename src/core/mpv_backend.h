@@ -42,6 +42,7 @@ public:
     std::vector<TrackInfo> subTracks() const; // 所有字幕轨
     int  currentSubId() const;             // 当前字幕轨 ID(无则-1)
     void setSubtitle(int id);              // 切换字幕轨
+    void loadSubtitle(const std::string& path); // 加载外部字幕文件
     void addSubDelay(double delta);        // 秒
     double subDelay() const;
 

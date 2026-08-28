@@ -88,6 +88,21 @@ static std::string openFileDialog(HWND hwnd) {
     return "";
 }
 
+static std::string openSubtitleDialog(HWND hwnd) {
+    wchar_t file[MAX_PATH * 2] = {};
+    OPENFILENAMEW ofn = {};
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = hwnd;
+    ofn.lpstrFilter =
+        L"Subtitle\0*.srt;*.ass;*.ssa;*.sub;*.idx;*.sup\0"
+        L"All\0*.*\0";
+    ofn.lpstrFile = file;
+    ofn.nMaxFile = MAX_PATH * 2;
+    ofn.Flags = OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
+    if (GetOpenFileNameW(&ofn)) return WideToUtf8(file);
+    return "";
+}
+
 // M36: 文件夹选择 (SHBrowseForFolderW + NEWDIALOGSTYLE 可调大小/新建按钮)
 // 注: w64devkit 的 shobjidl.h 只前置声明 IFileDialog(无完整 vtable),
 //     IFileDialog 方案不可用, 故用经典 API
@@ -1152,6 +1167,23 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 g_ui.osdStart = SDL_GetTicks();
                 LOG_DBG("MAIN", "osd -> %d", g_ui.osdActive ? 1 : 0);
                 break;
+            case 'S':
+                if (GetKeyState(VK_SHIFT) & 0x8000) {
+                    // Shift+S: 加载外部字幕文件
+                    if (g_mpv && g_mpv->hasMedia()) {
+                        std::string f = openSubtitleDialog(hwnd);
+                        if (!f.empty()) {
+                            g_mpv->loadSubtitle(f);
+                            showToast(T("字幕已加载", "Subtitle loaded"));
+                        }
+                    }
+                } else {
+                    // S: 切换字幕可见性
+                    bool vis = !g_mpv->subVisible();
+                    g_mpv->setSubVisibility(vis);
+                    showToast(vis ? i18n::subtitlesOn() : i18n::subtitlesOff());
+                }
+                break;
             case 'A': {  // AB 循环: 第一次设 A, 第二次设 B, 第三次清除
                 if (!g_mpv->looping()) {
                     g_mpv->setLoopA();
@@ -1685,7 +1717,7 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 Row1Layout L;
                 layoutRow1(g_ui.winW, sbTopY(), false, L);
                 int itemH = U(32), menuW = U(180);
-                int menuH = (int)(subs.size() + 1) * itemH + U(12);  // +1 for "off"
+                int menuH = (int)(subs.size() + 2) * itemH + U(12);  // +1 off +1 load external
                 int menuX = L.subBtn.x;
                 int menuY = L.subBtn.y - menuH - U(6);
                 if (menuY < 0) menuY = L.subBtn.y + L.subBtn.h + U(6);
@@ -1694,7 +1726,6 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     my >= menuY && my <= menuY + menuH - U(12)) {
                     int idx = (my - menuY - U(6)) / itemH;
                     if (idx == 0) {
-                        // "关闭字幕"
                         g_mpv->setSubVisibility(false);
                         showToast(i18n::subtitlesOff());
                     } else if (idx > 0 && idx <= (int)subs.size()) {
@@ -1704,6 +1735,16 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                         char msg[96];
                         std::snprintf(msg, sizeof(msg), "%s: %s", T("字幕", "Subtitle"), subs[idx - 1].desc.c_str());
                         showToast(msg);
+                    } else if (idx == (int)subs.size() + 1) {
+                        // 加载外部字幕
+                        g_ui.subMenuOpen = false;
+                        if (g_mpv->hasMedia()) {
+                            std::string f = openSubtitleDialog(hwnd);
+                            if (!f.empty()) {
+                                g_mpv->loadSubtitle(f);
+                                showToast(T("字幕已加载", "Subtitle loaded"));
+                            }
+                        }
                     }
                 }
                 g_ui.subMenuOpen = false;
@@ -3194,7 +3235,7 @@ static void renderOverlay() {
         Row1Layout L;
         layoutRow1(w, barTop, g_ui.volumeSliderOpen || g_ui.volumeDragging, L);
         int itemH = U(32), menuW = U(180);
-        int menuH = (int)(subs.size() + 1) * itemH + U(12);
+        int menuH = (int)(subs.size() + 2) * itemH + U(12);  // +1 off +1 load external
         int menuX = L.subBtn.x;
         int menuY = L.subBtn.y - menuH - U(6);
         if (menuY < 0) menuY = L.subBtn.y + L.subBtn.h + U(6);
@@ -3229,6 +3270,16 @@ static void renderOverlay() {
             bool sel = (subs[i].id == curSubId && subVis);
             Uint8 tr = sel ? 59 : 228, tg = sel ? 130 : 228, tb = sel ? 246 : 231;
             g_text.drawText(menuX + U(10), iy + U(6), subs[i].desc.c_str(), T(13), tr, tg, tb);
+        }
+        // 分隔线
+        int sepY = menuY + U(6) + (int)(subs.size() + 1) * itemH - U(2);
+        SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 26);
+        SDL_RenderDrawLine(g_sdlRdr, menuX + U(10), sepY, menuX + menuW - U(10), sepY);
+        // 加载外部字幕
+        {
+            int iy = menuY + U(6) + (int)(subs.size() + 1) * itemH;
+            g_text.drawText(menuX + U(10), iy + U(6), T("加载外部字幕...", "Load external..."),
+                            T(13), ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B);
         }
     }
     // --- audio track popup menu ---

@@ -312,6 +312,17 @@ void MpvBackend::setSubtitle(int id) {
     mpv_set_property(mpv_, "sid", MPV_FORMAT_INT64, &v);
 }
 
+void MpvBackend::loadSubtitle(const std::string& path) {
+    if (!mpv_ || path.empty()) return;
+    const char* cmd[] = { "sub-add", path.c_str(), "select", NULL };
+    int ret = mpv_command(mpv_, cmd);
+    if (ret < 0) {
+        LOG_ERROR("MPV", "sub-add failed: %s (path=%s)", mpv_error_string(ret), path.c_str());
+    } else {
+        LOG_INFO("MPV", "sub loaded: %s", path.c_str());
+    }
+}
+
 // ---- 字幕样式 ----
 void MpvBackend::setSubFontSize(int size) {
     if (!mpv_) return;
