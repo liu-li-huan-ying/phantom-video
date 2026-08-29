@@ -124,6 +124,7 @@ extern SDL_Renderer*     g_sdlRdr;
 extern GdiTextCache      g_text;
 extern UiState           g_ui;
 extern AppConfig         g_cfg;
+extern const char*       PHANTOM_VERSION;
 extern float             g_dpi;
 extern float             g_uiBase;
 extern std::vector<std::string> g_playlist;
