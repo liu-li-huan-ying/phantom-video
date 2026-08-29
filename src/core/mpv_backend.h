@@ -23,6 +23,7 @@ public:
     void close();
 
     void togglePause();
+    void unpause();               // P4-1: 确保恢复播放
     void seek(double seconds);
     void seekRelative(double delta);
     void setVolume(float v);

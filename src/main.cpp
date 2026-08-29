@@ -902,6 +902,7 @@ static std::string g_autoNextPath;
 static bool g_autoNextPending = false;
 static double g_resumeSeekPos = -1.0;      // FILE_LOADED 投递的续播位置
 static bool g_resumeSeekPending = false;
+static bool g_needsUnpause = false;        // P4-1: loadFile 后需 unpause
 // M36: 统一历史写入 (pos + dur + 时间戳)
 static void recordHistory(const std::string& path, double pos, double dur) {
     if (path.empty()) return;
@@ -931,6 +932,7 @@ static void playPath(const std::string& path) {
         showToast(i18n::failedOpen());
         return;
     }
+    g_needsUnpause = true;  // P4-1: loadFile 暂停, FILE_LOADED 后 unpause
     g_cfg.lastFile = path;
 
     // 播放列表面板打开时，滚动到当前项附近
@@ -4141,20 +4143,25 @@ wc.style         = CS_DBLCLKS;   // 接收 WM_LBUTTONDBLCLK
             }
         }
 
-        // 续播 seek: 消费 FILE_LOADED 投递的位置
+        // 续播 seek + unpause: 消费 FILE_LOADED 投递的位置
         {
             double pos = -1.0;
             {
                 std::lock_guard<std::mutex> lk(g_autoNextMtx);
                 if (g_resumeSeekPending) { pos = g_resumeSeekPos; g_resumeSeekPending = false; }
             }
-            if (pos > 1.0 && g_mpv && g_mpv->hasMedia()) {
-                LOG_INFO("MAIN", "resume at %.1fs", pos);
-                g_mpv->seek(pos);
-                char msg[48];
-                std::snprintf(msg, sizeof(msg), "%s %02d:%02d",
-                    T("续播于", "Resumed at"), (int)(pos / 60), (int)pos % 60);
-                showToast(msg);
+            if (g_needsUnpause && g_mpv && g_mpv->hasMedia()) {
+                if (pos > 1.0) {
+                    LOG_INFO("MAIN", "resume at %.1fs", pos);
+                    g_mpv->seek(pos);
+                    char msg[48];
+                    std::snprintf(msg, sizeof(msg), "%s %02d:%02d",
+                        T("续播于", "Resumed at"), (int)(pos / 60), (int)pos % 60);
+                    showToast(msg);
+                }
+                // P4-1: seek 完成后 unpause (无 resume 也 unpause)
+                g_mpv->unpause();
+                g_needsUnpause = false;
             }
         }
 

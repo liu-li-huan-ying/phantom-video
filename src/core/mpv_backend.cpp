@@ -120,17 +120,17 @@ bool MpvBackend::loadFile(const std::string& path) {
 
     close();
 
+    // P4-1: 先暂停，等 FILE_LOADED 后 seek + unpause
+    // 避免 audio 先于 video 开始播放导致启动冻结
+    int paused = 1;
+    mpv_set_property(mpv_, "pause", MPV_FORMAT_FLAG, &paused);
+
     const char* cmd[] = { "loadfile", path.c_str(), NULL };
     int ret = mpv_command(mpv_, cmd);
     if (ret < 0) {
         LOG_ERROR("MPV", "loadfile failed: %s (path=%s)", mpv_error_string(ret), path.c_str());
         return false;
     }
-
-    // stop 不重置 pause —— 暂停中拖入/切歌会继承暂停态(画面静止像没播),
-    // 显式恢复播放
-    int unpaused = 0;
-    mpv_set_property(mpv_, "pause", MPV_FORMAT_FLAG, &unpaused);
 
     path_ = path;
     hasMedia_.store(true);
@@ -141,7 +141,7 @@ bool MpvBackend::loadFile(const std::string& path) {
         hwdecRetryCount_ = 0;
         hwdecRetryPath_ = path;
     }
-    LOG_INFO("MPV", "loaded: %s", path.c_str());
+    LOG_INFO("MPV", "loaded: %s (paused)", path.c_str());
     return true;
 }
 
@@ -161,6 +161,13 @@ void MpvBackend::togglePause() {
 
     int paused = (state_.load() == State::Paused) ? 0 : 1;
     mpv_set_property(mpv_, "pause", MPV_FORMAT_FLAG, &paused);
+}
+
+void MpvBackend::unpause() {
+    if (!mpv_ || !hasMedia_.load()) return;
+    int unpaused = 0;
+    mpv_set_property(mpv_, "pause", MPV_FORMAT_FLAG, &unpaused);
+    state_.store(State::Playing);
 }
 
 void MpvBackend::seek(double seconds) {
