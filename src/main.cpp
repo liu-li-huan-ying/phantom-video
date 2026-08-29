@@ -1212,6 +1212,7 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             POINT pt = {0,0}; ClientToScreen(hwnd, &pt);
             SDL_SetWindowPosition(g_sdlWin, pt.x, pt.y);
             SDL_SetWindowSize(g_sdlWin, rc.right, rc.bottom);
+            LOG_DBG("MAIN", "overlay repositioned to screen(%d,%d) size(%d,%d)", pt.x, pt.y, rc.right, rc.bottom);
         }
         // 即时重绘 — 不等主循环唤醒
         renderOverlay();
@@ -1623,9 +1624,17 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             if (B) return HTBOTTOM;
         }
         // 顶栏：非图标区作为拖拽把手
-        if (pt.y >= 0 && pt.y <= curTopH()) {
-            if (hitTestTopbarIcon(pt.x, pt.y, g_ui.winW) < 0)
-                return HTCAPTION;
+        // 模态面板/菜单打开时, 不拦截为 HTCAPTION(避免拦截面板内关闭按钮)
+        // 播放列表区域也不拦截(列表关闭按钮在 topbar Y 范围内)
+        {
+            bool anyModalOpen = g_ui.settingsOpen || g_ui.speedMenuOpen || g_ui.qualityMenuOpen ||
+                                g_ui.eqMenuOpen || g_ui.subMenuOpen || g_ui.audioMenuOpen ||
+                                g_ui.chapterMenuOpen;
+            bool inPlArea = (g_ui.playlistOpen && !g_ui.fullscreen && pt.x >= g_ui.winW);
+            if (pt.y >= 0 && pt.y <= curTopH() && !anyModalOpen && !inPlArea) {
+                if (hitTestTopbarIcon(pt.x, pt.y, g_ui.winW) < 0)
+                    return HTCAPTION;
+            }
         }
         return HTCLIENT;
     }
@@ -1633,8 +1642,9 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_LBUTTONDOWN: {
         int mx = (short)LOWORD(lp), my = (short)HIWORD(lp);
         int barTop = sbTopY();
-        LOG_TRACE("MAIN", "parent LBUTTONDOWN (%d,%d) barTop=%d settings=%d playlist=%d",
-                  mx, my, barTop, g_ui.settingsOpen ? 1 : 0, g_ui.playlistOpen ? 1 : 0);
+        LOG_DBG("MAIN", "parent LBUTTONDOWN (%d,%d) barTop=%d settings=%d playlist=%d winW=%d winH=%d",
+                mx, my, barTop, g_ui.settingsOpen ? 1 : 0, g_ui.playlistOpen ? 1 : 0,
+                g_ui.winW, g_ui.winH);
 
         // --- 播放列表关闭钮: 最高优先级 ---
         // (y 在 topbar 高度内会被 topbar 分支拦截: 窗口模式变拖拽, 全屏时与
@@ -1655,8 +1665,12 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
 
         // --- topbar icon clicks (列表展开时列表区域不属于 topbar) ---
+        // 模态面板/菜单打开时, topbar 不响应点击(避免拦截面板内靠上的关闭按钮)
         bool inPlaylistArea = (g_ui.playlistOpen && !g_ui.fullscreen && mx >= g_ui.winW);
-        if (my >= 0 && my <= curTopH() && !inPlaylistArea) {
+        bool anyModalOpen = g_ui.settingsOpen || g_ui.speedMenuOpen || g_ui.qualityMenuOpen ||
+                            g_ui.eqMenuOpen || g_ui.subMenuOpen || g_ui.audioMenuOpen ||
+                            g_ui.chapterMenuOpen;
+        if (my >= 0 && my <= curTopH() && !inPlaylistArea && !anyModalOpen) {
             int icon = hitTestTopbarIcon(mx, my, g_ui.winW);
             LOG_TRACE("MAIN", "topbar click mx=%d my=%d winW=%d icon=%d", mx, my, g_ui.winW, icon);
             switch (icon) {
@@ -1747,7 +1761,11 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             SettingsGeom sg = settingsGeom(g_ui.winW, g_ui.winH);
             bool inside = (mx >= sg.panelX && mx <= sg.panelX + sg.panelW &&
                            my >= sg.panelY && my <= sg.panelY + sg.panelH);
+            LOG_DBG("MAIN", "settings click: mx=%d my=%d panel(%d,%d,%d,%d) closeC(%d,%d,R=%d) inside=%d",
+                    mx, my, sg.panelX, sg.panelY, sg.panelW, sg.panelH,
+                    sg.closeCx, sg.closeCy, sg.closeR, inside ? 1 : 0);
             if (!inside) {
+                LOG_DBG("MAIN", "settings close: click outside panel");
                 g_ui.settingsOpen = false;      // 点外 = 关闭(点击不再下传)
             }
             else if (std::abs(mx - sg.closeCx) <= sg.closeR &&
@@ -2340,7 +2358,21 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 // P2: overlay 窗口子类 — 让 WM_NCHITTEST 返回 HTTRANSPARENT, 使鼠标消息穿透到 parent
 static WNDPROC s_origOverlayWndProc = nullptr;
 static LRESULT CALLBACK overlaySubclassProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
-    if (msg == WM_NCHITTEST) return HTTRANSPARENT;
+    switch (msg) {
+    case WM_LBUTTONDOWN:
+    case WM_LBUTTONUP:
+    case WM_LBUTTONDBLCLK:
+    case WM_MOUSEMOVE:
+        LOG_DBG("MAIN", "overlay subclass msg=0x%04X wp=0x%zX lp=(%d,%d)",
+                msg, (size_t)wp, (short)LOWORD(lp), (short)HIWORD(lp));
+        break;
+    default:
+        break;
+    }
+    if (msg == WM_NCHITTEST) {
+        LOG_DBG("MAIN", "overlay WM_NCHITTEST -> HTTRANSPARENT");
+        return HTTRANSPARENT;
+    }
     return CallWindowProcW(s_origOverlayWndProc, h, msg, wp, lp);
 }
 
@@ -2375,6 +2407,7 @@ static bool createOverlay(HWND parent, int w, int h) {
     LONG_PTR ex = GetWindowLongPtrW(ov, GWL_EXSTYLE);
     SetWindowLongPtrW(ov, GWL_EXSTYLE,
         ex | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW);
+    LOG_INFO("MAIN", "overlay HWND=%p exStyle=0x%zX (LAYERED|TRANSPARENT|TOOLWINDOW applied)", (void*)ov, ex | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW);
     // 不再使用 LWA_COLORKEY: 改由 UpdateLayeredWindow 提供逐像素 alpha
 
     // 设为 parent 的 Owned 窗口：置顶于父、父最小化时联动、无独立任务栏项
@@ -2399,10 +2432,12 @@ static bool createOverlay(HWND parent, int w, int h) {
 
     POINT pt = {0,0}; ClientToScreen(parent, &pt);
     SetWindowPos(ov, nullptr, pt.x, pt.y, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
+    LOG_INFO("MAIN", "overlay pos: screen(%d,%d) size(%d,%d)", pt.x, pt.y, w, h);
 
     // P2: 子类化 overlay 窗口，让 WM_NCHITTEST 返回 HTTRANSPARENT
     // 解决 SDL 拦截鼠标消息导致关闭按钮点不动的问题
     s_origOverlayWndProc = (WNDPROC)SetWindowLongPtrW(ov, GWLP_WNDPROC, (LONG_PTR)overlaySubclassProc);
+    LOG_INFO("MAIN", "overlay subclass installed on HWND=%p orig=%p", (void*)ov, (void*)s_origOverlayWndProc);
 
     LOG_INFO("MAIN", "overlay created (%dx%d, owned)", w, h);
     return true;
