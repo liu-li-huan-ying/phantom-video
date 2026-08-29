@@ -581,7 +581,7 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 if (inRc(kv.second)) {
                     LOG_INFO("MAIN", "welcome continue-watch click");
                     buildPlaylistAround(kv.first);
-                    playPath(kv.first);
+                    playPath(kv.first, true);   // forceResume: welcome 卡片始终恢复进度
                     return 0;
                 }
             }

@@ -1,4 +1,4 @@
-﻿#ifndef SDL_MAIN_HANDLED
+#ifndef SDL_MAIN_HANDLED
 #define SDL_MAIN_HANDLED
 #endif
 #include <SDL.h>
@@ -103,9 +103,9 @@ const int SPEED_PRESET_COUNT = 8;
 const int TIMER_SINGLECLICK = 2;   // ������ͣ�ӳٶ�ʱ��
 
 const QualityPreset QUALITY_PRESETS[] = {
-    { "ʡ��",  "bilinear", "bilinear", "bilinear", 0, 0.0f },
-    { "��׼",  "spline36", "mitchell", "spline36", 1, 0.7f },
-    { "����",  "ewa_lanczossharp", "ewa_lanczossharp", "ewa_lanczossharp", 1, 0.7f },
+    { "省电",  "bilinear", "bilinear", "bilinear", 0, 0.0f },
+    { "标准",  "spline36", "mitchell", "spline36", 1, 0.7f },
+    { "卓越",  "ewa_lanczossharp", "ewa_lanczossharp", "ewa_lanczossharp", 1, 0.7f },
 };
 const int QUALITY_PRESET_COUNT = 3;
 
@@ -293,25 +293,28 @@ SettingsGeom settingsGeom(int w, int h) {
     return g;
 }
 
+// FILE_LOADED 恢复 seek 位+ unpause 标志 (applySetting 里 excl 需要提前使用)
+static double g_pendingResumePos = -1.0;
+static bool g_needsUnpause = false;
+
 // Ӧ�����ñ���� mpv�����ط�תʱ���ã�
 void applySetting(const char* key, int value) {
     if      (std::strcmp(key, "hw") == 0)      mpvSetOpt("hwdec", value ? (g_cfg.enableZeroCopy ? "auto-safe" : "auto-copy-safe") : "no");
     else if (std::strcmp(key, "sub") == 0)     mpvSetOpt("sub-auto", value ? "fuzzy" : "no");
     else if (std::strcmp(key, "excl") == 0) {
-        // WASAPI 独占模式是音频输出初始化参数，热切换不可靠
-        // 必须重启当前播放以重新初始化音频输出
         mpvSetOpt("audio-exclusive", value ? "yes" : "no");
         if (g_mpv && g_mpv->hasMedia()) {
             std::string cur = g_mpv->path();
             double pos = g_mpv->clock();
             bool wasPaused = (g_mpv->state() == MpvBackend::State::Paused);
-            if (!cur.empty()) {
-                playPath(cur);
-                if (pos > 0) g_mpv->seek(pos);
-                if (wasPaused) g_mpv->togglePause();
-                showToast(value ? i18n::exclusiveAudio() : i18n::exclusiveAudio());
+            if (!cur.empty() && pos > 0) {
+                g_mpv->close();                          // stop + 关闭音频设备
+                g_pendingResumePos = pos;
+                g_mpv->loadFile(cur);                    // 重新加载以应用新音频设置
+                g_needsUnpause = !wasPaused;
             }
         }
+        showToast(value ? i18n::exclusiveAudio() : i18n::exclusiveAudio());
     }
     else if (std::strcmp(key, "vol") == 0 ||
              std::strcmp(key, "night") == 0)   rebuildAudioFilters();
@@ -511,14 +514,12 @@ int playlistIndexOf(const std::string& path) {
 
 
 // ͳһ������ڣ���¼������λ�� + ���� lastFile + �����浱ǰ��
-static double g_pendingResumePos = -1.0;   // >0 ��ʾ FILE_LOADED �� seek ����
 // EOF �Զ�����: �¼��߳�ֻͶ��, UI ��ѭ������(������߳� mpv/UI ��������)
 static std::mutex g_autoNextMtx;
 static std::string g_autoNextPath;
 static bool g_autoNextPending = false;
 static double g_resumeSeekPos = -1.0;      // FILE_LOADED Ͷ�ݵ�����λ��
 static bool g_resumeSeekPending = false;
-static bool g_needsUnpause = false;        // P4-1: loadFile ���� unpause
 // M36: ͳһ��ʷд�� (pos + dur + ʱ���)
 static void recordHistory(const std::string& path, double pos, double dur) {
     if (path.empty()) return;
@@ -538,11 +539,11 @@ static void recordHistory(const std::string& path, double pos, double dur) {
         g_cfg.history.erase(oldest);
     }
 }
-void playPath(const std::string& path) {
+void playPath(const std::string& path, bool forceResume) {
     if (!g_mpv || path.empty()) return;
     g_pendingResumePos = -1.0;
     auto it = g_cfg.history.find(path);
-    if (g_cfg.resume && it != g_cfg.history.end() && it->second.pos > 1.0)
+    if ((forceResume || g_cfg.resume) && it != g_cfg.history.end() && it->second.pos > 1.0)
         g_pendingResumePos = it->second.pos;
     if (!g_mpv->loadFile(path)) {
         showToast(i18n::failedOpen());
@@ -782,7 +783,7 @@ wc.style         = CS_DBLCLKS;   // ���� WM_LBUTTONDBLCLK
         LOG_INFO("MAIN", "restore window pos (%d,%d) %dx%d", winX, winY, winW, winH);
     }
     g_parentHwnd = CreateWindowExW(WS_EX_ACCEPTFILES,
-        wc.lpszClassName, L"��Ӱ��Ƶ",
+        wc.lpszClassName, L"幻影视频",
         WS_POPUP | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX,
         winX, winY, winW, winH,
         nullptr, nullptr, wc.hInstance, nullptr);
@@ -968,7 +969,7 @@ wc.style         = CS_DBLCLKS;   // ���� WM_LBUTTONDBLCLK
                     g_mpv->seek(pos);
                     char msg[48];
                     std::snprintf(msg, sizeof(msg), "%s %02d:%02d",
-                        T("������", "Resumed at"), (int)(pos / 60), (int)pos % 60);
+                        T("已续播", "Resumed at"), (int)(pos / 60), (int)pos % 60);
                     showToast(msg);
                 }
                 // P4-1: seek ��ɺ� unpause (�� resume Ҳ unpause)

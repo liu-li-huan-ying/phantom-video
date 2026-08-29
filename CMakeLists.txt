@@ -48,6 +48,9 @@ target_include_directories(phantom_video PRIVATE
 
 target_compile_definitions(phantom_video PRIVATE SDL_MAIN_HANDLED)
 
+# UTF-8 全链路: 源文件 → 编译器 → 可执行文件 → GDI 渲染
+target_compile_options(phantom_video PRIVATE -finput-charset=UTF-8 -fexec-charset=UTF-8)
+
 # 过滤 SDL2main 相关标志
 set(SDL2_LINK "")
 foreach(f ${SDL2_LDFLAGS})

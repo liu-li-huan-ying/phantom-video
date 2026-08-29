@@ -289,7 +289,7 @@ void renderOverlay();
 void clampPlaylistScroll();
 void buildPlaylistAround(const std::string& file);
 bool buildPlaylistFromFolder(const std::string& dirUtf8);
-void playPath(const std::string& path);
+void playPath(const std::string& path, bool forceResume = false);
 void playIndex(int idx, bool relative = false);
 int  playlistIndexOf(const std::string& path);
 void addToPlaylist(const std::string& file);

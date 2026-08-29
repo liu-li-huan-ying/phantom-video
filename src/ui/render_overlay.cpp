@@ -1,4 +1,4 @@
-﻿#include "ui/render_overlay.h"
+#include "ui/render_overlay.h"
 
 #ifndef SDL_MAIN_HANDLED
 #define SDL_MAIN_HANDLED
@@ -621,8 +621,8 @@ void renderOverlay() {
                 // ������: ���� xx% �� ʱ���
                 char tb1[16];
                 formatTime(tb1, sizeof(tb1), it.pos);
-                std::string sub2 = std::string(T("���� ", "Watched ")) +
-                                   (it.dur > 0 ? std::to_string((int)(it.pos / it.dur * 100 + 0.5)) + "% �� " : "") +
+                std::string sub2 = std::string(T("已播放 ", "Watched ")) +
+                                   (it.dur > 0 ? std::to_string((int)(it.pos / it.dur * 100 + 0.5)) + "% 时 " : "") +
                                    tb1;
                 g_text.drawText(cx, contentY + thumbH + U(30), sub2,
                                 Tpt(ui::T_CAPTION), 150, 150, 158, A8(255));
@@ -701,8 +701,8 @@ void renderOverlay() {
 
         // ---- �ײ�: ������ʾ(����) + �汾(����) ----
         {
-            std::string hint = T("�ո� ����/��ͣ �� ���� ����� �� F ȫ�� �� M ����",
-                                 "Space Play/Pause �� Arrows Seek �� F Fullscreen �� M Mute");
+            std::string hint = T("空格 播放/暂停 → 方向键 快进退 → F 全屏 → M 静音",
+                                 "Space Play/Pause \u00bb Arrows Seek \u00bb F Fullscreen \u00bb M Mute");
             int hw = g_text.measureText(hint, Tpt(ui::T_CAPTION));
             g_text.drawText((totalW - hw) / 2, h - U(30), hint,
                             Tpt(ui::T_CAPTION), ui::HINT_TEXT, ui::HINT_TEXT, ui::HINT_TEXT + 6, A8(200));
@@ -748,7 +748,7 @@ void renderOverlay() {
 
         // title (left)
         std::string title = g_mpv->title();
-        if (title.empty()) title = "��Ӱ��Ƶ";
+        if (title.empty()) title = "幻影视频";
         if (title.size() > 55) title = title.substr(0, 52) + "...";
         g_text.drawText(U(20), U(14) + topOff, title, Tpt(14), 255, 255, 255);
 
@@ -1047,8 +1047,8 @@ void renderOverlay() {
             else               std::snprintf(label, sizeof(label), "%.2fx", sp);
             g_text.drawText(menuX + U(10), iy + U(6), label, Tpt(13), tr, tg, tb);
             // k ��ע: ��/����/��
-            const char* k = (sp < 0.99f) ? T("��", "Slow") : (sp < 1.01f) ? T("����", "Normal") :
-                            (sp < 2.01f) ? nullptr : T("��", "Fast");
+            const char* k = (sp < 0.99f) ? T("慢", "Slow") : (sp < 1.01f) ? T("正常", "Normal") :
+                            (sp < 2.01f) ? nullptr : T("快", "Fast");
             if (k) {
                 int kw = g_text.measureText(k, Tpt(11));
                 g_text.drawText(menuX + menuW - kw - U(10), iy + U(7), k, Tpt(11), ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B);
@@ -1097,7 +1097,7 @@ void renderOverlay() {
                            menuX + menuW - U(8), menuY + infoH - U(4));
 
         // Ԥ��ѡ��
-        const char* qNames[] = { T("ʡ��", "Power Saving"), T("��׼", "Standard"), T("����", "Ultimate") };
+        const char* qNames[] = { T("省电", "Power Saving"), T("标准", "Standard"), T("卓越", "Ultimate") };
         for (int i = 0; i < QUALITY_PRESET_COUNT; ++i) {
             int iy = menuY + infoH + i * itemH;
             bool sel = (g_ui.qualityPreset == i);
@@ -1185,7 +1185,7 @@ void renderOverlay() {
         static const int kPresetCount = (int)(sizeof(presets) / sizeof(presets[0]));
         int presetY = resetY + U(30);
         int presetBtnW = (menuW - U(20)) / kPresetCount;
-        g_text.drawText(menuX + U(10), presetY - U(2), T("Ԥ��:", "Presets:"), Tpt(10), 140, 140, 148);
+        g_text.drawText(menuX + U(10), presetY - U(2), T("预设:", "Presets:"), Tpt(10), 140, 140, 148);
         for (int i = 0; i < kPresetCount; ++i) {
             int bx = menuX + U(10) + i * presetBtnW;
             int by = presetY + U(14);
@@ -1240,7 +1240,7 @@ void renderOverlay() {
             int iy = menuY + U(6);
             bool sel = !subVis;
             Uint8 tr = sel ? 59 : 228, tg = sel ? 130 : 228, tb = sel ? 246 : 231;
-            g_text.drawText(menuX + U(10), iy + U(6), T("�ر�", "Off"), Tpt(13), tr, tg, tb);
+            g_text.drawText(menuX + U(10), iy + U(6), T("关闭", "Off"), Tpt(13), tr, tg, tb);
         }
         for (int i = 0; i < (int)subs.size(); ++i) {
             int iy = menuY + U(6) + (i + 1) * itemH;
@@ -1255,7 +1255,7 @@ void renderOverlay() {
         // �����ⲿ��Ļ
         {
             int iy = menuY + U(6) + (int)(subs.size() + 1) * itemH;
-            g_text.drawText(menuX + U(10), iy + U(6), T("�����ⲿ��Ļ...", "Load external..."),
+            g_text.drawText(menuX + U(10), iy + U(6), T("加载外部字幕...", "Load external..."),
                             Tpt(13), ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B);
         }
     }
@@ -1325,7 +1325,7 @@ void renderOverlay() {
             bool sel = (i == curCh);
             Uint8 tr = sel ? 59 : 228, tg = sel ? 130 : 228, tb = sel ? 246 : 231;
             const char* name = chs[i].title.empty()
-                ? T("�ޱ���", "Untitled") : chs[i].title.c_str();
+                ? T("无标题", "Untitled") : chs[i].title.c_str();
             char label[128];
             std::snprintf(label, sizeof(label), "%d. %s", i + 1, name);
             g_text.drawText(menuX + U(10), iy + U(6), label, Tpt(13), tr, tg, tb);
