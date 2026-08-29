@@ -297,7 +297,22 @@ SettingsGeom settingsGeom(int w, int h) {
 void applySetting(const char* key, int value) {
     if      (std::strcmp(key, "hw") == 0)      mpvSetOpt("hwdec", value ? (g_cfg.enableZeroCopy ? "auto-safe" : "auto-copy-safe") : "no");
     else if (std::strcmp(key, "sub") == 0)     mpvSetOpt("sub-auto", value ? "fuzzy" : "no");
-    else if (std::strcmp(key, "excl") == 0)    mpvSetOpt("audio-exclusive", value ? "yes" : "no");
+    else if (std::strcmp(key, "excl") == 0) {
+        // WASAPI 独占模式是音频输出初始化参数，热切换不可靠
+        // 必须重启当前播放以重新初始化音频输出
+        mpvSetOpt("audio-exclusive", value ? "yes" : "no");
+        if (g_mpv && g_mpv->hasMedia()) {
+            std::string cur = g_mpv->path();
+            double pos = g_mpv->clock();
+            bool wasPaused = (g_mpv->state() == MpvBackend::State::Paused);
+            if (!cur.empty()) {
+                playPath(cur);
+                if (pos > 0) g_mpv->seek(pos);
+                if (wasPaused) g_mpv->togglePause();
+                showToast(value ? i18n::exclusiveAudio() : i18n::exclusiveAudio());
+            }
+        }
+    }
     else if (std::strcmp(key, "vol") == 0 ||
              std::strcmp(key, "night") == 0)   rebuildAudioFilters();
     else if (std::strcmp(key, "interp") == 0)  applyMotionInterp(value != 0);
