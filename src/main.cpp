@@ -34,6 +34,7 @@ static const char* PHANTOM_VERSION = "0.1.0";
 #include "ui/helpers.h"
 #include "ui/dialogs.h"
 #include "ui/primitives.h"
+#include "ui/gradient.h"
 
 // ---- helpers (declarations in app/app_state.h, impl in ui/helpers.cpp) ----
 static std::vector<std::string> utf8Args() {
@@ -2112,93 +2113,11 @@ static void destroyOverlay() {
 // ---- dithered gradient helper ----
 // 渐变条逐像素绘制代价 ~13 万次 FillRect/帧; 缓存为纹理后每帧一次 RenderCopy。
 // 透明区(alpha<阈值)写入 0 —— 与品红 colorkey 兼容, 视频照常穿透。
-struct GradKey {
-    int w = 0, h = 0;
-    Uint8 cr = 0, cg = 0, cb = 0, aTop = 0, aBot = 0;
-    bool operator==(const GradKey& o) const {
-        return w == o.w && h == o.h && cr == o.cr && cg == o.cg &&
-               cb == o.cb && aTop == o.aTop && aBot == o.aBot;
-    }
-};
-static SDL_Texture* g_gradTex[3]   = { nullptr, nullptr, nullptr };
-static GradKey       g_gradKey[3]  = {};
+// P2-2: GradKey/GradCache/drawDitherDim/drawGradientBar 移至 ui/gradient.h
+static GradCache g_gradCache;
 
 static void destroyGradCache() {
-    for (auto& t : g_gradTex)
-        if (t) { SDL_DestroyTexture(t); t = nullptr; }
-}
-
-// 均匀抖动压暗: Bayer 抖动混合"透明键黑"与不透明深色, 模拟半透明遮罩
-// (colorkey 架构下无法真半透明, 抖动是唯一正确方案)
-static void drawDitherDim(SDL_Renderer* r, int x, int y, int w, int h,
-                          Uint8 cr, Uint8 cg, Uint8 cb, Uint8 alpha) {
-    static const int bayer[4][4] = {
-        {  0, 136,  34, 170},
-        {204,  68, 238, 102},
-        { 51, 187,  17, 153},
-        {255, 119, 221,  85}
-    };
-    if (w <= 0 || h <= 0) return;
-    GradKey key{ w, h, cr, cg, cb, alpha, alpha };
-
-    // slot 2 专用缓存
-    static SDL_Texture* dimTex = nullptr;
-    static GradKey      dimKey = {};
-    if (!dimTex || !(dimKey == key)) {
-        if (dimTex) { SDL_DestroyTexture(dimTex); dimTex = nullptr; }
-        SDL_Texture* tex = SDL_CreateTexture(r, SDL_PIXELFORMAT_ARGB8888,
-                                             SDL_TEXTUREACCESS_STREAMING, w, h);
-        if (!tex) return;
-        SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
-        Uint32* pixels = nullptr; int pitch = 0;
-        if (SDL_LockTexture(tex, nullptr, (void**)&pixels, &pitch) == 0) {
-            Uint32 rgb = ((Uint32)cr << 16) | ((Uint32)cg << 8) | cb;
-            for (int dy = 0; dy < h; ++dy) {
-                int by = dy % 4;
-                Uint32* row = (Uint32*)((Uint8*)pixels + dy * pitch);
-                for (int dx = 0; dx < w; ++dx) {
-                    row[dx] = (alpha > bayer[by][dx % 4])
-                            ? (0xFF000000u | rgb)
-                            : 0x00000000u;
-                }
-            }
-            SDL_UnlockTexture(tex);
-        }
-        dimTex = tex;
-        dimKey = key;
-    }
-    SDL_Rect dst = { x, y, w, h };
-    SDL_RenderCopy(r, dimTex, nullptr, &dst);
-}
-
-static void drawGradientBar(SDL_Renderer* r, int slot, int x, int y, int w, int h,
-                             Uint8 cr, Uint8 cg, Uint8 cb, Uint8 aTop, Uint8 aBot) {
-    if (w <= 0 || h <= 0) return;
-    GradKey key{ w, h, cr, cg, cb, aTop, aBot };
-
-    if (!g_gradTex[slot] || !(g_gradKey[slot] == key)) {
-        if (g_gradTex[slot]) { SDL_DestroyTexture(g_gradTex[slot]); g_gradTex[slot] = nullptr; }
-        SDL_Texture* tex = SDL_CreateTexture(r, SDL_PIXELFORMAT_ARGB8888,
-                                             SDL_TEXTUREACCESS_STREAMING, w, h);
-        if (!tex) return;
-        SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
-        Uint32* pixels = nullptr; int pitch = 0;
-        if (SDL_LockTexture(tex, nullptr, (void**)&pixels, &pitch) == 0) {
-            Uint32 rgb = ((Uint32)cr << 16) | ((Uint32)cg << 8) | cb;
-            for (int dy = 0; dy < h; ++dy) {
-                int a = aTop + ((int)(aBot - aTop)) * dy / h;   // 线性 alpha, 平滑无抖动
-                Uint32* row = (Uint32*)((Uint8*)pixels + dy * pitch);
-                for (int dx = 0; dx < w; ++dx) {
-                    row[dx] = ((Uint32)a << 24) | rgb;
-                }
-            }
-            SDL_UnlockTexture(tex);
-        }
-        g_gradTex[slot] = tex;
-        g_gradKey[slot] = key;
-    }
-    SDL_Rect dst = { x, y, w, h };
-    SDL_RenderCopy(r, g_gradTex[slot], nullptr, &dst);
+    g_gradCache.destroy();
 }
 
 // ---- rendering ----
@@ -2432,7 +2351,7 @@ static void renderOverlay() {
 
         // ---- topbar (与播放态一致的全套图标) ----
         drawGradientBar(g_sdlRdr, 0, 0, 0, totalW, curTopH(), 11, 11, 11,
-                        (Uint8)(ui::TOPBAR_A0 * g_ui.introAlpha), 0);
+                        (Uint8)(ui::TOPBAR_A0 * g_ui.introAlpha), 0, g_gradCache);
         {
             std::string title = i18n::appName();
             g_text.drawText(U(20), U(14), title, Tpt(14), 255, 255, 255, A8(255));
@@ -2726,7 +2645,7 @@ static void renderOverlay() {
     // --- topbar (gradient: glass 半透明效果, 视频隐约可见) ---
     {
         drawGradientBar(g_sdlRdr, 0, 0, topOff, w, U(52), 11, 11, 11,
-                        (Uint8)(ui::TOPBAR_A0 * fa), 0);
+                        (Uint8)(ui::TOPBAR_A0 * fa), 0, g_gradCache);
 
         // title (left)
         std::string title = g_mpv->title();
@@ -2784,7 +2703,7 @@ static void renderOverlay() {
     }
 
     // --- gradient background (效果图: 单层渐变 底部→顶部全透) ---
-    drawGradientBar(g_sdlRdr, 1, 0, barTop, w, ctrlH, 0, 0, 0, ui::CTRLBAR_A0, ui::CTRLBAR_A1);
+    drawGradientBar(g_sdlRdr, 1, 0, barTop, w, ctrlH, 0, 0, 0, ui::CTRLBAR_A0, ui::CTRLBAR_A1, g_gradCache);
 
     // --- seekbar (at very top of bar) ---
     if (dur > 0) {
