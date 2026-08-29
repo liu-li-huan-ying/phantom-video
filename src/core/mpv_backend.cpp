@@ -601,12 +601,15 @@ void MpvBackend::eventLoop() {
                 // 1. 确实尝试过硬件解码 (hwdecCurrent_ 非空且非 "no")
                 // 2. 同一文件重试未超限 (上限 2 次)
                 // 3. 当前文件路径与重试路径一致 (换文件重置)
+                // P4-2: 降级时不再触发 onPlaybackEnded, 避免 auto-next 级联
+                bool hwdecRetry = false;
                 if (!hwdecCurrent_.empty() && hwdecCurrent_ != "no" &&
                     hwdecRetryPath_ == path_ && hwdecRetryCount_ < 2) {
                     retryWithHwdecFallback();
+                    hwdecRetry = true;
                 }
 
-                if (onPlaybackEnded) onPlaybackEnded();
+                if (!hwdecRetry && onPlaybackEnded) onPlaybackEnded();
             } else if (end->reason == MPV_END_FILE_REASON_STOP) {
                 LOG_DBG("MPV", "playback stopped");
             }
