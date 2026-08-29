@@ -2337,6 +2337,13 @@ static LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     return DefWindowProcW(hwnd, msg, wp, lp);
 }
 
+// P2: overlay 窗口子类 — 让 WM_NCHITTEST 返回 HTTRANSPARENT, 使鼠标消息穿透到 parent
+static WNDPROC s_origOverlayWndProc = nullptr;
+static LRESULT CALLBACK overlaySubclassProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
+    if (msg == WM_NCHITTEST) return HTTRANSPARENT;
+    return CallWindowProcW(s_origOverlayWndProc, h, msg, wp, lp);
+}
+
 // ---- SDL2 overlay ----
 // 逐像素 alpha 合成(UpdateLayeredWindow): 渲染结果 ReadPixels 后预乘 alpha,
 // 经 ULW_ALPHA 上屏。支持真半透明(玻璃渐变/压暗遮罩/模态背景), 无 colorkey
@@ -2391,7 +2398,11 @@ static bool createOverlay(HWND parent, int w, int h) {
     g_text.init(g_sdlRdr);
 
     POINT pt = {0,0}; ClientToScreen(parent, &pt);
-    SetWindowPos(ov, nullptr, pt.x, pt.y, w, h, SWP_NOACTIVATE);
+    SetWindowPos(ov, nullptr, pt.x, pt.y, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
+
+    // P2: 子类化 overlay 窗口，让 WM_NCHITTEST 返回 HTTRANSPARENT
+    // 解决 SDL 拦截鼠标消息导致关闭按钮点不动的问题
+    s_origOverlayWndProc = (WNDPROC)SetWindowLongPtrW(ov, GWLP_WNDPROC, (LONG_PTR)overlaySubclassProc);
 
     LOG_INFO("MAIN", "overlay created (%dx%d, owned)", w, h);
     return true;
