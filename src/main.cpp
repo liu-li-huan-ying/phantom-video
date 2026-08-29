@@ -31,8 +31,9 @@ static const char* PHANTOM_VERSION = "0.1.0";
 #include "ui/gdi_text.h"
 #include "ui/svgicon.h"
 #include "app/app_state.h"
+#include "ui/helpers.h"
 
-// ---- helpers (declarations in app/app_state.h) ----
+// ---- helpers (declarations in app/app_state.h, impl in ui/helpers.cpp) ----
 static std::vector<std::string> utf8Args() {
     std::vector<std::string> out;
     int argc = 0;
@@ -46,32 +47,6 @@ static std::vector<std::string> utf8Args() {
     }
     LocalFree(wargv);
     return out;
-}
-
-void formatTime(char* buf, size_t n, double sec) {
-    int s = (int)(sec + 0.5);
-    if (s < 0) s = 0;
-    int h = s / 3600, m = (s % 3600) / 60, ss = s % 60;
-    if (h > 0) std::snprintf(buf, n, "%d:%02d:%02d", h, m, ss);
-    else       std::snprintf(buf, n, "%02d:%02d", m, ss);
-}
-
-// ---- UTF-8 <-> UTF-16 ----
-// mpv/std::string 用 UTF-8; Win32 文件 API 与 fs::path(w) 用 UTF-16。
-// DragQueryFileA/fs::path(窄)/GetOpenFileNameA 都按 ANSI(GBK) 解读 ->
-// 中文路径必坏, 所有边界必须显式转换
-std::wstring Utf8ToWide(const std::string& u8) {
-    int n = MultiByteToWideChar(CP_UTF8, 0, u8.c_str(), -1, nullptr, 0);
-    std::wstring w(n > 0 ? n - 1 : 0, L'\0');
-    if (n > 1) MultiByteToWideChar(CP_UTF8, 0, u8.c_str(), -1, w.data(), n);
-    return w;
-}
-
-std::string WideToUtf8(const std::wstring& ws) {
-    int n = WideCharToMultiByte(CP_UTF8, 0, ws.c_str(), -1, nullptr, 0, nullptr, nullptr);
-    std::string s(n > 0 ? n - 1 : 0, '\0');
-    if (n > 1) WideCharToMultiByte(CP_UTF8, 0, ws.c_str(), -1, s.data(), n, nullptr, nullptr);
-    return s;
 }
 
 static std::string openFileDialog(HWND hwnd) {
@@ -206,15 +181,6 @@ static std::string openFolderDialog(HWND hwnd) {
     }
     if (coOwned) CoUninitialize();
     return result;
-}
-
-// 从 UTF-8 路径安全提取文件名（fs::path 窄构造会按 ANSI 误读）
-std::string fileNameOf(const std::string& utf8path) {
-    namespace fs = std::filesystem;
-    try {
-        fs::path p(Utf8ToWide(utf8path));
-        return WideToUtf8(p.filename().wstring());
-    } catch (...) { return utf8path; }
 }
 
 // ---- UI state (defined in app/app_state.h) ----
