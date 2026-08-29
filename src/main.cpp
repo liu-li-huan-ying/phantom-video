@@ -852,9 +852,17 @@ wc.style         = CS_DBLCLKS;   // ���� WM_LBUTTONDBLCLK
 
     if (!mpv.init(g_mpvHwnd, g_cfg.enableZeroCopy != 0)) { LOG_ERROR("MAIN", "mpv init failed"); return 1; }
 
-    // ������Ӧ������ʱѡ��
+    // Essential mpv options only (critical for first frame)
     mpvSetOpt("hwdec", g_cfg.hwDecode ? (g_cfg.enableZeroCopy ? "auto-safe" : "auto-copy-safe") : "no");
     mpvSetOpt("sub-auto", g_cfg.subAutoLoad ? "fuzzy" : "no");
+
+    // ---- SDL2 overlay ----
+    if (!createOverlay(g_parentHwnd, rc.right, rc.bottom)) { return 1; }
+
+    ShowWindow(g_parentHwnd, SW_SHOW);
+    UpdateWindow(g_parentHwnd);
+
+    // Deferred mpv options (non-critical, applied after window visible)
     mpvSetOpt("audio-exclusive", g_cfg.audioExclusive ? "yes" : "no");
     rebuildAudioFilters();
     if (g_cfg.motionInterp) applyMotionInterp(true);
@@ -862,12 +870,6 @@ wc.style         = CS_DBLCLKS;   // ���� WM_LBUTTONDBLCLK
         mpvSetOpt("scale", "ewa_lanczossharp");
         mpvSetOpt("cscale", "ewa_lanczossharp");
     }
-
-    // ---- SDL2 overlay��owned ���㴰�ڣ������������� ----
-    if (!createOverlay(g_parentHwnd, rc.right, rc.bottom)) { return 1; }
-
-    ShowWindow(g_parentHwnd, SW_SHOW);
-    UpdateWindow(g_parentHwnd);
 
     // ---- command line / resume ----
     auto args = utf8Args();
@@ -891,10 +893,9 @@ wc.style         = CS_DBLCLKS;   // ���� WM_LBUTTONDBLCLK
 
     LOG_INFO("MAIN", "entering main loop (playlist=%d)", (int)g_playlist.size());
 
-    // ����ͼ worker�������̻���Ŀ¼��
+    // Thumb worker: start thread first, cleanup runs inside worker
     CreateDirectoryA((exeDir() + "cache").c_str(), nullptr);
     CreateDirectoryA(thumbCacheDir().c_str(), nullptr);
-    thumbCacheCleanup(7);
     g_thumbQuit.store(false);
     g_thumbThread = std::thread(thumbWorkerMain);
 

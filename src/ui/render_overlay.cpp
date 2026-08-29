@@ -41,7 +41,8 @@
 std::mutex g_thumbMtx;
 std::vector<std::string> g_thumbWant;                   // ��ǰ�ɼ�����ȡ����
 std::map<std::string, ThumbRgb> g_thumbRgb;              // path -> RGB24(�� px=ʧ�ܱ��)
-std::map<std::string, SDL_Texture*> g_thumbTex;          // ��Ⱦ�߳�ר��
+std::map<std::string, SDL_Texture*> g_thumbTex;
+std::map<std::string, Uint32>       g_thumbAccess;          // ��Ⱦ�߳�ר��
 std::atomic<bool> g_thumbQuit{false};
 std::thread g_thumbThread;
 
@@ -147,6 +148,9 @@ static void thumbDiskSave(const std::string& path, const ThumbRgb& t) {
 }
 
 void thumbWorkerMain() {
+    // Run cache cleanup in background (non-blocking startup)
+    thumbCacheCleanup(7);
+
     ThumbnailExtractor ex;
     while (!g_thumbQuit.load()) {
         std::string path;
@@ -205,6 +209,7 @@ static void uploadThumbs(SDL_Renderer* r) {
             SDL_FreeSurface(surf);
             if (tex) {
                 g_thumbTex[it->first] = tex;
+                g_thumbAccess[it->first] = SDL_GetTicks();
                 it = g_thumbRgb.erase(it);
                 continue;
             }
@@ -358,6 +363,7 @@ static void drawThumbCover(const std::string& path, SDL_Rect rc, int rad) {
         svgicon::draw(g_sdlRdr, "play", rc.x + rc.w / 2, rc.y + rc.h / 2, U(20),
                       255, 255, 255, 255);
     } else {
+        g_thumbAccess[path] = SDL_GetTicks();  // LRU: update access time
         int tw = 0, th = 0;
         SDL_QueryTexture(it->second, nullptr, nullptr, &tw, &th);
         SDL_Rect src = {0, 0, tw, th};
@@ -379,10 +385,35 @@ static void drawThumbCover(const std::string& path, SDL_Rect rc, int rad) {
 // renderOverlay() — the main UI rendering function
 // ================================================================
 
+static Uint32 s_frameCount = 0;
+static Uint32 s_renderTimeAcc = 0;
 void renderOverlay() {
     if (!g_sdlRdr || !g_sdlWin) return;
 
-    uploadThumbs(g_sdlRdr);   // �����ϴ�����������ͼ����
+    uploadThumbs(g_sdlRdr);   // Upload pending thumbnail RGB to GPU textures
+
+    // LRU eviction: keep at most 60 thumbnail textures in VRAM
+    static const int kMaxThumbTex = 60;
+    if ((int)g_thumbTex.size() > kMaxThumbTex) {
+        // Find and evict oldest entries
+        while ((int)g_thumbTex.size() > kMaxThumbTex - 10) {
+            std::string oldestPath;
+            Uint32 oldestTick = UINT32_MAX;
+            for (auto& kv : g_thumbAccess) {
+                if (kv.second < oldestTick && g_thumbTex.count(kv.first)) {
+                    oldestTick = kv.second;
+                    oldestPath = kv.first;
+                }
+            }
+            if (oldestPath.empty()) break;
+            auto it = g_thumbTex.find(oldestPath);
+            if (it != g_thumbTex.end()) {
+                SDL_DestroyTexture(it->second);
+                g_thumbTex.erase(it);
+            }
+            g_thumbAccess.erase(oldestPath);
+        }
+    }
 
     // ���� UI �������� ARGB ����(�� alpha); �󱸻��岻ʹ��
     // ֱ���� g_ui.winW/winH (WM_SIZE �Ѹ���), ���� SDL_GetWindowSize �����ӳ�

@@ -27,6 +27,7 @@ extern std::mutex                g_thumbMtx;
 extern std::vector<std::string>  g_thumbWant;
 extern std::map<std::string, ThumbRgb>  g_thumbRgb;
 extern std::map<std::string, SDL_Texture*> g_thumbTex;
+extern std::map<std::string, Uint32>       g_thumbAccess;  // LRU: last access tick
 extern std::atomic<bool>         g_thumbQuit;
 extern std::thread               g_thumbThread;
 
