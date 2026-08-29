@@ -1,4 +1,4 @@
-#ifndef SDL_MAIN_HANDLED
+﻿#ifndef SDL_MAIN_HANDLED
 #define SDL_MAIN_HANDLED
 #endif
 #include <SDL.h>
@@ -30,8 +30,9 @@ static const char* PHANTOM_VERSION = "0.1.0";
 #include "ui/theme.h"
 #include "ui/gdi_text.h"
 #include "ui/svgicon.h"
+#include "app/app_state.h"
 
-// ---- helpers ----
+// ---- helpers (declarations in app/app_state.h) ----
 static std::vector<std::string> utf8Args() {
     std::vector<std::string> out;
     int argc = 0;
@@ -47,7 +48,7 @@ static std::vector<std::string> utf8Args() {
     return out;
 }
 
-static void formatTime(char* buf, size_t n, double sec) {
+void formatTime(char* buf, size_t n, double sec) {
     int s = (int)(sec + 0.5);
     if (s < 0) s = 0;
     int h = s / 3600, m = (s % 3600) / 60, ss = s % 60;
@@ -59,14 +60,14 @@ static void formatTime(char* buf, size_t n, double sec) {
 // mpv/std::string 用 UTF-8; Win32 文件 API 与 fs::path(w) 用 UTF-16。
 // DragQueryFileA/fs::path(窄)/GetOpenFileNameA 都按 ANSI(GBK) 解读 ->
 // 中文路径必坏, 所有边界必须显式转换
-static std::wstring Utf8ToWide(const std::string& u8) {
+std::wstring Utf8ToWide(const std::string& u8) {
     int n = MultiByteToWideChar(CP_UTF8, 0, u8.c_str(), -1, nullptr, 0);
     std::wstring w(n > 0 ? n - 1 : 0, L'\0');
     if (n > 1) MultiByteToWideChar(CP_UTF8, 0, u8.c_str(), -1, w.data(), n);
     return w;
 }
 
-static std::string WideToUtf8(const std::wstring& ws) {
+std::string WideToUtf8(const std::wstring& ws) {
     int n = WideCharToMultiByte(CP_UTF8, 0, ws.c_str(), -1, nullptr, 0, nullptr, nullptr);
     std::string s(n > 0 ? n - 1 : 0, '\0');
     if (n > 1) WideCharToMultiByte(CP_UTF8, 0, ws.c_str(), -1, s.data(), n, nullptr, nullptr);
@@ -208,7 +209,7 @@ static std::string openFolderDialog(HWND hwnd) {
 }
 
 // 从 UTF-8 路径安全提取文件名（fs::path 窄构造会按 ANSI 误读）
-static std::string fileNameOf(const std::string& utf8path) {
+std::string fileNameOf(const std::string& utf8path) {
     namespace fs = std::filesystem;
     try {
         fs::path p(Utf8ToWide(utf8path));
@@ -216,194 +217,27 @@ static std::string fileNameOf(const std::string& utf8path) {
     } catch (...) { return utf8path; }
 }
 
-// ---- UI state ----
+// ---- UI state (defined in app/app_state.h) ----
 
-struct UiState {
-    bool   visible   = true;
-    Uint32 hideAt    = 3000;
-    int    mouseX    = -1;
-    int    mouseY    = -1;
-    int    winW      = 960;
-    int    winH      = 540;
-    bool   fullscreen = false;
+// ---- globals (declared extern in app/app_state.h) ----
+HWND              g_parentHwnd = nullptr;
+HWND              g_mpvHwnd    = nullptr;
+HWND              g_overlayHwnd = nullptr;
 
-    // seekbar
-    bool   seekbarHover  = false;
-    bool   seekingDrag   = false;
-    double seekTarget    = 0.0;
+std::atomic<bool> g_dirty{ true };
+MpvBackend*       g_mpv        = nullptr;
+SDL_Window*       g_sdlWin     = nullptr;
+SDL_Renderer*     g_sdlRdr     = nullptr;
+GdiTextCache      g_text;
+UiState           g_ui;
+AppConfig         g_cfg;
+float             g_dpi = 1.0f;
+float             g_uiBase = 1.0f;
+std::vector<std::string> g_playlist;
 
-    // topbar icon hover (-1=none, 0=close, 1=maximize, ...)
-    int    topbarHover   = -1;
-
-    // M36: 欢迎页命中区 (每帧渲染时重建)
-    SDL_Rect heroFileBtn   = {};
-    SDL_Rect heroFolderBtn = {};
-    std::vector<std::pair<std::string, SDL_Rect>> continueHits;   // 继续观看卡片
-    std::vector<std::pair<int, SDL_Rect>>         gridHits;       // 队列网格卡片 (playlist idx)
-    float introAlpha = 1.0f;   // 入场淡入 0→1
-
-    // speed popup
-    bool   speedMenuOpen = false;
-
-    // quality popup
-    bool   qualityMenuOpen = false;
-    int    qualityPreset = 1;   // 0=省电 1=标准 2=至臻
-
-    // EQ popup
-    bool   eqMenuOpen = false;
-    int    eqDraggingBand = -1; // 正在拖动的频段, -1=无
-
-    // subtitle/audio track popup
-    bool subMenuOpen = false;
-    bool audioMenuOpen = false;
-    bool chapterMenuOpen = false;
-
-    // volume slider
-    bool   volumeSliderOpen = false;
-    bool   volumeDragging   = false;
-    bool   volumeSliderHover = false;  // mouse over slider track (hover-to-adjust)
-
-    // toast
-    bool   toastActive = false;
-    Uint32 toastStart  = 0;
-    char   toastMsg[128] = {};
-
-    // settings panel
-    bool   settingsOpen = false;
-
-    // playlist panel（右侧独立区域: 打开时窗口扩展, 视频不被遮挡）
-    bool   playlistOpen = false;
-    int    playlistTargetW = 0;  // target window width when playlist open
-    int    playlistAnimW = 0;   // current animation width
-    int    playlistScroll = 0;  // 滚动偏移(px)
-    int    totalW = 960;        // 整个客户区宽(含列表区); winW 仅视频区
-
-    // 单击暂停延迟判定（双击全屏互斥）
-    bool   pendingPause = false;
-
-    // 控件淡入淡出（M30 缓动恢复: alpha 0..1, 控制栏滑出/顶栏滑升）
-    float  ctrlAlpha = 1.0f;
-
-    // 音量滑条 hover 自动展开/收起
-    Uint32 volHoverAt = 0;
-
-    // 播放列表拖拽排序
-    int    plDragFrom = -1;     // 按下的项 index
-    int    plDownY = 0;        // 按下时 y
-    bool   plDragging = false;
-    int    plDragY = 0;         // 拖拽中鼠标 y
-
-    // 播放列表滚动条（M33d: 悬停常驻/拖拽/轨道跳页）
-    bool   sbHover = false;
-    bool   sbDragging = false;
-    int    sbGrabOff = 0;       // 按下点相对 bar 顶的偏移
-    int    sbTrackX = -1, sbTrackY = 0, sbTrackW = 0, sbTrackH = 0;
-    int    sbBarY = 0, sbBarH = 0;
-    SDL_Rect plCloseRect = {};   // 列表面板头部关闭钮
-
-    // PIP / mini mode（置顶迷你小窗）
-    bool   miniMode  = false;
-    RECT   savedRect  = {};     // 还原用窗口 rect
-    DWORD  savedStyle = 0;      // 还原用 style
-
-    // OSD 信息叠加
-    bool   osdActive = false;
-    Uint32 osdStart  = 0;
-};
-
-// ---- globals ----
-static HWND          g_parentHwnd = nullptr;
-static HWND          g_mpvHwnd    = nullptr;
-static HWND          g_overlayHwnd = nullptr;   // overlay 原生句柄(z序调整用)
-
-// ---- 按需渲染 ----
-// 任何 Win32 消息都可能改变视觉状态 -> proc 入口置脏;
-// 播放进度秒变/定时到期在主循环轮询置脏; 空闲时 MsgWait 阻塞零占用
-#include <atomic>
-static std::atomic<bool> g_dirty{ true };
-static MpvBackend*   g_mpv        = nullptr;
-static SDL_Window*   g_sdlWin     = nullptr;
-static SDL_Renderer* g_sdlRdr     = nullptr;
-static GdiTextCache  g_text;
-static UiState       g_ui;
-static AppConfig     g_cfg;
-
-// ---- i18n: 双语字符串表 (0=中文 1=English) ----
-static const char* T(const char* zh, const char* en) {
+// ---- i18n (defined in app/app_state.h) ----
+const char* T(const char* zh, const char* en) {
     return g_cfg.lang == 0 ? zh : en;
-}
-namespace i18n {
-    inline const char* subtitles()  { return T("字幕", "Subtitles"); }
-    inline const char* audioTrack() { return T("音轨", "Audio"); }
-    inline const char* chapName()   { return T("章节", "Chapters"); }
-    inline const char* speed()      { return T("倍速", "Speed"); }
-    inline const char* quality()    { return T("画质", "Quality"); }
-    inline const char* settings()   { return T("设置", "Settings"); }
-    inline const char* settingsTitle()  { return T("设置", "Settings"); }
-    inline const char* language()       { return T("语言", "Language"); }
-    inline const char* chinese()        { return T("中文", "Chinese"); }
-    inline const char* english()        { return T("English", "English"); }
-    inline const char* hwDecode()       { return T("硬件解码", "Hardware Decode"); }
-    inline const char* volNorm()        { return T("音量标准化", "Volume Normalization"); }
-    inline const char* subAutoLoad()    { return T("字幕自动加载", "Subtitle Auto-Load"); }
-    inline const char* thumbCache()     { return T("缩略图缓存", "Thumbnail Cache"); }
-    inline const char* resume()         { return T("续播记忆", "Resume Playback"); }
-    inline const char* nightMode()      { return T("夜间模式", "Night Mode"); }
-    inline const char* exclusiveAudio() { return T("独占音频", "Exclusive Audio"); }
-    inline const char* motionInterp()   { return T("运动插值", "Motion Interpolation"); }
-    inline const char* hiQScaling()     { return T("高质量缩放", "HQ Scaling"); }
-    inline const char* playbackMode()   { return T("播放模式", "Playback Mode"); }
-    inline const char* modeSingle()     { return T("单曲", "Single"); }
-    inline const char* modeLoop()       { return T("循环", "Loop"); }
-    inline const char* modeShuffle()    { return T("随机", "Shuffle"); }
-    inline const char* playlist()       { return T("播放列表", "Playlist"); }
-    inline const char* playing()        { return T("正在播放", "Playing"); }
-    inline const char* played()         { return T("已播放", "Played"); }
-    inline const char* unplayed()       { return T("未播放", "Unplayed"); }
-    inline const char* emptyPlaylist()  { return T("无文件", "No files"); }
-    inline const char* dropHint()       { return T("拖入视频文件", "Drop video here"); }
-    inline const char* ctrlOHint()      { return T("或按 Ctrl+O", "or press Ctrl+O"); }
-    inline const char* ctrlUHint()      { return T("或按 Ctrl+U 打开 URL", "or press Ctrl+U for URL"); }
-    inline const char* equalizer()      { return T("均衡器", "Equalizer"); }
-    inline const char* reset()          { return T("重置", "Reset"); }
-    inline const char* muted()          { return T("已静音", "Muted"); }
-    inline const char* unmuted()        { return T("已取消静音", "Unmuted"); }
-    inline const char* subtitlesOn()    { return T("字幕已开启", "Subtitles ON"); }
-    inline const char* subtitlesOff()   { return T("字幕已关闭", "Subtitles OFF"); }
-    inline const char* loopASet()       { return T("已设置 A 点", "Loop A set"); }
-    inline const char* loopActive()     { return T("AB 循环中", "AB loop active"); }
-    inline const char* loopCleared()    { return T("循环已清除", "Loop cleared"); }
-    inline const char* singleTrack()    { return T("单音轨", "Single audio track"); }
-    inline const char* playlistReordered() { return T("列表已重排", "Playlist reordered"); }
-    inline const char* failedOpen()     { return T("打开失败", "Failed to open file"); }
-    inline const char* eqReset()        { return T("EQ 已重置", "EQ reset"); }
-    inline const char* noPrev()         { return T("无上一曲", "No previous track"); }
-    inline const char* noNext()         { return T("无下一曲", "No next track"); }
-    inline const char* screenshotSaved() { return T("截图已保存", "Screenshot saved"); }
-    inline const char* screenshotFailed() { return T("截图失败", "Screenshot failed"); }
-    inline const char* pipOn()          { return T("画中画已开启", "PIP ON"); }
-    inline const char* pipOff()         { return T("画中画已关闭", "PIP OFF"); }
-    inline const char* buffering()      { return T("缓冲中...", "Buffering..."); }
-    inline const char* endOfTrack()     { return T("播放结束", "End of track"); }
-    inline const char* resumedAt()      { return T("已续播", "Resumed at"); }
-    inline const char* modeSingleT()   { return T("模式: 单曲", "Mode: Single"); }
-    inline const char* modeLoopT()     { return T("模式: 循环", "Mode: Loop"); }
-    inline const char* modeShuffleT()  { return T("模式: 随机", "Mode: Shuffle"); }
-    // M36: 欢迎页
-    inline const char* appName()       { return T("幻影视频", "Phantom Video"); }
-    inline const char* tagline()       { return T("轻 · 快 · 纯粹的本地视频体验", "Light, fast, pure local video"); }
-    inline const char* openFile()      { return T("打开文件", "Open File"); }
-    inline const char* openFolder()    { return T("打开文件夹", "Open Folder"); }
-    inline const char* dropAnywhere()  { return T("或直接拖拽视频到窗口", "or drop a video anywhere"); }
-    inline const char* continueWatching() { return T("继续观看", "Continue Watching"); }
-    inline const char* folderEmpty()   { return T("该文件夹没有视频文件", "No videos in this folder"); }
-    inline const char* debandOff()     { return T("关闭", "Off"); }
-    inline const char* debandLight()   { return T("轻", "Light"); }
-    inline const char* debandMedium()  { return T("中", "Medium"); }
-    inline const char* debandStrong()  { return T("强", "Strong"); }
-    inline const char* subBottom()     { return T("底部", "Bottom"); }
-    inline const char* subCenter()     { return T("居中", "Center"); }
-    inline const char* subTop()        { return T("顶部", "Top"); }
 }
 
 // ---- mpv 子窗口鼠标/键盘消息中继 ----
@@ -466,21 +300,7 @@ static void applyQualityPreset(int idx) {
     LOG_INFO("MAIN", "quality preset -> %s (scale=%s deband=%d)", p.name, p.scale, p.deband);
 }
 
-// ---- 统一 UI 缩放 ----
-// 参考点: 1280x720 窗口, 96 DPI。所有 UI 像素和文字大小从这里派生。
-static float g_dpi = 1.0f;
-static float g_uiBase = 1.0f;   // 窗口缩放因子 = min(winW/1280, winH/720)
-
-// 像素度量(DPI + 窗口比例), 最小 1px
-static int U(int v) {
-    float s = g_dpi * g_uiBase;
-    return std::max(1, (int)(v * s + 0.5f));
-}
-
-// 文字点号(DPI 已由 GDI 处理, 此处只做窗口比例)
-static int T(int pt) {
-    return std::max(8, (int)(pt * g_uiBase + 0.5f));
-}
+// ---- 统一 UI 缩放 (U/Tpt defined in app/app_state.h) ----
 
 #ifndef WM_DPICHANGED
 #define WM_DPICHANGED 0x02E0
@@ -556,7 +376,7 @@ static void layoutRow1(int w, int barTopY, bool volOpen, Row1Layout& L) {
     char tbuf[80];
     formatTime(tbuf, sizeof(tbuf), 0);
     std::string sample = std::string(tbuf) + " / " + tbuf;
-    x += U(10) + g_text.measureText(sample, T(12)) + U(12);
+    x += U(10) + g_text.measureText(sample, Tpt(12)) + U(12);
 
     // 右侧组: 从右往左
     int xr = w - pad;
@@ -566,18 +386,18 @@ static void layoutRow1(int w, int barTopY, bool volOpen, Row1Layout& L) {
         xr -= U(4);  // 按钮间距
     };
     placeRight(L.fullBtn, iconSz);
-    placeRight(L.setBtn, g_text.measureText(i18n::settings(), T(12)) + U(26));
-    placeRight(L.qualityBtn, g_text.measureText(i18n::quality(), T(12)) + g_text.measureText(qualityLabel(), T(11)) + U(22));
+    placeRight(L.setBtn, g_text.measureText(i18n::settings(), Tpt(12)) + U(26));
+    placeRight(L.qualityBtn, g_text.measureText(i18n::quality(), Tpt(12)) + g_text.measureText(qualityLabel(), Tpt(11)) + U(22));
     {
         char spd[16];
         float s = g_mpv ? g_mpv->speed() : 1.0f;
         if (s == (int)s) std::snprintf(spd, sizeof(spd), "%.0fx", s);
         else             std::snprintf(spd, sizeof(spd), "%.2fx", s);
-        placeRight(L.speedBtn, g_text.measureText(spd, T(12)) + g_text.measureText(i18n::speed(), T(12)) + U(24));
+        placeRight(L.speedBtn, g_text.measureText(spd, Tpt(12)) + g_text.measureText(i18n::speed(), Tpt(12)) + U(24));
     }
-    placeRight(L.subBtn, g_text.measureText(i18n::subtitles(), T(12)) + U(26));
-    placeRight(L.audioBtn, g_text.measureText(i18n::audioTrack(), T(12)) + U(26));
-    placeRight(L.chapterBtn, g_text.measureText(i18n::chapName(), T(12)) + U(26));
+    placeRight(L.subBtn, g_text.measureText(i18n::subtitles(), Tpt(12)) + U(26));
+    placeRight(L.audioBtn, g_text.measureText(i18n::audioTrack(), Tpt(12)) + U(26));
+    placeRight(L.chapterBtn, g_text.measureText(i18n::chapName(), Tpt(12)) + U(26));
     // 音量: 先放滑条(展开态), 再放图标; 滑条在图标右侧
     L.volSliderW = volOpen ? U(80) : 0;
     if (volOpen) {
@@ -787,7 +607,6 @@ static void toggleMini(HWND hwnd) {
 }
 
 // ---- 播放队列（稳定顺序，文件夹扫描生成，不随播放重排） ----
-static std::vector<std::string> g_playlist;
 
 static void clampPlaylistScroll() {
     int contentH = (int)g_playlist.size() * U(72);
@@ -2747,14 +2566,14 @@ static void overlayPresent() {
 
 // M36: 像素宽度约束的单行省略 (UTF-8 安全, 逐码点回退)
 static std::string ellipsize(const std::string& s, int pt, int maxW) {
-    if (s.empty() || g_text.measureText(s, T(pt)) <= maxW) return s;
+    if (s.empty() || g_text.measureText(s, Tpt(pt)) <= maxW) return s;
     std::string out = s;
     while (out.size() > 1) {
         size_t n = out.size();
         while (n > 0 && (out[n - 1] & 0xC0) == 0x80) --n;   // 跳过续字节
         if (n > 0) --n;                                      // 去掉一个前导字节
         out.resize(n);
-        if (g_text.measureText(out + "...", T(pt)) <= maxW) break;
+        if (g_text.measureText(out + "...", Tpt(pt)) <= maxW) break;
     }
     return out + "...";
 }
@@ -2829,7 +2648,7 @@ static void renderOverlay() {
                         (Uint8)(ui::TOPBAR_A0 * g_ui.introAlpha), 0);
         {
             std::string title = i18n::appName();
-            g_text.drawText(U(20), U(14), title, T(14), 255, 255, 255, A8(255));
+            g_text.drawText(U(20), U(14), title, Tpt(14), 255, 255, 255, A8(255));
         }
         {
             int iconY = curTopH() / 2;
@@ -2869,7 +2688,7 @@ static void renderOverlay() {
                       255, 255, 255, A8(255));
 
         // ---- 产品名 + 标语 (间距按字号实际高度, 防重叠) ----
-        int namePt = T(ui::T_DISPLAY);
+        int namePt = Tpt(ui::T_DISPLAY);
         int nameHpx = (int)(namePt * g_dpi * 1.4f);   // GDI 行高近似
         int nameY = iy + iconSz + (compact ? U(10) : U(18));
         {
@@ -2881,8 +2700,8 @@ static void renderOverlay() {
         int tagY = nameY + nameHpx + U(4);
         {
             std::string tg = i18n::tagline();
-            int tgw = g_text.measureText(tg, T(ui::T_BODY));
-            g_text.drawText((w - tgw) / 2, tagY, tg, T(ui::T_BODY),
+            int tgw = g_text.measureText(tg, Tpt(ui::T_BODY));
+            g_text.drawText((w - tgw) / 2, tagY, tg, Tpt(ui::T_BODY),
                             170, 170, 178, A8(255));
         }
 
@@ -2891,8 +2710,8 @@ static void renderOverlay() {
         int btnY = tagY + U(18) + (compact ? U(6) : U(18));
         {
             std::string l1 = i18n::openFile(), l2 = i18n::openFolder();
-            int w1 = g_text.measureText(l1, T(ui::T_BODY)) + U(48);
-            int w2 = g_text.measureText(l2, T(ui::T_BODY)) + U(48);
+            int w1 = g_text.measureText(l1, Tpt(ui::T_BODY)) + U(48);
+            int w2 = g_text.measureText(l2, Tpt(ui::T_BODY)) + U(48);
             int gap = U(14);
             int bx1 = (w - (w1 + gap + w2)) / 2;
             int bx2 = bx1 + w1 + gap;
@@ -2909,9 +2728,9 @@ static void renderOverlay() {
                             hov1 ? ui::ACCENT2_R : ui::ACCENT_R_,
                             hov1 ? ui::ACCENT2_G : ui::ACCENT_G_,
                             hov1 ? ui::ACCENT2_B : ui::ACCENT_B_, A8(255));
-            int t1w = g_text.measureText(l1, T(ui::T_BODY));
+            int t1w = g_text.measureText(l1, Tpt(ui::T_BODY));
             g_text.drawText(bx1 + (w1 - t1w) / 2, btnY + U(12), l1,
-                            T(ui::T_BODY), 255, 255, 255, A8(255));
+                            Tpt(ui::T_BODY), 255, 255, 255, A8(255));
 
             // 描边式次按钮: 白描边, 悬停浮起背景
             if (hov2) {
@@ -2922,17 +2741,17 @@ static void renderOverlay() {
             }
             roundedRectStroke(g_sdlRdr, bx2, btnY, w2, btnH, btnH / 2,
                               255, 255, 255, A8(hov2 ? 90 : 60));
-            int t2w = g_text.measureText(l2, T(ui::T_BODY));
+            int t2w = g_text.measureText(l2, Tpt(ui::T_BODY));
             g_text.drawText(bx2 + (w2 - t2w) / 2, btnY + U(12), l2,
-                            T(ui::T_BODY), ui::TEXT_DIM, ui::TEXT_DIM, ui::TEXT_DIM + 5, A8(255));
+                            Tpt(ui::T_BODY), ui::TEXT_DIM, ui::TEXT_DIM, ui::TEXT_DIM + 5, A8(255));
         }
         // 拖拽提示 (紧贴按钮下方)
         int hintY = btnY + btnH + U(8);
         {
             std::string dh = i18n::dropAnywhere();
-            int dw = g_text.measureText(dh, T(ui::T_CAPTION));
+            int dw = g_text.measureText(dh, Tpt(ui::T_CAPTION));
             g_text.drawText((w - dw) / 2, hintY, dh,
-                            T(ui::T_CAPTION), 140, 140, 148, A8(255));
+                            Tpt(ui::T_CAPTION), 140, 140, 148, A8(255));
         }
 
         // ---- 继续观看行 (YouTube 缩略图卡片) ----
@@ -2965,7 +2784,7 @@ static void renderOverlay() {
             {
                 std::string hd = i18n::continueWatching();
                 g_text.drawText(std::max(margin, gx), contentY - U(30), hd,
-                                T(ui::T_HEADLINE), 255, 255, 255, A8(255));
+                                Tpt(ui::T_HEADLINE), 255, 255, 255, A8(255));
             }
             for (int i = 0; i < nShow; ++i) {
                 const CWItem& it = cw[i];
@@ -2993,7 +2812,7 @@ static void renderOverlay() {
                 std::string fn = fileNameOf(it.path);
                 fn = ellipsize(fn, ui::T_BODY, cardW);
                 g_text.drawText(cx, contentY + thumbH + U(8), fn,
-                                T(ui::T_BODY), 235, 235, 240, A8(255));
+                                Tpt(ui::T_BODY), 235, 235, 240, A8(255));
                 // 副标题: 看到 xx% · 时间点
                 char tb1[16];
                 formatTime(tb1, sizeof(tb1), it.pos);
@@ -3001,7 +2820,7 @@ static void renderOverlay() {
                                    (it.dur > 0 ? std::to_string((int)(it.pos / it.dur * 100 + 0.5)) + "% · " : "") +
                                    tb1;
                 g_text.drawText(cx, contentY + thumbH + U(30), sub2,
-                                T(ui::T_CAPTION), 150, 150, 158, A8(255));
+                                Tpt(ui::T_CAPTION), 150, 150, 158, A8(255));
 
                 g_ui.continueHits.push_back({it.path, {cx, contentY - U(4), cardW, thumbH + U(52)}});
                 wantThumbs.push_back(it.path);
@@ -3014,7 +2833,7 @@ static void renderOverlay() {
             {
                 std::string hd = i18n::playlist();
                 g_text.drawText(std::max(margin, (w - 0) / 2), contentY - U(26), hd,
-                                T(ui::T_HEADLINE), 255, 255, 255, A8(255));
+                                Tpt(ui::T_HEADLINE), 255, 255, 255, A8(255));
             }
             int cardW = U(180);
             int gap = U(14);
@@ -3046,7 +2865,7 @@ static void renderOverlay() {
 
                 std::string fn = ellipsize(fileNameOf(g_playlist[i]), ui::T_CAPTION, cardW);
                 g_text.drawText(cx, cy + thumbH + U(8), fn,
-                                T(ui::T_CAPTION), isCur ? 255 : 225, isCur ? 255 : 225,
+                                Tpt(ui::T_CAPTION), isCur ? 255 : 225, isCur ? 255 : 225,
                                 isCur ? 255 : 230, A8(255));
                 // 时长/进度副文字
                 auto hit = g_cfg.history.find(g_playlist[i]);
@@ -3059,7 +2878,7 @@ static void renderOverlay() {
                 }
                 if (sub[0])
                     g_text.drawText(cx, cy + thumbH + U(26), sub,
-                                    T(ui::T_CAPTION), 140, 140, 148, A8(255));
+                                    Tpt(ui::T_CAPTION), 140, 140, 148, A8(255));
 
                 g_ui.gridHits.push_back({i, {cx, cy, cardW, thumbH + U(50)}});
                 wantThumbs.push_back(g_playlist[i]);
@@ -3079,13 +2898,13 @@ static void renderOverlay() {
         {
             std::string hint = T("空格 播放/暂停 · ←→ 快进退 · F 全屏 · M 静音",
                                  "Space Play/Pause · Arrows Seek · F Fullscreen · M Mute");
-            int hw = g_text.measureText(hint, T(ui::T_CAPTION));
+            int hw = g_text.measureText(hint, Tpt(ui::T_CAPTION));
             g_text.drawText((totalW - hw) / 2, h - U(30), hint,
-                            T(ui::T_CAPTION), ui::HINT_TEXT, ui::HINT_TEXT, ui::HINT_TEXT + 6, A8(200));
+                            Tpt(ui::T_CAPTION), ui::HINT_TEXT, ui::HINT_TEXT, ui::HINT_TEXT + 6, A8(200));
             std::string ver = std::string("v") + PHANTOM_VERSION;
-            int vw = g_text.measureText(ver, T(ui::T_CAPTION));
+            int vw = g_text.measureText(ver, Tpt(ui::T_CAPTION));
             g_text.drawText(totalW - vw - U(16), h - U(30), ver,
-                            T(ui::T_CAPTION), 110, 110, 116, A8(160));
+                            Tpt(ui::T_CAPTION), 110, 110, 116, A8(160));
         }
 
         overlayPresent();
@@ -3126,7 +2945,7 @@ static void renderOverlay() {
         std::string title = g_mpv->title();
         if (title.empty()) title = "幻影视频";
         if (title.size() > 55) title = title.substr(0, 52) + "...";
-        g_text.drawText(U(20), U(14) + topOff, title, T(14), 255, 255, 255);
+        g_text.drawText(U(20), U(14) + topOff, title, Tpt(14), 255, 255, 255);
 
         // icons (right) — 纯白图标 + 悬停高亮背景
         int topH = U(52);
@@ -3235,7 +3054,7 @@ static void renderOverlay() {
             if (hoverPos > dur) hoverPos = dur;
             char pv[16];
             formatTime(pv, sizeof(pv), hoverPos);
-            int bw = g_text.measureText(pv, T(11)) + U(16);
+            int bw = g_text.measureText(pv, Tpt(11)) + U(16);
             int bh = U(22);
             int bx = g_ui.mouseX - bw / 2;
             if (bx < tx) bx = tx;
@@ -3254,7 +3073,7 @@ static void renderOverlay() {
             fillCircle(g_sdlRdr, bx + U(4), by + bh - U(4), U(4), 20, 20, 22, 235);
             fillCircle(g_sdlRdr, bx + bw - U(4), by + bh - U(4), U(4), 20, 20, 22, 235);
             // 气泡文字
-            g_text.drawText(bx + U(8), by + U(4), pv, T(11), 255, 255, 255);
+            g_text.drawText(bx + U(8), by + U(4), pv, Tpt(11), 255, 255, 255);
         }
     }
 
@@ -3285,15 +3104,15 @@ static void renderOverlay() {
             formatTime(cur, sizeof(cur), pos);
             formatTime(tot, sizeof(tot), dur);
             std::snprintf(ts, sizeof(ts), "%s / %s", cur, tot);
-            g_text.drawText(L.timeX, L.cy - U(9), ts, T(12), ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B);
+            g_text.drawText(L.timeX, L.cy - U(9), ts, Tpt(12), ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B);
         }
 
         // 右侧 textbtn 组 (文字 + 图标)
         auto drawTextBtn = [&](const SDL_Rect& rc, const char* label,
                                const char* iconId, Uint8 ir, Uint8 ig, Uint8 ib) {
-            int tw = g_text.measureText(label, T(12));
+            int tw = g_text.measureText(label, Tpt(12));
             int tx = rc.x + U(8);
-            g_text.drawText(tx, rc.y + U(10), label, T(12), ui::TEXT_DIM, ui::TEXT_DIM, ui::TEXT_DIM + 5);
+            g_text.drawText(tx, rc.y + U(10), label, Tpt(12), ui::TEXT_DIM, ui::TEXT_DIM, ui::TEXT_DIM + 5);
             svgicon::draw(g_sdlRdr, iconId, tx + tw + U(9), rc.y + U(17), U(22),
                           ir, ig, ib, A(255));
         };
@@ -3318,17 +3137,17 @@ static void renderOverlay() {
             float s = g_mpv->speed();
             if (s == (int)s) std::snprintf(spd, sizeof(spd), "%.0fx", s);
             else             std::snprintf(spd, sizeof(spd), "%.2fx", s);
-            int lw = g_text.measureText(i18n::speed(), T(12));
-            g_text.drawText(L.speedBtn.x + U(8), L.speedBtn.y + U(10), i18n::speed(), T(12), ui::TEXT_DIM, ui::TEXT_DIM, ui::TEXT_DIM + 5);
-            g_text.drawText(L.speedBtn.x + U(8) + lw + U(4), L.speedBtn.y + U(10), spd, T(12),
+            int lw = g_text.measureText(i18n::speed(), Tpt(12));
+            g_text.drawText(L.speedBtn.x + U(8), L.speedBtn.y + U(10), i18n::speed(), Tpt(12), ui::TEXT_DIM, ui::TEXT_DIM, ui::TEXT_DIM + 5);
+            g_text.drawText(L.speedBtn.x + U(8) + lw + U(4), L.speedBtn.y + U(10), spd, Tpt(12),
                             ui::ACCENT2_R, ui::ACCENT2_G, ui::ACCENT2_B);
         }
         // 画质 + 分辨率标签
         {
             const char* ql = qualityLabel();
-            int qw = g_text.measureText(i18n::quality(), T(12));
-            g_text.drawText(L.qualityBtn.x + U(8), L.qualityBtn.y + U(10), i18n::quality(), T(12), ui::TEXT_DIM, ui::TEXT_DIM, ui::TEXT_DIM + 5);
-            g_text.drawText(L.qualityBtn.x + U(8) + qw + U(4), L.qualityBtn.y + U(11), ql, T(11), ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B);
+            int qw = g_text.measureText(i18n::quality(), Tpt(12));
+            g_text.drawText(L.qualityBtn.x + U(8), L.qualityBtn.y + U(10), i18n::quality(), Tpt(12), ui::TEXT_DIM, ui::TEXT_DIM, ui::TEXT_DIM + 5);
+            g_text.drawText(L.qualityBtn.x + U(8) + qw + U(4), L.qualityBtn.y + U(11), ql, Tpt(11), ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B);
         }
         // 音量图标
         {
@@ -3377,7 +3196,7 @@ static void renderOverlay() {
 
     // --- buffering indicator ---
     if (g_mpv->bufferFill() < 0.5) {
-        g_text.drawText(w / 2 - U(30), barTop + U(75), "Buffering...", T(12), ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B);
+        g_text.drawText(w / 2 - U(30), barTop + U(75), "Buffering...", Tpt(12), ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B);
     }
 
     // --- speed popup menu（效果图规格: 圆角r8/向上展开/k标注） ---
@@ -3421,13 +3240,13 @@ static void renderOverlay() {
             float sp = SPEED_PRESETS[i];
             if (sp == (int)sp) std::snprintf(label, sizeof(label), "%.2fx", sp);
             else               std::snprintf(label, sizeof(label), "%.2fx", sp);
-            g_text.drawText(menuX + U(10), iy + U(6), label, T(13), tr, tg, tb);
+            g_text.drawText(menuX + U(10), iy + U(6), label, Tpt(13), tr, tg, tb);
             // k 标注: 慢/正常/快
             const char* k = (sp < 0.99f) ? T("慢", "Slow") : (sp < 1.01f) ? T("正常", "Normal") :
                             (sp < 2.01f) ? nullptr : T("快", "Fast");
             if (k) {
-                int kw = g_text.measureText(k, T(11));
-                g_text.drawText(menuX + menuW - kw - U(10), iy + U(7), k, T(11), ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B);
+                int kw = g_text.measureText(k, Tpt(11));
+                g_text.drawText(menuX + menuW - kw - U(10), iy + U(7), k, Tpt(11), ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B);
             }
         }
     }
@@ -3466,7 +3285,7 @@ static void renderOverlay() {
         int iw = g_mpv->videoWidth(), ih = g_mpv->videoHeight();
         char info[64];
         std::snprintf(info, sizeof(info), "%dx%d", iw, ih);
-        g_text.drawText(menuX + U(10), menuY + U(8), info, T(12), ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B);
+        g_text.drawText(menuX + U(10), menuY + U(8), info, Tpt(12), ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B);
         // 分隔线
         SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 20);
         SDL_RenderDrawLine(g_sdlRdr, menuX + U(8), menuY + infoH - U(4),
@@ -3478,10 +3297,10 @@ static void renderOverlay() {
             int iy = menuY + infoH + i * itemH;
             bool sel = (g_ui.qualityPreset == i);
             Uint8 tr = sel ? 59 : 228, tg = sel ? 130 : 228, tb = sel ? 246 : 231;
-            g_text.drawText(menuX + U(10), iy + U(8), qNames[i], T(13), tr, tg, tb);
+            g_text.drawText(menuX + U(10), iy + U(8), qNames[i], Tpt(13), tr, tg, tb);
             // 当前选中标记
             if (sel) {
-                g_text.drawText(menuX + menuW - U(24), iy + U(8), "✓", T(13), ui::ACCENT2_R, ui::ACCENT2_G, ui::ACCENT2_B);
+                g_text.drawText(menuX + menuW - U(24), iy + U(8), "✓", Tpt(13), ui::ACCENT2_R, ui::ACCENT2_G, ui::ACCENT2_B);
             }
         }
     }
@@ -3509,11 +3328,11 @@ static void renderOverlay() {
         fillCircle(g_sdlRdr, menuX + cr, menuY + menuH - cr, cr, 24, 24, 26, 255);
         fillCircle(g_sdlRdr, menuX + menuW - cr, menuY + menuH - cr, cr, 24, 24, 26, 255);
         // 标题
-        g_text.drawText(menuX + U(10), menuY + U(10), i18n::equalizer(), T(13), 255, 255, 255);
+        g_text.drawText(menuX + U(10), menuY + U(10), i18n::equalizer(), Tpt(13), 255, 255, 255);
         // 开关状态
         const char* st = g_mpv->eqEnabled() ? "ON" : "OFF";
         Uint8 sr = g_mpv->eqEnabled() ? 59 : 161, sg = g_mpv->eqEnabled() ? 130 : 161, sb = g_mpv->eqEnabled() ? 246 : 166;
-        g_text.drawText(menuX + menuW - U(40), menuY + U(10), st, T(12), sr, sg, sb);
+        g_text.drawText(menuX + menuW - U(40), menuY + U(10), st, Tpt(12), sr, sg, sb);
 
         // 6 频段滑块
         int baseY = menuY + U(32);
@@ -3521,7 +3340,7 @@ static void renderOverlay() {
         int trackW = sliderW;
         for (int i = 0; i < 6; ++i) {
             int iy = baseY + i * itemH;
-            g_text.drawText(menuX + U(10), iy + U(8), bandNames[i], T(11), ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B);
+            g_text.drawText(menuX + U(10), iy + U(8), bandNames[i], Tpt(11), ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B);
             // 轨道
             SDL_SetRenderDrawColor(g_sdlRdr, 58, 58, 62, 255);
             SDL_Rect trk = {trackX, iy + U(14), trackW, U(4)};
@@ -3536,7 +3355,7 @@ static void renderOverlay() {
             // 数值
             char val[16];
             std::snprintf(val, sizeof(val), "%+.0f", gain);
-            g_text.drawText(trackX + trackW + U(8), iy + U(8), val, T(11), ui::ICON_BRIGHT, ui::ICON_BRIGHT, 231);
+            g_text.drawText(trackX + trackW + U(8), iy + U(8), val, Tpt(11), ui::ICON_BRIGHT, ui::ICON_BRIGHT, 231);
             // 存储滑块区域用于点击
             static SDL_Rect s_bandRects[6];
             s_bandRects[i] = {trackX - U(8), iy, trackW + U(16), itemH};
@@ -3547,7 +3366,7 @@ static void renderOverlay() {
         SDL_Rect resetRc = {menuX + menuW / 2 - U(30), resetY, U(60), U(26)};
         SDL_SetRenderDrawColor(g_sdlRdr, 58, 58, 62, 255);
         SDL_RenderFillRect(g_sdlRdr, &resetRc);
-        g_text.drawText(resetRc.x + U(14), resetRc.y + U(5), i18n::reset(), T(11), ui::ICON_BRIGHT, ui::ICON_BRIGHT, 231);
+        g_text.drawText(resetRc.x + U(14), resetRc.y + U(5), i18n::reset(), Tpt(11), ui::ICON_BRIGHT, ui::ICON_BRIGHT, 231);
 
         // P1-6: EQ 预设按钮
         struct EqPreset { const char* name; float bands[6]; };
@@ -3561,7 +3380,7 @@ static void renderOverlay() {
         static const int kPresetCount = (int)(sizeof(presets) / sizeof(presets[0]));
         int presetY = resetY + U(30);
         int presetBtnW = (menuW - U(20)) / kPresetCount;
-        g_text.drawText(menuX + U(10), presetY - U(2), T("预设:", "Presets:"), T(10), 140, 140, 148);
+        g_text.drawText(menuX + U(10), presetY - U(2), T("预设:", "Presets:"), Tpt(10), 140, 140, 148);
         for (int i = 0; i < kPresetCount; ++i) {
             int bx = menuX + U(10) + i * presetBtnW;
             int by = presetY + U(14);
@@ -3575,7 +3394,7 @@ static void renderOverlay() {
             SDL_SetRenderDrawColor(g_sdlRdr, match ? 59 : 48, match ? 130 : 48, match ? 246 : 52, 255);
             SDL_Rect btnRc = {bx, by, bw, bh};
             SDL_RenderFillRect(g_sdlRdr, &btnRc);
-            g_text.drawText(bx + U(4), by + U(4), presets[i].name, T(9),
+            g_text.drawText(bx + U(4), by + U(4), presets[i].name, Tpt(9),
                             match ? 255 : 180, match ? 255 : 180, match ? 255 : 186);
             // 存储按钮区域
             static SDL_Rect s_presetRects[5];
@@ -3616,13 +3435,13 @@ static void renderOverlay() {
             int iy = menuY + U(6);
             bool sel = !subVis;
             Uint8 tr = sel ? 59 : 228, tg = sel ? 130 : 228, tb = sel ? 246 : 231;
-            g_text.drawText(menuX + U(10), iy + U(6), T("关闭", "Off"), T(13), tr, tg, tb);
+            g_text.drawText(menuX + U(10), iy + U(6), T("关闭", "Off"), Tpt(13), tr, tg, tb);
         }
         for (int i = 0; i < (int)subs.size(); ++i) {
             int iy = menuY + U(6) + (i + 1) * itemH;
             bool sel = (subs[i].id == curSubId && subVis);
             Uint8 tr = sel ? 59 : 228, tg = sel ? 130 : 228, tb = sel ? 246 : 231;
-            g_text.drawText(menuX + U(10), iy + U(6), subs[i].desc.c_str(), T(13), tr, tg, tb);
+            g_text.drawText(menuX + U(10), iy + U(6), subs[i].desc.c_str(), Tpt(13), tr, tg, tb);
         }
         // 分隔线
         int sepY = menuY + U(6) + (int)(subs.size() + 1) * itemH - U(2);
@@ -3632,7 +3451,7 @@ static void renderOverlay() {
         {
             int iy = menuY + U(6) + (int)(subs.size() + 1) * itemH;
             g_text.drawText(menuX + U(10), iy + U(6), T("加载外部字幕...", "Load external..."),
-                            T(13), ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B);
+                            Tpt(13), ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B);
         }
     }
     // --- audio track popup menu ---
@@ -3666,7 +3485,7 @@ static void renderOverlay() {
             int iy = menuY + U(6) + i * itemH;
             bool sel = (tracks[i].id == curAudioId);
             Uint8 tr = sel ? 59 : 228, tg = sel ? 130 : 228, tb = sel ? 246 : 231;
-            g_text.drawText(menuX + U(10), iy + U(6), tracks[i].desc.c_str(), T(13), tr, tg, tb);
+            g_text.drawText(menuX + U(10), iy + U(6), tracks[i].desc.c_str(), Tpt(13), tr, tg, tb);
         }
     }
     // --- chapter popup menu ---
@@ -3704,7 +3523,7 @@ static void renderOverlay() {
                 ? T("无标题", "Untitled") : chs[i].title.c_str();
             char label[128];
             std::snprintf(label, sizeof(label), "%d. %s", i + 1, name);
-            g_text.drawText(menuX + U(10), iy + U(6), label, T(13), tr, tg, tb);
+            g_text.drawText(menuX + U(10), iy + U(6), label, Tpt(13), tr, tg, tb);
         }
     }
     if (g_ui.playlistOpen) {
@@ -3729,7 +3548,7 @@ static void renderOverlay() {
         SDL_RenderDrawLine(g_sdlRdr, panelX, panelY, panelX, panelY + panelH);
 
         // title + 关闭钮（效果图 .pl-head）
-        g_text.drawText(panelX + U(14), panelY + U(16), i18n::playlist(), T(13), 255, 255, 255);
+        g_text.drawText(panelX + U(14), panelY + U(16), i18n::playlist(), Tpt(13), 255, 255, 255);
         int closeX = panelX + panelW - U(44);
         int closeY = panelY + U(8);
         SDL_Rect closeRc = {closeX, closeY, U(36), U(36)};
@@ -3785,13 +3604,13 @@ static void renderOverlay() {
                 if (hpos > 1.0) {
                     std::snprintf(durBuf, sizeof(durBuf), "%02d:%02d",
                                   (int)(hpos / 60), (int)hpos % 60);
-                    int dw = g_text.measureText(durBuf, T(9)) + U(8);
+                    int dw = g_text.measureText(durBuf, Tpt(9)) + U(8);
                     int dx = thRc.x + thRc.w - dw - U(4);
                     int dy = thRc.y + thRc.h - U(18);
                     SDL_Rect db = {dx, dy, dw, U(15)};
                     SDL_SetRenderDrawColor(g_sdlRdr, 0, 0, 0, 184);
                     SDL_RenderFillRect(g_sdlRdr, &db);
-                    g_text.drawText(dx + U(4), dy + U(2), durBuf, T(9), 255, 255, 255);
+                    g_text.drawText(dx + U(4), dy + U(2), durBuf, Tpt(9), 255, 255, 255);
                 }
             }
 
@@ -3801,14 +3620,14 @@ static void renderOverlay() {
             if (maxTw < U(80)) maxTw = U(80);
             {
                 // 按像素宽截断
-                if (g_text.measureText(fn, T(12)) > maxTw) {
-                    while (fn.size() > 4 && g_text.measureText(fn + "...", T(12)) > maxTw)
+                if (g_text.measureText(fn, Tpt(12)) > maxTw) {
+                    while (fn.size() > 4 && g_text.measureText(fn + "...", Tpt(12)) > maxTw)
                         fn.pop_back();
                     fn += "...";
                 }
                 Uint8 tr = isCurrent ? 191 : 240, tg = isCurrent ? 214 : 240,
                       tb = isCurrent ? 255 : 240;   // playing #bfd6ff
-                g_text.drawText(thRc.x + thRc.w + U(10), iy + U(10), fn, T(12), tr, tg, tb);
+                g_text.drawText(thRc.x + thRc.w + U(10), iy + U(10), fn, Tpt(12), tr, tg, tb);
             }
             // state: 正在播放(accent2)/已播放(#6b7280)/未播放(#3f3f46)
             {
@@ -3816,7 +3635,7 @@ static void renderOverlay() {
                 if (isCurrent) { st = i18n::playing(); sr = 59; sg_ = 130; sb_ = 246; }
                 else if (hpos > 1.0) { st = i18n::played(); sr = 107; sg_ = 114; sb_ = 128; }
                 else { st = i18n::unplayed(); sr = 63; sg_ = 63; sb_ = 70; }
-                g_text.drawText(thRc.x + thRc.w + U(10), iy + U(32), st, T(11), sr, sg_, sb_);
+                g_text.drawText(thRc.x + thRc.w + U(10), iy + U(32), st, Tpt(11), sr, sg_, sb_);
             }
         }
         SDL_RenderSetClipRect(g_sdlRdr, nullptr);   // 解除裁剪(拖拽指示线/滚动条可越界)
@@ -3884,7 +3703,7 @@ static void renderOverlay() {
         }
 
         if (g_playlist.empty()) {
-            g_text.drawText(panelX + U(16), itemY + U(10), i18n::emptyPlaylist(), T(12), 100, 100, 100);
+            g_text.drawText(panelX + U(16), itemY + U(10), i18n::emptyPlaylist(), Tpt(12), 100, 100, 100);
         }
     }
 
@@ -3925,7 +3744,7 @@ static void renderOverlay() {
         SDL_RenderDrawRect(g_sdlRdr, &borderV);
 
         // title + close
-        g_text.drawText(sg.panelX + U(20), sg.panelY + U(16), i18n::settingsTitle(), T(16), 255, 255, 255);
+        g_text.drawText(sg.panelX + U(20), sg.panelY + U(16), i18n::settingsTitle(), Tpt(16), 255, 255, 255);
         svgicon::draw(g_sdlRdr, "close", sg.closeCx, sg.closeCy, U(26), 255, 255, 255, 200);
 
         // toggle rows
@@ -3941,7 +3760,7 @@ static void renderOverlay() {
         for (int i = 0; i < SET_ROW_COUNT; ++i) {
             int ry = sg.rowY[i];
             bool on = (toggleVals[i] != 0);
-            g_text.drawText(sg.panelX + U(20), ry + U(3), rowLabels[i], T(13), on ? 230 : 170, on ? 230 : 170, on ? 230 : 170);
+            g_text.drawText(sg.panelX + U(20), ry + U(3), rowLabels[i], Tpt(13), on ? 230 : 170, on ? 230 : 170, on ? 230 : 170);
 
             // Switch
             SDL_Rect swRc = {sg.swX, ry, sg.swW, sg.swH};
@@ -3962,7 +3781,7 @@ static void renderOverlay() {
         }
 
         // playback mode row (选中=蓝色胶囊, 未选中=纯文字无边框)
-        g_text.drawText(sg.panelX + U(20), sg.modeRowY + U(3), i18n::playbackMode(), T(13), 200, 200, 200);
+        g_text.drawText(sg.panelX + U(20), sg.modeRowY + U(3), i18n::playbackMode(), Tpt(13), 200, 200, 200);
         const char* modes[] = { i18n::modeSingle(), i18n::modeLoop(), i18n::modeShuffle() };
         for (int i = 0; i < 3; ++i) {
             int lx = sg.swX - U(180) + i * (sg.chipW + U(6));
@@ -3975,13 +3794,13 @@ static void renderOverlay() {
                 fillCircle(g_sdlRdr, lx + cr2, sg.chipY + cr2, cr2, ui::ACCENT_R_, ui::ACCENT_G_, ui::ACCENT_B_, 255);
                 fillCircle(g_sdlRdr, lx + sg.chipW - cr2, sg.chipY + cr2, cr2, ui::ACCENT_R_, ui::ACCENT_G_, ui::ACCENT_B_, 255);
             }
-            int tw = g_text.measureText(modes[i], T(11));
-            g_text.drawText(lx + (sg.chipW - tw) / 2, sg.chipY + U(4), modes[i], T(11),
+            int tw = g_text.measureText(modes[i], Tpt(11));
+            g_text.drawText(lx + (sg.chipW - tw) / 2, sg.chipY + U(4), modes[i], Tpt(11),
                             sel ? 255 : 150, sel ? 255 : 150, sel ? 255 : 150);
         }
 
         // 语言切换行 (同风格: 选中=蓝色胶囊, 未选中=纯文字)
-        g_text.drawText(sg.panelX + U(20), sg.langRowY + U(3), i18n::language(), T(13), 200, 200, 200);
+        g_text.drawText(sg.panelX + U(20), sg.langRowY + U(3), i18n::language(), Tpt(13), 200, 200, 200);
         const char* langLabels[] = { i18n::chinese(), i18n::english() };
         for (int i = 0; i < 2; ++i) {
             int lx = sg.langSegX + i * (sg.langSegW / 2);
@@ -3995,8 +3814,8 @@ static void renderOverlay() {
                 fillCircle(g_sdlRdr, lx + cr2, sg.langRowY + cr2, cr2, ui::ACCENT_R_, ui::ACCENT_G_, ui::ACCENT_B_, 255);
                 fillCircle(g_sdlRdr, lx + halfW - cr2, sg.langRowY + cr2, cr2, ui::ACCENT_R_, ui::ACCENT_G_, ui::ACCENT_B_, 255);
             }
-            int tw2 = g_text.measureText(langLabels[i], T(11));
-            g_text.drawText(lx + (halfW - tw2) / 2, sg.langRowY + U(4), langLabels[i], T(11),
+            int tw2 = g_text.measureText(langLabels[i], Tpt(11));
+            g_text.drawText(lx + (halfW - tw2) / 2, sg.langRowY + U(4), langLabels[i], Tpt(11),
                             sel ? 255 : 150, sel ? 255 : 150, sel ? 255 : 150);
         }
     }
@@ -4011,7 +3830,7 @@ static void renderOverlay() {
             if (elapsed > ui::TOAST_MS - 300)
                 alpha = 1.0f - (float)(elapsed - (ui::TOAST_MS - 300)) / 300.0f;
             Uint8 a = (Uint8)(alpha * 255);
-            int tw = g_text.measureText(g_ui.toastMsg, T(13));
+            int tw = g_text.measureText(g_ui.toastMsg, Tpt(13));
             int bh = U(36), capR = bh / 2, padX = U(20);
             int bw = tw + padX * 2;
             int bx = w / 2 - bw / 2, by = U(60);
@@ -4024,7 +3843,7 @@ static void renderOverlay() {
             Uint8 ba = (Uint8)(26 * alpha);
             SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, ba);
             SDL_RenderDrawRect(g_sdlRdr, &mid);
-            g_text.drawText(w / 2 - tw / 2, by + U(8), g_ui.toastMsg, T(13), 255, 255, 255);
+            g_text.drawText(w / 2 - tw / 2, by + U(8), g_ui.toastMsg, Tpt(13), 255, 255, 255);
         }
     }
 
@@ -4077,10 +3896,10 @@ static void renderOverlay() {
                 SDL_RenderDrawRect(g_sdlRdr, &bg);
 
                 int ty = boxY + padY;
-                if (line1[0]) { g_text.drawText(boxX + padX, ty, line1, T(12), 255, 255, 255); ty += lineH; }
-                if (line2[0]) { g_text.drawText(boxX + padX, ty, line2, T(12), ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B); ty += lineH; }
-                if (line3[0]) { g_text.drawText(boxX + padX, ty, line3, T(12), ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B); ty += lineH; }
-                if (line4[0]) { g_text.drawText(boxX + padX, ty, line4, T(12), 0, 200, 120); }
+                if (line1[0]) { g_text.drawText(boxX + padX, ty, line1, Tpt(12), 255, 255, 255); ty += lineH; }
+                if (line2[0]) { g_text.drawText(boxX + padX, ty, line2, Tpt(12), ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B); ty += lineH; }
+                if (line3[0]) { g_text.drawText(boxX + padX, ty, line3, Tpt(12), ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B); ty += lineH; }
+                if (line4[0]) { g_text.drawText(boxX + padX, ty, line4, Tpt(12), 0, 200, 120); }
             }
         }
     }
