@@ -35,6 +35,7 @@ static const char* PHANTOM_VERSION = "0.1.0";
 #include "ui/dialogs.h"
 #include "ui/primitives.h"
 #include "ui/gradient.h"
+#include "ui/ulw.h"
 
 // ---- helpers (declarations in app/app_state.h, impl in ui/helpers.cpp) ----
 static std::vector<std::string> utf8Args() {
@@ -2101,7 +2102,10 @@ static bool createOverlay(HWND parent, int w, int h) {
 
 static void destroyGradCache();   // 定义于 drawGradientBar（渐变纹理缓存）
 
+static UlwCtx g_ulw;
+
 static void destroyOverlay() {
+    ulwDestroy(g_ulw);
     g_text.shutdown();
     svgicon::shutdown();
     destroyGradCache();
@@ -2121,17 +2125,7 @@ static void destroyGradCache() {
 }
 
 // ---- rendering ----
-
-// 逐像素 alpha 上屏: UI 画入离屏 ARGB 纹理(真 alpha) → ReadPixels →
-// 预乘 alpha → UpdateLayeredWindow。
-// 注意: 窗口后备缓冲(RGBX)不保留 alpha, 必须经离屏纹理中转。
-struct UlwCtx {
-    HDC memDC = nullptr;
-    HBITMAP dib = nullptr;
-    void* bits = nullptr;
-    int w = 0, h = 0;
-};
-static UlwCtx g_ulw;
+// P2-3: UlwCtx/ulwDestroy/ulwResize 移至 ui/ulw.h
 static SDL_Texture* g_ovTex = nullptr;   // UI 离屏画布(真 alpha)
 static int g_ovTexW = 0, g_ovTexH = 0;
 
@@ -2152,39 +2146,11 @@ static bool ovTexEnsure(int w, int h) {
     return true;
 }
 
-static void ulwDestroy() {
-    if (g_ulw.dib) { DeleteObject(g_ulw.dib); g_ulw.dib = nullptr; }
-    if (g_ulw.memDC) { DeleteDC(g_ulw.memDC); g_ulw.memDC = nullptr; }
-    g_ulw.bits = nullptr; g_ulw.w = g_ulw.h = 0;
-}
-
-static bool ulwResize(int w, int h) {
-    ulwDestroy();
-    BITMAPINFO bi{};
-    bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bi.bmiHeader.biWidth = w;
-    bi.bmiHeader.biHeight = -h;          // top-down
-    bi.bmiHeader.biPlanes = 1;
-    bi.bmiHeader.biBitCount = 32;
-    bi.bmiHeader.biCompression = BI_RGB;
-    g_ulw.dib = CreateDIBSection(nullptr, &bi, DIB_RGB_COLORS, &g_ulw.bits, nullptr, 0);
-    if (!g_ulw.dib) { LOG_ERROR("MAIN", "CreateDIBSection failed"); return false; }
-    g_ulw.memDC = CreateCompatibleDC(nullptr);
-    if (!g_ulw.memDC) { LOG_ERROR("MAIN", "CreateCompatibleDC failed"); return false; }
-    SelectObject(g_ulw.memDC, g_ulw.dib);
-    g_ulw.w = w; g_ulw.h = h;
-    return true;
-}
-
 static void overlayPresent() {
     if (!g_sdlRdr || !g_sdlWin || !g_overlayHwnd) return;
     int w = g_ui.totalW > 0 ? g_ui.totalW : g_ui.winW;
     int h = g_ui.winH > 0 ? g_ui.winH : 540;
     if (w <= 0 || h <= 0 || !g_ovTex) return;
-
-    if (g_ulw.w != w || g_ulw.h != h) {
-        if (!ulwResize(w, h)) return;
-    }
 
     // 1. 从离屏 ARGB 纹理回读 (真 alpha)
     if (SDL_SetRenderTarget(g_sdlRdr, g_ovTex) != 0) return;
@@ -2225,49 +2191,8 @@ static void overlayPresent() {
     }
     g_roundMasks.clear();
 
-    // 2. 预乘 alpha (ULW 要求 premultiplied BGRA)
-    const Uint32* src = px.data();
-    Uint32* dst = (Uint32*)g_ulw.bits;
-    const size_t n = (size_t)w * h;
-    for (size_t i = 0; i < n; ++i) {
-        Uint32 p = src[i];
-        Uint32 a = p >> 24;
-        if (a == 0)        dst[i] = 0;
-        else if (a == 255) dst[i] = p | 0xFF000000u;
-        else {
-            Uint32 r = ((p >> 16) & 255) * a / 255;
-            Uint32 gg = ((p >> 8) & 255) * a / 255;
-            Uint32 b = (p & 255) * a / 255;
-            dst[i] = (a << 24) | (r << 16) | (gg << 8) | b;
-        }
-    }
-
-    // 诊断: 首帧采样视频区中心 alpha(应为 0=透明; 255=alpha 通路失效)
-    {
-        static bool sampled = false;
-        if (!sampled) {
-            sampled = true;
-            Uint32 s1 = src[(size_t)(h / 2) * w + w / 2];
-            Uint32 s2 = src[(size_t)10 * w + 10];
-            LOG_INFO("MAIN", "alpha sample center=%08X corner=%08X (expect A=00)",
-                     s1, s2);
-        }
-    }
-
-    // 3. ULW 上屏 (位置跟随 parent 客户区原点)
-    POINT pt = {0, 0};
-    ClientToScreen(g_parentHwnd, &pt);
-    POINT srcPt = {0, 0};
-    SIZE sz = {w, h};
-    BLENDFUNCTION bf = {AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
-    HDC scr = GetDC(nullptr);
-    BOOL ok = UpdateLayeredWindow(g_overlayHwnd, scr, &pt, &sz,
-                                  g_ulw.memDC, &srcPt, 0, &bf, ULW_ALPHA);
-    ReleaseDC(nullptr, scr);
-    if (!ok) {
-        static bool warned = false;
-        if (!warned) { LOG_ERROR("MAIN", "UpdateLayeredWindow failed err=%lu", GetLastError()); warned = true; }
-    }
+    // 2. 预乘 alpha + ULW 上屏 (P2-3: 移至 ui/ulw.h)
+    ulwPresent(g_ulw, g_overlayHwnd, g_parentHwnd, px.data(), w, h);
 }
 
 // M36: 像素宽度约束的单行省略 (UTF-8 安全, 逐码点回退)
