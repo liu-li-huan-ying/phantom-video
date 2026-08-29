@@ -114,7 +114,7 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             {
                 g_mpv->setSpeed(g_mpv->speed() - 0.25f);
                 char msg[32];
-                std::snprintf(msg, sizeof(msg), "%s: %.2fx", T("锟斤拷锟斤拷", "Speed"), g_mpv->speed());
+                std::snprintf(msg, sizeof(msg), "%s: %.2fx", T("倍速", "Speed"), g_mpv->speed());
                 showToast(msg);
                 break;
             }
@@ -123,7 +123,7 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             {
                 g_mpv->setSpeed(g_mpv->speed() + 0.25f);
                 char msg[32];
-                std::snprintf(msg, sizeof(msg), "%s: %.2fx", T("锟斤拷锟斤拷", "Speed"), g_mpv->speed());
+                std::snprintf(msg, sizeof(msg), "%s: %.2fx", T("倍速", "Speed"), g_mpv->speed());
                 showToast(msg);
                 break;
             }
@@ -136,14 +136,14 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             case 'X': {
                 g_mpv->addSubDelay(-0.5);
                 char msg[40];
-                std::snprintf(msg, sizeof(msg), "%s: %.1fs", T("锟斤拷幕锟接筹拷", "Sub delay"), -g_mpv->subDelay());
+                std::snprintf(msg, sizeof(msg), "%s: %.1fs", T("字幕延迟", "Sub delay"), -g_mpv->subDelay());
                 showToast(msg);
                 break;
             }
             case 'Z': {
                 g_mpv->addSubDelay(0.5);
                 char msg[40];
-                std::snprintf(msg, sizeof(msg), "%s: %.1fs", T("锟斤拷幕锟接筹拷", "Sub delay"), -g_mpv->subDelay());
+                std::snprintf(msg, sizeof(msg), "%s: %.1fs", T("字幕延迟", "Sub delay"), -g_mpv->subDelay());
                 showToast(msg);
                 break;
             }
@@ -159,7 +159,7 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                         std::string f = openSubtitleDialog(hwnd);
                         if (!f.empty()) {
                             g_mpv->loadSubtitle(f);
-                            showToast(T("锟斤拷幕锟窖硷拷锟斤拷", "Subtitle loaded"));
+                            showToast(T("字幕已加载", "Subtitle loaded"));
                         }
                     }
                 } else {
@@ -190,9 +190,9 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     g_mpv->seekToChapter(next);
                     char msg[64];
                     std::snprintf(msg, sizeof(msg), "%s %d/%d: %s",
-                                 T("锟铰斤拷", "Chapter"),
+                                 T("章节", "Chapter"),
                                  next + 1, (int)chs.size(),
-                                 chs[next].title.empty() ? T("锟睫憋拷锟斤拷", "Untitled") : chs[next].title.c_str());
+                                 chs[next].title.empty() ? T("无标题", "Untitled") : chs[next].title.c_str());
                     showToast(msg);
                 }
                 break;
@@ -210,8 +210,8 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     g_mpv->setAudioTrack(tracks[nextIdx].id);
                     char msg[64];
                     std::snprintf(msg, sizeof(msg), "%s: %s",
-                                 T("锟斤拷锟斤拷", "Audio"),
-                                 tracks[nextIdx].desc.empty() ? T("默锟斤拷", "Default") : tracks[nextIdx].desc.c_str());
+                                 T("音轨", "Audio"),
+                                 tracks[nextIdx].desc.empty() ? T("默认", "Default") : tracks[nextIdx].desc.c_str());
                     showToast(msg);
                 } else {
                     showToast(i18n::singleTrack());
@@ -225,7 +225,7 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 subPosIdx = (subPosIdx + 1) % 3;
                 g_mpv->setSubPos(positions[subPosIdx]);
                 char msg[32];
-                std::snprintf(msg, sizeof(msg), "%s: %s", T("锟斤拷幕", "Sub"), names[subPosIdx]);
+                std::snprintf(msg, sizeof(msg), "%s: %s", T("字幕", "Sub"), names[subPosIdx]);
                 showToast(msg);
                 break;
             }
@@ -235,7 +235,7 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 g_mpv->setDebandLevel(next);
                 const char* names[] = {i18n::debandOff(), i18n::debandLight(), i18n::debandMedium(), i18n::debandStrong()};
                 char msg[32];
-                std::snprintf(msg, sizeof(msg), "%s: %s", T("去色锟斤拷", "Deband"), names[next]);
+                std::snprintf(msg, sizeof(msg), "%s: %s", T("去色带", "Deband"), names[next]);
                 showToast(msg);
                 break;
             }
@@ -273,7 +273,7 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     if (!f.empty()) {
                         addToPlaylist(f);
                         if (!g_ui.playlistOpen) g_ui.playlistOpen = true;
-                        showToast(T("锟斤拷锟斤拷锟接碉拷锟斤拷锟斤拷锟叫憋拷", "Added to playlist"));
+                        showToast(T("已添加到播放列表", "Added to playlist"));
                     }
                 }
                 break;
@@ -287,7 +287,7 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                         removeFromPlaylist(curIdx);
                         char msg[128];
                         std::snprintf(msg, sizeof(msg), "%s: %s",
-                                      T("锟斤拷锟狡筹拷", "Removed"), fn.c_str());
+                                      T("已移除", "Removed"), fn.c_str());
                         showToast(msg);
                     }
                 }
@@ -689,7 +689,7 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     if (idx >= 0 && idx < SPEED_PRESET_COUNT) {
                         g_mpv->setSpeed(SPEED_PRESETS[idx]);
                         char msg[32];
-                        std::snprintf(msg, sizeof(msg), "%s: %.2fx", T("锟斤拷锟斤拷", "Speed"), SPEED_PRESETS[idx]);
+                        std::snprintf(msg, sizeof(msg), "%s: %.2fx", T("倍速", "Speed"), SPEED_PRESETS[idx]);
                         showToast(msg);
                     }
                 }
@@ -710,7 +710,7 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     int idx = (my - itemsY) / itemH;
                     if (idx >= 0 && idx < QUALITY_PRESET_COUNT) {
                         applyQualityPreset(idx);
-                        const char* qNames[] = { T("省锟斤拷", "Power Saving"), T("锟斤拷准", "Standard"), T("锟斤拷锟斤拷", "Ultimate") };
+                        const char* qNames[] = { T("省电", "Power Saving"), T("标准", "Standard"), T("卓越", "Ultimate") };
                         showToast(qNames[idx]);
                     }
                 }
@@ -798,7 +798,7 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                         g_mpv->setSubtitle(trackId);
                         g_mpv->setSubVisibility(true);
                         char msg[96];
-                        std::snprintf(msg, sizeof(msg), "%s: %s", T("锟斤拷幕", "Subtitle"), subs[idx - 1].desc.c_str());
+                        std::snprintf(msg, sizeof(msg), "%s: %s", T("字幕", "Subtitle"), subs[idx - 1].desc.c_str());
                         showToast(msg);
                     } else if (idx == (int)subs.size() + 1) {
                         // 锟斤拷锟斤拷锟解部锟斤拷幕
@@ -807,7 +807,7 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                             std::string f = openSubtitleDialog(hwnd);
                             if (!f.empty()) {
                                 g_mpv->loadSubtitle(f);
-                                showToast(T("锟斤拷幕锟窖硷拷锟斤拷", "Subtitle loaded"));
+                                showToast(T("字幕已加载", "Subtitle loaded"));
                             }
                         }
                     }
@@ -831,7 +831,7 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     if (idx >= 0 && idx < (int)tracks.size()) {
                         g_mpv->setAudioTrack(tracks[idx].id);
                         char msg[96];
-                        std::snprintf(msg, sizeof(msg), "%s: %s", T("锟斤拷锟斤拷", "Audio"), tracks[idx].desc.c_str());
+                        std::snprintf(msg, sizeof(msg), "%s: %s", T("音轨", "Audio"), tracks[idx].desc.c_str());
                         showToast(msg);
                     }
                 }
@@ -854,10 +854,10 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     if (idx >= 0 && idx < (int)chs.size()) {
                         g_mpv->seekToChapter(idx);
                         const char* name = chs[idx].title.empty()
-                            ? T("锟睫憋拷锟斤拷", "Untitled") : chs[idx].title.c_str();
+                            ? T("无标题", "Untitled") : chs[idx].title.c_str();
                         char msg[128];
                         std::snprintf(msg, sizeof(msg), "%s %d: %s",
-                                      T("锟铰斤拷", "Chapter"), idx + 1, name);
+                                      T("章节", "Chapter"), idx + 1, name);
                         showToast(msg);
                     }
                 }
@@ -903,7 +903,7 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             }
             else if (inRc(L.prev)) {
                 int idx = playlistIndexOf(g_mpv->path());
-                if (idx > 0) { playIndex(idx - 1); showToast(T("锟斤拷一锟斤拷", "Previous")); }
+                if (idx > 0) { playIndex(idx - 1); showToast(T("上一曲", "Previous")); }
                 else showToast(i18n::noPrev());
             }
             else if (inRc(L.play)) {
@@ -912,7 +912,7 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             else if (inRc(L.next)) {
                 int idx = playlistIndexOf(g_mpv->path());
                 int n = (int)g_playlist.size();
-                if (idx >= 0 && idx + 1 < n) { playIndex(idx + 1); showToast(T("锟斤拷一锟斤拷", "Next")); }
+                if (idx >= 0 && idx + 1 < n) { playIndex(idx + 1); showToast(T("下一曲", "Next")); }
                 else showToast(i18n::noNext());
             }
             else if (inRc(L.subBtn)) {
@@ -957,7 +957,7 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     g_ui.subMenuOpen = false;
                     g_ui.audioMenuOpen = false;
                 } else {
-                    showToast(T("锟斤拷锟铰斤拷锟斤拷息", "No chapters"));
+                    showToast(T("无章节信息", "No chapters"));
                 }
             }
             else if (inRc(L.qualityBtn)) {
@@ -1142,7 +1142,7 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         else if (g_mpv) {
             g_mpv->setVolume(g_mpv->volume() + (d > 0 ? 0.05f : -0.05f));
             char msg[24];
-            std::snprintf(msg, sizeof(msg), "%s %d%%", T("锟斤拷锟斤拷", "Volume"), (int)(g_mpv->volume() * 100 + 0.5f));
+            std::snprintf(msg, sizeof(msg), "%s %d%%", T("音量", "Volume"), (int)(g_mpv->volume() * 100 + 0.5f));
             showToast(msg);
         }
         g_ui.visible = true;

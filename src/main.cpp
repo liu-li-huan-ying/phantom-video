@@ -308,9 +308,11 @@ void applySetting(const char* key, int value) {
             double pos = g_mpv->clock();
             bool wasPaused = (g_mpv->state() == MpvBackend::State::Paused);
             if (!cur.empty() && pos > 0) {
-                g_mpv->close();                          // stop + 关闭音频设备
+                g_mpv->close();
+                // 强制 mpv 在下次加载时重新选择音频设备，否则 audio-exclusive 切换不生效
+                mpv_set_property_string(g_mpv->mpv(), "audio-device", "auto");
                 g_pendingResumePos = pos;
-                g_mpv->loadFile(cur);                    // 重新加载以应用新音频设置
+                g_mpv->loadFile(cur);
                 g_needsUnpause = !wasPaused;
             }
         }
