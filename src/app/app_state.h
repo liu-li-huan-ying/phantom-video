@@ -220,3 +220,85 @@ void formatTime(char* buf, size_t n, double sec);
 std::wstring Utf8ToWide(const std::string& u8);
 std::string  WideToUtf8(const std::wstring& ws);
 std::string  fileNameOf(const std::string& utf8path);
+
+// ---- constants (extracted from main.cpp for WndProc cross-module access) ----
+extern const float SPEED_PRESETS[];
+extern const int   SPEED_PRESET_COUNT;
+extern const int   TIMER_SINGLECLICK;
+extern const int   QUALITY_PRESET_COUNT;
+extern const int   SET_ROW_COUNT;
+extern const int   SB_MARGIN;
+
+// ---- quality presets ----
+struct QualityPreset {
+    const char* name;
+    const char* scale;
+    const char* dscale;
+    const char* cscale;
+    int         deband;
+    float       antiring;
+};
+extern const QualityPreset QUALITY_PRESETS[];
+
+// ---- control-bar layout (shared by renderOverlay + parentProc) ----
+struct Row1Layout {
+    SDL_Rect prev, play, next;
+    int timeX;
+    SDL_Rect subBtn, audioBtn, chapterBtn, speedBtn, qualityBtn, setBtn, fullBtn;
+    int volIconCx;
+    int volSliderX, volSliderW;
+    int cy;
+};
+
+// ---- settings panel geometry ----
+struct SettingsGeom {
+    int panelX, panelY, panelW, panelH;
+    int closeCx, closeCy, closeR;
+    int swX, swW, swH;
+    int rowY[9];
+    int modeRowY;
+    int chipY, chipH, chipW;
+    int langRowY;
+    int langSegX, langSegW, langSegH;
+};
+
+// ---- seekbar geometry (inline, depend on g_ui/g_uiBase) ----
+inline int sbTopY()    { return g_ui.winH - U(80); }
+inline int sbTrackY()  { return sbTopY() + U(10); }
+inline int sbLeftX()   { return U(16); }
+inline int sbRightX()  { return g_ui.winW - U(16); }
+inline int sbWidth()   { return sbRightX() - sbLeftX(); }
+inline int curCtrlH()  { return U(80); }
+inline int curTopH()   { return U(52); }
+
+// ---- control-bar layout declaration ----
+void layoutRow1(int w, int barTopY, bool volOpen, Row1Layout& L);
+
+// ---- UI helper functions (cross-module) ----
+void showToast(const char* msg);
+const char* qualityLabel();
+void raiseOverlayAbove();
+void applyPlaylistWindow(HWND hwnd);
+void toggleFullscreen(HWND hwnd);
+void toggleMini(HWND hwnd);
+void saveWindowPos(HWND hwnd);
+void renderOverlay();
+
+// ---- playlist functions (cross-module) ----
+void clampPlaylistScroll();
+void buildPlaylistAround(const std::string& file);
+bool buildPlaylistFromFolder(const std::string& dirUtf8);
+void playPath(const std::string& path);
+void playIndex(int idx, bool relative = false);
+int  playlistIndexOf(const std::string& path);
+void addToPlaylist(const std::string& file);
+void removeFromPlaylist(int idx);
+
+// ---- settings functions (cross-module) ----
+void applySetting(const char* key, int value);
+void applyQualityPreset(int idx);
+SettingsGeom settingsGeom(int w, int h);
+
+// ---- topbar/volume hit-test ----
+int  hitTestTopbarIcon(int mx, int my, int winW);
+bool inVolumeArea(int mx, int my);
