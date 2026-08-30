@@ -1599,33 +1599,44 @@ void renderOverlay() {
         int toggleVals[SET_ROW_COUNT] = { g_cfg.hwDecode, g_cfg.volNorm,
             g_cfg.subAutoLoad, g_cfg.thumbCache, g_cfg.resume,
             g_cfg.nightMode, g_cfg.audioExclusive, g_cfg.motionInterp,
-            g_cfg.hiQScale };
+            g_cfg.hiQScale, 1 /* audioOutput placeholder: always "on" */ };
         const char* rowLabels[SET_ROW_COUNT] = {
             i18n::hwDecode(), i18n::volNorm(), i18n::subAutoLoad(),
             i18n::thumbCache(), i18n::resume(), i18n::nightMode(),
             i18n::exclusiveAudio(), i18n::motionInterp(), i18n::hiQScaling(),
+            T("音频输出模式", "Audio Output"),
         };
         for (int i = 0; i < SET_ROW_COUNT; ++i) {
             int ry = sg.rowY[i];
             bool on = (toggleVals[i] != 0);
             g_text.drawText(sg.panelX + U(20), ry + U(3), rowLabels[i], Tpt(13), on ? 230 : 170, on ? 230 : 170, on ? 230 : 170);
 
-            // Switch
-            SDL_Rect swRc = {sg.swX, ry, sg.swW, sg.swH};
-            int swR = sg.swH / 2;
-            if (on) {
-                fillCircle(g_sdlRdr, sg.swX + swR, ry + swR, swR, ui::ACCENT_R_, ui::ACCENT_G_, ui::ACCENT_B_, 255);
-                fillCircle(g_sdlRdr, sg.swX + sg.swW - swR, ry + swR, swR, ui::ACCENT_R_, ui::ACCENT_G_, ui::ACCENT_B_, 255);
-                SDL_Rect mid = {sg.swX + swR, ry, sg.swW - sg.swH, sg.swH};
-                SDL_RenderFillRect(g_sdlRdr, &mid);
-            } else {
-                fillCircle(g_sdlRdr, sg.swX + swR, ry + swR, swR, 80, 80, 80, 255);
-                fillCircle(g_sdlRdr, sg.swX + sg.swW - swR, ry + swR, swR, 80, 80, 80, 255);
-                SDL_Rect mid = {sg.swX + swR, ry, sg.swW - sg.swH, sg.swH};
-                SDL_RenderFillRect(g_sdlRdr, &mid);
+            // 音频输出模式行：显示当前模式名称
+            if (i == SET_ROW_COUNT - 1) {
+                const char* modeNames[] = {"立体声", "5.1环绕", "7.1环绕", "直通"};
+                int modeIdx = (g_cfg.audioOutput >= 0 && g_cfg.audioOutput < 4) ? g_cfg.audioOutput : 0;
+                g_text.drawText(sg.panelX + U(160), ry + U(3), modeNames[modeIdx], Tpt(11),
+                    ui::ACCENT2_R, ui::ACCENT2_G, ui::ACCENT2_B);
             }
-            int thumbX = on ? sg.swX + sg.swW - sg.swH + U(2) : sg.swX + U(2);
-            fillCircle(g_sdlRdr, thumbX + (sg.swH - U(4))/2, ry + U(10), (sg.swH - U(4))/2, 255, 255, 255, 255);
+
+            // Switch (non-audioOutput rows get normal switch)
+            if (i != SET_ROW_COUNT - 1) {
+                SDL_Rect swRc = {sg.swX, ry, sg.swW, sg.swH};
+                int swR = sg.swH / 2;
+                if (on) {
+                    fillCircle(g_sdlRdr, sg.swX + swR, ry + swR, swR, ui::ACCENT_R_, ui::ACCENT_G_, ui::ACCENT_B_, 255);
+                    fillCircle(g_sdlRdr, sg.swX + sg.swW - swR, ry + swR, swR, ui::ACCENT_R_, ui::ACCENT_G_, ui::ACCENT_B_, 255);
+                    SDL_Rect mid = {sg.swX + swR, ry, sg.swW - sg.swH, sg.swH};
+                    SDL_RenderFillRect(g_sdlRdr, &mid);
+                } else {
+                    fillCircle(g_sdlRdr, sg.swX + swR, ry + swR, swR, 80, 80, 80, 255);
+                    fillCircle(g_sdlRdr, sg.swX + sg.swW - swR, ry + swR, swR, 80, 80, 80, 255);
+                    SDL_Rect mid = {sg.swX + swR, ry, sg.swW - sg.swH, sg.swH};
+                    SDL_RenderFillRect(g_sdlRdr, &mid);
+                }
+                int thumbX = on ? sg.swX + sg.swW - sg.swH + U(2) : sg.swX + U(2);
+                fillCircle(g_sdlRdr, thumbX + (sg.swH - U(4))/2, ry + U(10), (sg.swH - U(4))/2, 255, 255, 255, 255);
+            }
         }
 
         // playback mode row (ѡ��=��ɫ����, δѡ��=�������ޱ߿�)

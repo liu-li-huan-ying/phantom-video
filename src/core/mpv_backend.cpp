@@ -24,13 +24,26 @@ bool MpvBackend::init(HWND hwnd, bool enableZeroCopy) {
     // 四级 hwdec 降级链首: auto-copy-safe(最稳基线, 禁用 zero-copy)
     // enableZeroCopy=true 时直接用 auto-safe(允许 zero-copy)
     mpv_set_option_string(mpv_, "hwdec", enableZeroCopy ? "auto-safe" : "auto-copy-safe");
-    mpv_set_option_string(mpv_, "audio-pitch-correction", "yes");
     mpv_set_option_string(mpv_, "sub-auto", "fuzzy");
     mpv_set_option_string(mpv_, "volume", "80");
     mpv_set_option_string(mpv_, "keep-open", "yes");
     mpv_set_option_string(mpv_, "no-input-default-bindings", "yes");
     mpv_set_option_string(mpv_, "input-vo-keyboard", "no");
     mpv_set_option_string(mpv_, "cursor-autohide", "0");
+
+    // ---- 音频质量优化 ----
+    // 声道映射: auto-safe 安全降混, 保留多声道布局直到最终输出
+    mpv_set_option_string(mpv_, "audio-channels", "auto-safe");
+    // 采样率: 0=使用源采样率(避免不必要的重采样)
+    mpv_set_option_string(mpv_, "audio-samplerate", "0");
+    // WASAPI 缓冲区: 增大到 80ms 减少 underrun(默认偏小导致噪音)
+    mpv_set_option_string(mpv_, "ao-wasapi-buffer-duration", "80");
+    // 音频预缓冲: 0.5s 确保播放启动时有足够数据
+    mpv_set_option_string(mpv_, "audio-buffer", "0.5");
+    // 音频同步: 用音频时钟作为主时钟(最稳定)
+    mpv_set_option_string(mpv_, "video-sync", "audio");
+    // 音高校正: 变速时保持音高(内部用 rubberband/resampler)
+    mpv_set_option_string(mpv_, "audio-pitch-correction", "yes");
 
     // 网络流缓存优化
     mpv_set_option_string(mpv_, "demuxer-max-bytes", "80MiB");

@@ -262,29 +262,53 @@ static void mpvSetOpt(const char* prop, const char* val) {
     LOG_DBG("MAIN", "set %s=%s ret=%d", prop, val, r);
 }
 
-// �� volNorm/nightMode �ؽ� af �˾���
+// volNorm/nightMode 音频滤镜链重建
 static void rebuildAudioFilters() {
     std::string af;
-    if (g_cfg.volNorm) af += "loudnorm";
+    if (g_cfg.volNorm) {
+        // loudnorm 单遍模式: I=-16 LUFS 目标响度, TP=-1.5 dBTP 峰值限制, LRA=11 动态范围
+        af += "loudnorm=I=-16:TP=-1.5:LRA=11:print_format=summary";
+    }
     if (g_cfg.nightMode) {
         if (!af.empty()) af += ",";
-        af += "@night:acompressor=threshold=-25dB:ratio=6";
+        // acompressor: 阈值-25dB, 比率6:1, 轻度压缩避免广告炸耳
+        af += "@night:acompressor=threshold=-25dB:ratio=6:attack=20:release=100";
     }
     mpvSetOpt("af", af.c_str());
+    LOG_INFO("MPV", "audio filters: %s", af.empty() ? "(none)" : af.c_str());
 }
 
-// �˶���ֵ��display-resample ʱ�� + oversample���Ϳ���ȥ judder��
+// 音频输出模式切换: 0=立体声 1=5.1 2=7.1 3=直通
+static const char* AUDIO_CH_MODES[]  = {"auto-safe", "5.1", "7.1", "auto-safe"};
+static const char* AUDIO_LABELS[]    = {"立体声", "5.1环绕", "7.1环绕", "直通(Passthrough)"};
+static const int   AUDIO_MODE_COUNT  = 4;
+
+static void applyAudioOutput(int mode) {
+    if (mode < 0 || mode >= AUDIO_MODE_COUNT) mode = 0;
+    // 直通模式: 放宽声道数限制, 让 WASAPI 传递原始多声道流
+    if (mode == 3) {
+        mpvSetOpt("audio-channels", "auto");
+        mpvSetOpt("audio-exclusive", "yes");
+    } else {
+        mpvSetOpt("audio-channels", AUDIO_CH_MODES[mode]);
+        // 非直通模式使用独占输出可减少延迟和重采样
+        mpvSetOpt("audio-exclusive", g_cfg.audioExclusive ? "yes" : "no");
+    }
+    LOG_INFO("MPV", "audio output mode -> %s (channels=%s)", AUDIO_LABELS[mode], AUDIO_CH_MODES[mode]);
+}
+
+// 运动插值
 static void applyMotionInterp(bool on) {
     mpvSetOpt("video-sync", on ? "display-resample" : "audio");
     mpvSetOpt("interpolation", on ? "yes" : "no");
     if (on) mpvSetOpt("tscale", "oversample");
 }
 
-const int SET_ROW_COUNT = 9;
+const int SET_ROW_COUNT = 10;
 
 SettingsGeom settingsGeom(int w, int h) {
     SettingsGeom g;
-    g.panelW = U(400); g.panelH = U(520);
+    g.panelW = U(400); g.panelH = U(560);
     g.panelX = (w - g.panelW) / 2;
     g.panelY = (h - g.panelH) / 2;
     // С����: ��御������̧���������Ϸ�, �ײ��в����ڵ�
@@ -341,6 +365,9 @@ void applySetting(const char* key, int value) {
         const char* s = value ? "ewa_lanczossharp" : "spline36";
         mpvSetOpt("scale", s);
         mpvSetOpt("cscale", s);
+    }
+    else if (std::strcmp(key, "audioOut") == 0) {
+        applyAudioOutput(value);
     }
     // thumbCache/resume �����أ�����֪ͨ mpv
 }
@@ -914,6 +941,7 @@ wc.style         = CS_DBLCLKS;   // ���� WM_LBUTTONDBLCLK
     // Deferred mpv options (non-critical, applied after window visible)
     mpvSetOpt("audio-exclusive", g_cfg.audioExclusive ? "yes" : "no");
     rebuildAudioFilters();
+    applyAudioOutput(g_cfg.audioOutput);
     if (g_cfg.motionInterp) applyMotionInterp(true);
     if (g_cfg.hiQScale) {
         mpvSetOpt("scale", "ewa_lanczossharp");

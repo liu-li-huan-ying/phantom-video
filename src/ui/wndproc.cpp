@@ -669,19 +669,29 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 int* vals[SET_ROW_COUNT] = { &g_cfg.hwDecode, &g_cfg.volNorm,
                     &g_cfg.subAutoLoad, &g_cfg.thumbCache, &g_cfg.resume,
                     &g_cfg.nightMode, &g_cfg.audioExclusive, &g_cfg.motionInterp,
-                    &g_cfg.hiQScale };
+                    &g_cfg.hiQScale, &g_cfg.audioOutput };
                 const char* keys[SET_ROW_COUNT] = { "hw", "vol", "sub", "thumb",
-                    "resume", "night", "excl", "interp", "hiq" };
+                    "resume", "night", "excl", "interp", "hiq", "audioOut" };
                 bool handled = false;
                 for (int i = 0; i < SET_ROW_COUNT && !handled; ++i) {
                     if (my >= sg.rowY[i] - U(5) && my <= sg.rowY[i] + sg.swH + U(5) &&
                         mx >= sg.panelX + U(12)) {
-                        *vals[i] = *vals[i] ? 0 : 1;
-                        applySetting(keys[i], *vals[i]);
-                        const char* tNames[] = { i18n::hwDecode(), i18n::volNorm(), i18n::subAutoLoad(),
-                            i18n::thumbCache(), i18n::resume(), i18n::nightMode(),
-                            i18n::exclusiveAudio(), i18n::motionInterp(), i18n::hiQScaling() };
-                        showToast(tNames[i]);
+                        if (i == SET_ROW_COUNT - 1) {
+                            // 音频输出模式: 循环 0→1→2→3→0
+                            g_cfg.audioOutput = (g_cfg.audioOutput + 1) % 4;
+                            applySetting("audioOut", g_cfg.audioOutput);
+                            const char* modeNames[] = {"立体声", "5.1环绕", "7.1环绕", "直通"};
+                            char msg[32];
+                            std::snprintf(msg, sizeof(msg), "%s: %s", T("音频输出", "Audio"), modeNames[g_cfg.audioOutput]);
+                            showToast(msg);
+                        } else {
+                            *vals[i] = *vals[i] ? 0 : 1;
+                            applySetting(keys[i], *vals[i]);
+                            const char* tNames[] = { i18n::hwDecode(), i18n::volNorm(), i18n::subAutoLoad(),
+                                i18n::thumbCache(), i18n::resume(), i18n::nightMode(),
+                                i18n::exclusiveAudio(), i18n::motionInterp(), i18n::hiQScaling() };
+                            showToast(tNames[i]);
+                        }
                         LOG_INFO("MAIN", "setting %s -> %d", keys[i], *vals[i]);
                         handled = true;
                     }

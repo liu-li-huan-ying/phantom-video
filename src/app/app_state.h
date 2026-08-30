@@ -207,6 +207,10 @@ namespace i18n {
     inline const char* buffering()      { return T("缓冲中...", "Buffering..."); }
     inline const char* endOfTrack()     { return T("播放结束", "End of track"); }
     inline const char* resumedAt()      { return T("已续播", "Resumed at"); }
+    inline const char* audioStereo()    { return T("立体声", "Stereo"); }
+    inline const char* audio51()        { return T("5.1环绕", "5.1 Surround"); }
+    inline const char* audio71()        { return T("7.1环绕", "7.1 Surround"); }
+    inline const char* audioPassthrough() { return T("直通(Passthrough)", "Passthrough"); }
     inline const char* modeSingleT()   { return T("模式: 单曲", "Mode: Single"); }
     inline const char* modeLoopT()     { return T("模式: 循环", "Mode: Loop"); }
     inline const char* modeShuffleT()  { return T("模式: 随机", "Mode: Shuffle"); }
@@ -266,7 +270,7 @@ struct SettingsGeom {
     int panelX, panelY, panelW, panelH;
     int closeCx, closeCy, closeR;
     int swX, swW, swH;
-    int rowY[9];
+    int rowY[10];
     int modeRowY;
     int chipY, chipH, chipW;
     int langRowY;

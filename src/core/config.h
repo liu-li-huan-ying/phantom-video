@@ -26,6 +26,7 @@ struct AppConfig {
     int volNorm = 0;       // 音量标准化(loudnorm)
     int nightMode = 0;     // 夜间模式(acompressor 动态压缩)
     int audioExclusive = 0;// WASAPI 独占输出
+    int audioOutput = 0;    // 音频输出: 0=立体声 1=5.1环绕 2=7.1环绕 3=直通(passthrough)
     int motionInterp = 0;  // 运动插值(display-resample + oversample)
     int hiQScale = 0;      // 高质量缩放(ewa_lanczossharp, GPU 开销较高)
     int lang = 0;           // 语言: 0=中文 1=English
