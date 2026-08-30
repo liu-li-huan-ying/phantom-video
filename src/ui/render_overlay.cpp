@@ -1177,12 +1177,8 @@ void renderOverlay() {
         fillCircle(g_sdlRdr, menuX + menuW - cr, menuY + menuH - cr, cr, 24, 24, 26, 255);
         // ����
         g_text.drawText(menuX + U(10), menuY + U(10), i18n::equalizer(), Tpt(13), 255, 255, 255);
-        // 开关状态
-        const char* st = g_mpv->eqEnabled() ? i18n::eqOn() : i18n::eqOff();
-        Uint8 sr = g_mpv->eqEnabled() ? 59 : 161, sg = g_mpv->eqEnabled() ? 130 : 161, sb = g_mpv->eqEnabled() ? 246 : 166;
-        g_text.drawText(menuX + menuW - U(40), menuY + U(10), st, Tpt(12), sr, sg, sb);
 
-        // 6 Ƶ�λ���
+        // 6 频段滑块
         int baseY = menuY + U(32);
         int trackX = menuX + U(60);
         int trackW = sliderW;
