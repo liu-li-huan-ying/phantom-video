@@ -32,6 +32,11 @@ bool MpvBackend::init(HWND hwnd, bool enableZeroCopy) {
     mpv_set_option_string(mpv_, "input-vo-keyboard", "no");
     mpv_set_option_string(mpv_, "cursor-autohide", "0");
 
+    // 网络流缓存优化
+    mpv_set_option_string(mpv_, "demuxer-max-bytes", "80MiB");
+    mpv_set_option_string(mpv_, "demuxer-max-back-bytes", "20MiB");
+    mpv_set_option_string(mpv_, "cache-secs", "30");
+
     // 截图输出到 exe/screenshots/
     {
         std::string dir = exeDir() + "screenshots";
@@ -92,6 +97,7 @@ bool MpvBackend::init(HWND hwnd, bool enableZeroCopy) {
     mpv_observe_property(mpv_, 8, "height", MPV_FORMAT_INT64);
     mpv_observe_property(mpv_, 9, "mute", MPV_FORMAT_FLAG);
     mpv_observe_property(mpv_, 10, "paused-for-cache", MPV_FORMAT_FLAG);
+    mpv_observe_property(mpv_, 12, "demuxer-cache-state", MPV_FORMAT_NODE);
     // keep-open=yes 时播完不发 END_FILE, 必须观察 eof-reached 才能触发连播
     mpv_observe_property(mpv_, 11, "eof-reached", MPV_FORMAT_FLAG);
 
@@ -652,7 +658,11 @@ void MpvBackend::eventLoop() {
                     hwdecRetry = true;
                 }
 
-                if (!hwdecRetry && onPlaybackEnded) onPlaybackEnded();
+                if (!hwdecRetry) {
+                    // 非 hwdec 降级错误 → 通知 UI（网络错误/解码错误等）
+                    if (onPlaybackError) onPlaybackError(es ? es : "Unknown error");
+                    if (onPlaybackEnded) onPlaybackEnded();
+                }
             } else if (end->reason == MPV_END_FILE_REASON_STOP) {
                 LOG_DBG("MPV", "playback stopped");
             }
@@ -710,7 +720,32 @@ void MpvBackend::handlePropertyChange(const char* name, mpv_event_property* prop
         muted_.store(*(int*)prop->data != 0);
     }
     else if (std::strcmp(name, "paused-for-cache") == 0 && prop->format == MPV_FORMAT_FLAG) {
-        cachedBufferFill_ = *(int*)prop->data ? 0.0 : 1.0;
+        bool buf = *(int*)prop->data != 0;
+        isBuffering_.store(buf);
+        cachedBufferFill_ = buf ? 0.0 : 1.0;
+    }
+    else if (std::strcmp(name, "demuxer-cache-state") == 0 && prop->format == MPV_FORMAT_NODE) {
+        // 解析 demuxer-cache-state 获取 fw.byte 和 total 字节计算缓存百分比
+        mpv_node* node = (mpv_node*)prop->data;
+        if (node && node->format == MPV_FORMAT_NODE_MAP) {
+            mpv_node_list* list = node->u.list;
+            double fwBytes = 0, totalBytes = 0;
+            for (int i = 0; i < list->num; i++) {
+                if (std::strcmp(list->keys[i], "fw.byte") == 0 &&
+                    list->values[i].format == MPV_FORMAT_DOUBLE) {
+                    fwBytes = list->values[i].u.double_;
+                } else if (std::strcmp(list->keys[i], "total") == 0 &&
+                           list->values[i].format == MPV_FORMAT_DOUBLE) {
+                    totalBytes = list->values[i].u.double_;
+                }
+            }
+            if (totalBytes > 0) {
+                double level = fwBytes / totalBytes;
+                if (level < 0.0) level = 0.0;
+                if (level > 1.0) level = 1.0;
+                bufferingLevel_.store(level);
+            }
+        }
     }
     else if (std::strcmp(name, "eof-reached") == 0 && prop->format == MPV_FORMAT_FLAG) {
         // keep-open 下播完的唯一信号; 去重: 仅从未触发态进入

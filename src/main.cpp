@@ -872,6 +872,13 @@ wc.style         = CS_DBLCLKS;   // ���� WM_LBUTTONDBLCLK
             g_autoNextPending = true;
         }
     };
+    mpv.onPlaybackError = [&](const char* errorMsg) {
+        LOG_ERROR("MAIN", "playback error: %s", errorMsg);
+        // 区分网络错误和解码错误
+        std::string msg = "Playback error: ";
+        msg += errorMsg;
+        showToast(msg.c_str());
+    };
 
     if (!mpv.init(g_mpvHwnd, g_cfg.enableZeroCopy != 0)) { LOG_ERROR("MAIN", "mpv init failed"); return 1; }
 

@@ -109,6 +109,8 @@ public:
     int videoWidth() const { return videoWidth_.load(); }
     int videoHeight() const { return videoHeight_.load(); }
     double bufferFill() const;
+    bool isBuffering() const { return isBuffering_.load(); }
+    double bufferingLevel() const { return bufferingLevel_.load(); }
 
     std::string title() const;
 
@@ -116,6 +118,7 @@ public:
 
     std::function<void()> onFileLoaded;
     std::function<void()> onPlaybackEnded;
+    std::function<void(const char* errorMsg)> onPlaybackError;  // 网络/解码错误回调
 
 private:
     void eventLoop();
@@ -144,6 +147,8 @@ private:
     double cachedDuration_ = 0.0;
     double cachedClock_ = 0.0;
     double cachedBufferFill_ = 0.0;
+    std::atomic<double> bufferingLevel_{ 0.0 };  // demuxer-cache-state: 0.0~1.0
+    std::atomic<bool> isBuffering_{ false };      // paused-for-cache
     std::atomic<bool> eofFired_{ false };   // eof-reached 去重(事件线程读/loadFile 写)
     uint32_t seekbarFreezeEnd_ = 0;         // 速度切换后冻结进度条显示(ms)
     double loopA_ = -1.0;                   // AB 循环 A 点

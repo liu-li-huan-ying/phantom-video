@@ -999,9 +999,36 @@ void renderOverlay() {
         }
     }
 
-    // --- buffering indicator ---
-    if (g_mpv->bufferFill() < 0.5) {
-        g_text.drawText(w / 2 - U(30), barTop + U(75), "Buffering...", Tpt(12), ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B);
+    // --- buffering indicator (animated spinner + percentage) ---
+    if (g_mpv->isBuffering() && g_mpv->bufferFill() < 0.5) {
+        int cx = w / 2, cy = barTop + U(60);
+        int r = U(18);
+        // 绘制旋转弧线 (6 段弧，旋转动画)
+        Uint32 ticks = SDL_GetTicks();
+        double angle = (ticks % 1200) / 1200.0 * 6.28318;  // 1.2 秒一圈
+        int segments = 8;
+        for (int i = 0; i < segments; i++) {
+            double a1 = angle + (double)i / segments * 6.28318;
+            double a2 = a1 + 6.28318 / segments * 0.55;
+            int x1 = cx + (int)(std::cos(a1) * r);
+            int y1 = cy + (int)(std::sin(a1) * r);
+            int x2 = cx + (int)(std::cos(a2) * r);
+            int y2 = cy + (int)(std::sin(a2) * r);
+            Uint8 alpha = (Uint8)(180 - i * (160 / segments));
+            SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, alpha);
+            SDL_RenderDrawLine(g_sdlRdr, x1, y1, x2, y2);
+        }
+        // 百分比文字
+        double lvl = g_mpv->bufferingLevel();
+        if (lvl > 0.01 && lvl < 1.0) {
+            char buf[32];
+            std::snprintf(buf, sizeof(buf), "%d%%", (int)(lvl * 100));
+            g_text.drawText(cx - U(12), cy + r + U(6), buf, Tpt(10),
+                            ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B);
+        } else {
+            g_text.drawText(cx - U(22), cy + r + U(6), "Buffering...", Tpt(10),
+                            ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B);
+        }
     }
 
     // --- speed popup menu��Ч��ͼ���: Բ��r8/����չ��/k��ע�� ---
