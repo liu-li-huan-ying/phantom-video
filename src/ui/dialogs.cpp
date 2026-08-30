@@ -7,15 +7,19 @@
 // overlay HWND (defined in main.cpp)
 extern HWND g_overlayHwnd;
 
-static void hideOverlay() {
-    if (g_overlayHwnd) ShowWindow(g_overlayHwnd, SW_HIDE);
+static void lowerOverlay() {
+    if (g_overlayHwnd)
+        SetWindowPos(g_overlayHwnd, HWND_NOTOPMOST, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 }
-static void showOverlay() {
-    if (g_overlayHwnd) ShowWindow(g_overlayHwnd, SW_SHOW);
+static void raiseOverlay() {
+    if (g_overlayHwnd)
+        SetWindowPos(g_overlayHwnd, HWND_TOPMOST, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
 std::string openFileDialog(HWND hwnd) {
-    hideOverlay();
+    lowerOverlay();
     wchar_t file[MAX_PATH * 2] = {};
     OPENFILENAMEW ofn = {};
     ofn.lStructSize = sizeof(ofn);
@@ -28,12 +32,12 @@ std::string openFileDialog(HWND hwnd) {
     ofn.Flags = OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
     std::string result;
     if (GetOpenFileNameW(&ofn)) result = WideToUtf8(file);
-    showOverlay();
+    raiseOverlay();
     return result;
 }
 
 std::string openSubtitleDialog(HWND hwnd) {
-    hideOverlay();
+    lowerOverlay();
     wchar_t file[MAX_PATH * 2] = {};
     OPENFILENAMEW ofn = {};
     ofn.lStructSize = sizeof(ofn);
@@ -46,12 +50,12 @@ std::string openSubtitleDialog(HWND hwnd) {
     ofn.Flags = OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
     std::string result;
     if (GetOpenFileNameW(&ofn)) result = WideToUtf8(file);
-    showOverlay();
+    raiseOverlay();
     return result;
 }
 
 std::string openUrlDialog(HWND hwnd) {
-    hideOverlay();
+    lowerOverlay();
     struct Ctx { bool ok; std::string url; } ctx{false, ""};
 
     RECT rc; GetWindowRect(hwnd, &rc);
@@ -130,12 +134,12 @@ std::string openUrlDialog(HWND hwnd) {
         }
         if (IsWindow(dlg)) WaitMessage();
     }
-    showOverlay();
+    raiseOverlay();
     return ctx.url;
 }
 
 std::string openFolderDialog(HWND hwnd) {
-    hideOverlay();
+    lowerOverlay();
     std::string result;
     HRESULT coInit = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     bool coOwned = SUCCEEDED(coInit);
@@ -150,6 +154,6 @@ std::string openFolderDialog(HWND hwnd) {
         CoTaskMemFree(pidl);
     }
     if (coOwned) CoUninitialize();
-    showOverlay();
+    raiseOverlay();
     return result;
 }
