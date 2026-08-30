@@ -1148,7 +1148,7 @@ void renderOverlay() {
             g_text.drawText(menuX + U(10), iy + U(8), qNames[i], Tpt(13), tr, tg, tb);
             // ��ǰѡ�б��
             if (sel) {
-                g_text.drawText(menuX + menuW - U(24), iy + U(8), "?", Tpt(13), ui::ACCENT2_R, ui::ACCENT2_G, ui::ACCENT2_B);
+                fillCircle(g_sdlRdr, menuX + menuW - U(18), iy + U(14), U(4), ui::ACCENT2_R, ui::ACCENT2_G, ui::ACCENT2_B, 255);
             }
         }
     }

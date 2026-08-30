@@ -169,14 +169,18 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     showToast(vis ? i18n::subtitlesOn() : i18n::subtitlesOff());
                 }
                 break;
-            case 'A': {  // AB 循锟斤拷: 锟斤拷一锟斤拷锟斤拷 A, 锟节讹拷锟斤拷锟斤拷 B, 锟斤拷锟斤拷锟斤拷锟斤拷锟?
-                if (!g_mpv->looping()) {
+            case 'A': {  // AB loop: press 1 = set A, press 2 = set B, press 3 = clear
+                if (g_mpv->loopA() < 0) {
+                    // No A yet: set A
                     g_mpv->setLoopA();
                     showToast(i18n::loopASet());
-                } else if (g_mpv->loopA() >= 0 && g_mpv->loopB() < 0) {
+                } else if (g_mpv->loopB() < 0) {
+                    // A set, no B: set B
                     g_mpv->setLoopB();
-                    showToast(i18n::loopActive());
+                    if (g_mpv->looping()) showToast(i18n::loopActive());
+                    else { g_mpv->clearLoop(); showToast(i18n::loopCleared()); }
                 } else {
+                    // Both set: clear
                     g_mpv->clearLoop();
                     showToast(i18n::loopCleared());
                 }
@@ -990,12 +994,13 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 }
             }
             else if (inRc(L.abBtn)) {
-                if (!g_mpv->looping()) {
+                if (g_mpv->loopA() < 0) {
                     g_mpv->setLoopA();
                     showToast(i18n::loopASet());
-                } else if (g_mpv->loopA() >= 0 && g_mpv->loopB() < 0) {
+                } else if (g_mpv->loopB() < 0) {
                     g_mpv->setLoopB();
-                    showToast(i18n::loopActive());
+                    if (g_mpv->looping()) showToast(i18n::loopActive());
+                    else { g_mpv->clearLoop(); showToast(i18n::loopCleared()); }
                 } else {
                     g_mpv->clearLoop();
                     showToast(i18n::loopCleared());
