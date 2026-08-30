@@ -35,7 +35,7 @@ enable_language(C)
 add_library(sonic STATIC "${DEV_DIR}/sonic/sonic.c")
 target_include_directories(sonic PUBLIC "${DEV_DIR}/sonic")
 
-add_executable(phantom_video ${PLAYER_SOURCES})
+add_executable(phantom_video WIN32 ${PLAYER_SOURCES} app.rc)
 
 target_include_directories(phantom_video PRIVATE
   ${SDL2_INCLUDE_DIRS}
