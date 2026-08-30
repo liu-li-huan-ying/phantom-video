@@ -262,13 +262,12 @@ static void mpvSetOpt(const char* prop, const char* val) {
 static void rebuildAudioFilters() {
     std::string af;
     if (g_cfg.volNorm) {
-        // loudnorm 单遍模式: I=-16 LUFS 目标响度, TP=-1.5 dBTP 峰值限制
-        // 注意: 单遍 loudnorm 在 seek 时可能产生瞬态噪声
-        af += "loudnorm=I=-16:TP=-1.5:LRA=11:print_format=summary";
+        // 音量归一化: 使用 volume 滤镜的 dynaudnorm（动态归一化，seek 稳定）
+        // 替代 loudnorm（单遍模式在 seek 时产生瞬态噪声）
+        af += "dynaudnorm=f=250:g=15:p=0.9:m=100:s=12";
     }
     if (g_cfg.nightMode && !g_cfg.volNorm) {
-        // acompressor: 仅在 volNorm 关闭时使用（避免两个滤镜叠加产生噪声）
-        if (!af.empty()) af += ",";
+        // acompressor: 仅在 volNorm 关闭时使用（避免叠加噪声）
         af += "@night:acompressor=threshold=-25dB:ratio=6:attack=20:release=100";
     }
     mpvSetOpt("af", af.c_str());
@@ -284,6 +283,10 @@ static void applyAudioOutput(int mode) {
     if (mode < 0 || mode >= AUDIO_MODE_COUNT) mode = 0;
     // 只切换声道布局，不改变 exclusive 模式（运行时切换会丢设备）
     mpvSetOpt("audio-channels", AUDIO_CH_MODES[mode]);
+    // 切换声道后 unpause 确保音频管线恢复（WASAPI 重配置后可能静默）
+    if (g_mpv && g_mpv->hasMedia()) {
+        g_mpv->unpause();
+    }
     LOG_INFO("MPV", "audio output mode -> %s (channels=%s)", AUDIO_LABELS[mode], AUDIO_CH_MODES[mode]);
 }
 
@@ -925,7 +928,8 @@ wc.style         = CS_DBLCLKS;   // ���� WM_LBUTTONDBLCLK
     // Deferred mpv options (non-critical, applied after window visible)
     mpvSetOpt("audio-exclusive", g_cfg.audioExclusive ? "yes" : "no");
     rebuildAudioFilters();
-    applyAudioOutput(g_cfg.audioOutput);
+    // 注意: 不在启动时调用 applyAudioOutput，避免 audio-channels 变更阻塞
+    // 用户在设置面板切换时才生效
     if (g_cfg.motionInterp) applyMotionInterp(true);
     if (g_cfg.hiQScale) {
         mpvSetOpt("scale", "ewa_lanczossharp");
