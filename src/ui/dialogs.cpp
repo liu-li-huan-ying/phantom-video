@@ -4,7 +4,18 @@
 #include <shlobj.h>
 #include <string>
 
+// overlay HWND (defined in main.cpp)
+extern HWND g_overlayHwnd;
+
+static void hideOverlay() {
+    if (g_overlayHwnd) ShowWindow(g_overlayHwnd, SW_HIDE);
+}
+static void showOverlay() {
+    if (g_overlayHwnd) ShowWindow(g_overlayHwnd, SW_SHOW);
+}
+
 std::string openFileDialog(HWND hwnd) {
+    hideOverlay();
     wchar_t file[MAX_PATH * 2] = {};
     OPENFILENAMEW ofn = {};
     ofn.lStructSize = sizeof(ofn);
@@ -15,11 +26,14 @@ std::string openFileDialog(HWND hwnd) {
     ofn.lpstrFile = file;
     ofn.nMaxFile = MAX_PATH * 2;
     ofn.Flags = OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
-    if (GetOpenFileNameW(&ofn)) return WideToUtf8(file);
-    return "";
+    std::string result;
+    if (GetOpenFileNameW(&ofn)) result = WideToUtf8(file);
+    showOverlay();
+    return result;
 }
 
 std::string openSubtitleDialog(HWND hwnd) {
+    hideOverlay();
     wchar_t file[MAX_PATH * 2] = {};
     OPENFILENAMEW ofn = {};
     ofn.lStructSize = sizeof(ofn);
@@ -30,11 +44,14 @@ std::string openSubtitleDialog(HWND hwnd) {
     ofn.lpstrFile = file;
     ofn.nMaxFile = MAX_PATH * 2;
     ofn.Flags = OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
-    if (GetOpenFileNameW(&ofn)) return WideToUtf8(file);
-    return "";
+    std::string result;
+    if (GetOpenFileNameW(&ofn)) result = WideToUtf8(file);
+    showOverlay();
+    return result;
 }
 
 std::string openUrlDialog(HWND hwnd) {
+    hideOverlay();
     struct Ctx { bool ok; std::string url; } ctx{false, ""};
 
     RECT rc; GetWindowRect(hwnd, &rc);
@@ -113,10 +130,12 @@ std::string openUrlDialog(HWND hwnd) {
         }
         if (IsWindow(dlg)) WaitMessage();
     }
+    showOverlay();
     return ctx.url;
 }
 
 std::string openFolderDialog(HWND hwnd) {
+    hideOverlay();
     std::string result;
     HRESULT coInit = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     bool coOwned = SUCCEEDED(coInit);
@@ -131,5 +150,6 @@ std::string openFolderDialog(HWND hwnd) {
         CoTaskMemFree(pidl);
     }
     if (coOwned) CoUninitialize();
+    showOverlay();
     return result;
 }
