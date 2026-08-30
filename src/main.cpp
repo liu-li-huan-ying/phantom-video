@@ -262,12 +262,13 @@ static void mpvSetOpt(const char* prop, const char* val) {
 static void rebuildAudioFilters() {
     std::string af;
     if (g_cfg.volNorm) {
-        // loudnorm 单遍模式: I=-16 LUFS 目标响度, TP=-1.5 dBTP 峰值限制, LRA=11 动态范围
+        // loudnorm 单遍模式: I=-16 LUFS 目标响度, TP=-1.5 dBTP 峰值限制
+        // 注意: 单遍 loudnorm 在 seek 时可能产生瞬态噪声
         af += "loudnorm=I=-16:TP=-1.5:LRA=11:print_format=summary";
     }
-    if (g_cfg.nightMode) {
+    if (g_cfg.nightMode && !g_cfg.volNorm) {
+        // acompressor: 仅在 volNorm 关闭时使用（避免两个滤镜叠加产生噪声）
         if (!af.empty()) af += ",";
-        // acompressor: 阈值-25dB, 比率6:1, 轻度压缩避免广告炸耳
         af += "@night:acompressor=threshold=-25dB:ratio=6:attack=20:release=100";
     }
     mpvSetOpt("af", af.c_str());
@@ -275,21 +276,14 @@ static void rebuildAudioFilters() {
 }
 
 // 音频输出模式切换: 0=立体声 1=5.1 2=7.1 3=直通
-static const char* AUDIO_CH_MODES[]  = {"auto-safe", "5.1", "7.1", "auto-safe"};
+static const char* AUDIO_CH_MODES[]  = {"auto-safe", "5.1", "7.1", "auto"};
 static const char* AUDIO_LABELS[]    = {"立体声", "5.1环绕", "7.1环绕", "直通(Passthrough)"};
 static const int   AUDIO_MODE_COUNT  = 4;
 
 static void applyAudioOutput(int mode) {
     if (mode < 0 || mode >= AUDIO_MODE_COUNT) mode = 0;
-    // 直通模式: 放宽声道数限制, 让 WASAPI 传递原始多声道流
-    if (mode == 3) {
-        mpvSetOpt("audio-channels", "auto");
-        mpvSetOpt("audio-exclusive", "yes");
-    } else {
-        mpvSetOpt("audio-channels", AUDIO_CH_MODES[mode]);
-        // 非直通模式使用独占输出可减少延迟和重采样
-        mpvSetOpt("audio-exclusive", g_cfg.audioExclusive ? "yes" : "no");
-    }
+    // 只切换声道布局，不改变 exclusive 模式（运行时切换会丢设备）
+    mpvSetOpt("audio-channels", AUDIO_CH_MODES[mode]);
     LOG_INFO("MPV", "audio output mode -> %s (channels=%s)", AUDIO_LABELS[mode], AUDIO_CH_MODES[mode]);
 }
 

@@ -36,13 +36,9 @@ bool MpvBackend::init(HWND hwnd, bool enableZeroCopy) {
     mpv_set_option_string(mpv_, "audio-channels", "auto-safe");
     // 采样率: 0=使用源采样率(避免不必要的重采样)
     mpv_set_option_string(mpv_, "audio-samplerate", "0");
-    // WASAPI 缓冲区: 增大到 80ms 减少 underrun(默认偏小导致噪音)
-    mpv_set_option_string(mpv_, "ao-wasapi-buffer-duration", "80");
-    // 音频预缓冲: 0.5s 确保播放启动时有足够数据
-    mpv_set_option_string(mpv_, "audio-buffer", "0.5");
     // 音频同步: 用音频时钟作为主时钟(最稳定)
     mpv_set_option_string(mpv_, "video-sync", "audio");
-    // 音高校正: 变速时保持音高(内部用 rubberband/resampler)
+    // 音高校正: 变速时保持音高
     mpv_set_option_string(mpv_, "audio-pitch-correction", "yes");
 
     // 网络流缓存优化

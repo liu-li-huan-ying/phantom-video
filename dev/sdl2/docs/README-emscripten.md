@@ -9,15 +9,14 @@ In modern times, all the browsers you probably care about (Chrome, Firefox,
 Edge, and Safari, on Windows, macOS, Linux, iOS and Android), support some
 reasonable base configurations:
 
-- WebAssembly (don't bother with asm.js any more)
-- WebGL (which will look like OpenGL ES 2 or 3 to your app).
-- Threads (see caveats, though!)
-- Game controllers
-- Autoupdating (so you can assume they have a recent version of the browser)
+* WebAssembly (don't bother with asm.js any more)
+* WebGL (which will look like OpenGL ES 2 or 3 to your app).
+* Threads (see caveats, though!)
+* Game controllers
+* Autoupdating (so you can assume they have a recent version of the browser)
 
 All this to say we're at the point where you don't have to make a lot of
 concessions to get even a fairly complex SDL-based game up and running.
-
 
 ## RTFM
 
@@ -25,7 +24,6 @@ This document is a quick rundown of some high-level details. The
 documentation at [emscripten.org](https://emscripten.org/) is vast
 and extremely detailed for a wide variety of topics, and you should at
 least skim through it at some point.
-
 
 ## Porting your app to Emscripten
 
@@ -113,7 +111,6 @@ There's a lot of little details that are beyond the scope of this
 document, but that's the biggest intial set of hurdles to porting
 your app to the web.
 
-
 ## Do you need threads?
 
 If you plan to use threads, they work on all major browsers now. HOWEVER,
@@ -136,7 +133,6 @@ but is built on pthreads, so it shares the same little incompatibilities
 that are documented there, such as where you can use a mutex, and when
 a thread will start running, etc.
 
-
 IMPORTANT: You have to decide to either build something that uses
 threads or something that doesn't; you can't have one build
 that works everywhere. This is an Emscripten (or maybe WebAssembly?
@@ -151,7 +147,6 @@ If building with threads, `__EMSCRIPTEN_PTHREADS__` will be defined
 for checking with the C preprocessor, so you can build something
 different depending on what sort of build you're compiling.
 
-
 ## Audio
 
 Audio works as expected at the API level, but not exactly like other
@@ -159,7 +154,7 @@ platforms.
 
 You'll only see a single default audio device. Audio capture also works;
 if the browser pops up a prompt to ask for permission to access the
-microphone, the SDL_OpenAudioDevice call will succeed and start producing
+microphone, the SDL\_OpenAudioDevice call will succeed and start producing
 silence at a regular interval. Once the user approves the request, real
 audio data will flow. If the user denies it, the app is not informed and
 will just continue to receive silence.
@@ -192,9 +187,8 @@ available to be opened as soon as the program started, and since this magic
 happens in a little Javascript, you don't have to change your C/C++ code at
 all to make it happen.
 
-Please see the discussion at https://github.com/libsdl-org/SDL/issues/6385
+Please see the discussion at <https://github.com/libsdl-org/SDL/issues/6385>
 for some Javascript code to steal for this approach.
-
 
 ## Rendering
 
@@ -202,10 +196,9 @@ If you use SDL's 2D render API, it will use GLES2 internally, which
 Emscripten will turn into WebGL calls. You can also use OpenGL ES 2
 directly by creating a GL context and drawing into it.
 
-Calling SDL_RenderPresent (or SDL_GL_SwapWindow) will not actually
+Calling SDL\_RenderPresent (or SDL\_GL\_SwapWindow) will not actually
 present anything on the screen until your return from your mainloop
 function.
-
 
 ## Building SDL/emscripten
 
@@ -224,12 +217,10 @@ revision control, so often this is much easier for app developers.
 1.2 instead; if you need SDL 1.2, this might be fine, but we generally
 recommend you don't use SDL 1.2 in modern times.
 
-
 If you want to build SDL, though...
 
 SDL currently requires at least Emscripten 3.1.35 to build. Newer versions
 are likely to work, as well.
-
 
 Build:
 
@@ -302,7 +293,6 @@ to more memory. If using pthreads, you'll need the `-sMAXIMUM_MEMORY=1gb`
 or the app will fail to start on iOS browsers, but this might be a bug that
 goes away in the future.
 
-
 ## Data files
 
 Your game probably has data files. Here's how to access them.
@@ -310,7 +300,7 @@ Your game probably has data files. Here's how to access them.
 Filesystem access works like a Unix filesystem; you have a single directory
 tree, possibly interpolated from several mounted locations, no drive letters,
 '/' for a path separator. You can access them with standard file APIs like
-open() or fopen() or SDL_RWops. You can read or write from the filesystem.
+open() or fopen() or SDL\_RWops. You can read or write from the filesystem.
 
 By default, you probably have a "MEMFS" filesystem (all files are stored in
 memory, but access to them is immediate and doesn't need to block). There are
@@ -345,7 +335,6 @@ all has to live in memory at runtime.
 [Emscripten's documentation on the matter](https://emscripten.org/docs/porting/files/packaging_files.html)
 gives other options and details, and is worth a read.
 
-
 ## Debugging
 
 Debugging web apps is a mixed bag. You should compile and link with
@@ -360,15 +349,11 @@ If you try debugging in Firefox and it doesn't work well for no apparent
 reason, try Chrome, and vice-versa. These tools are still relatively new,
 and improving all the time.
 
-SDL_Log() (or even plain old printf) will write to the Javascript console,
+SDL\_Log() (or even plain old printf) will write to the Javascript console,
 and honestly I find printf-style debugging to be easier than setting up a build
 for proper debugging, so use whatever tools work best for you.
-
 
 ## Questions?
 
 Please give us feedback on this document at [the SDL bug tracker](https://github.com/libsdl-org/SDL/issues).
 If something is wrong or unclear, we want to know!
-
-
-

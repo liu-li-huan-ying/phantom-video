@@ -84,9 +84,6 @@ add_custom_command(TARGET phantom_video POST_BUILD
 # 拷贝图标资源到构建目录
 add_custom_command(TARGET phantom_video POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_directory
-    "${CMAKE_SOURCE_DIR}/assets"
-    "$<TARGET_FILE_DIR:phantom_video>/assets"
-  COMMAND ${CMAKE_COMMAND} -E copy_directory
     "${CMAKE_SOURCE_DIR}/ico"
     "$<TARGET_FILE_DIR:phantom_video>/ico"
-  COMMENT "拷贝 assets 资源")
+  COMMENT "拷贝 ico 资源")
