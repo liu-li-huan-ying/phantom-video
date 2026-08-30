@@ -296,6 +296,7 @@ SettingsGeom settingsGeom(int w, int h) {
 // FILE_LOADED 恢复 seek 位+ unpause 标志 (applySetting 里 excl 需要提前使用)
 static double g_pendingResumePos = -1.0;
 static bool g_needsUnpause = false;
+static std::atomic<bool> g_suppressNextUnpause{false};  // exclusive toggle: 保持暂停状态
 
 // Ӧ�����ñ���� mpv�����ط�תʱ���ã�
 void applySetting(const char* key, int value) {
@@ -304,19 +305,13 @@ void applySetting(const char* key, int value) {
     else if (std::strcmp(key, "excl") == 0) {
         g_cfg.audioExclusive = (value != 0);
         if (g_mpv) {
-            // audio-exclusive 是 WASAPI AO 选项，运行时改属性不会重置已打开的 exclusive 设备
-            // 必须完整销毁+重建 mpv 上下文才能释放 WASAPI exclusive 独占
             auto snap = g_mpv->reinit(g_mpvHwnd, g_cfg.enableZeroCopy != 0);
-            // reinit 后重新设置 audio-exclusive（init 不设置此选项）
             mpvSetOpt("audio-exclusive", value ? "yes" : "no");
-            // 恢复播放
             if (!snap.path.empty() && snap.pos > 1.0) {
                 g_pendingResumePos = snap.pos;
+                if (snap.wasPaused) g_suppressNextUnpause = true;
                 g_mpv->loadFile(snap.path);
-                g_needsUnpause = !snap.wasPaused;
             }
-            // 更新全局指针（reinit 不改变 MpvBackend 地址，但确认安全）
-            // g_mpv 已指向同一个栈上对象，无需更新
         }
         showToast(value ? i18n::exclusiveAudio() : i18n::exclusiveAudio());
     }
@@ -555,7 +550,8 @@ void playPath(const std::string& path, bool forceResume) {
         showToast(i18n::failedOpen());
         return;
     }
-    g_needsUnpause = true;  // P4-1: loadFile ��ͣ, FILE_LOADED �� unpause
+    // g_needsUnpause 移到 onFileLoaded 回调中设置，
+    // 避免竞态：主循环在 onFileLoaded 之前醒来 → 无 seek 位就 unpause → 从头播放
     g_cfg.lastFile = path;
 
     // �����б�����ʱ����������ǰ���
@@ -751,7 +747,7 @@ int main(int argc, char** argv) {
     bool diag = false;
     for (int i = 1; i < argc; ++i)
         if (std::string(argv[i]) == "--debug") { diag = true; break; }
-    Logger::instance().setLevel(diag ? LogLevel::Trace : LogLevel::Warn);
+    Logger::instance().setLevel(diag ? LogLevel::Trace : LogLevel::Info);
     LOG_INFO("MAIN", "phantom video (mpv + SDL2 overlay) starting");
 
     loadConfig(configPath(), g_cfg);
@@ -835,11 +831,16 @@ wc.style         = CS_DBLCLKS;   // ���� WM_LBUTTONDBLCLK
         double pos = g_pendingResumePos;
         g_pendingResumePos = -1.0;
         LOG_INFO("MPV", "file loaded, pendingResumePos=%.1f", pos);
+        std::lock_guard<std::mutex> lk(g_autoNextMtx);
         if (pos > 1.0) {
-            std::lock_guard<std::mutex> lk(g_autoNextMtx);
             g_resumeSeekPos = pos;
             g_resumeSeekPending = true;
-            LOG_INFO("MPV", "resume seek queued: %.1f", pos);
+        }
+        if (!g_suppressNextUnpause) {
+            g_needsUnpause = true;
+        } else {
+            g_suppressNextUnpause = false;
+            LOG_INFO("MPV", "suppress next unpause");
         }
     };
     mpv.onPlaybackEnded = [&]() {
@@ -965,22 +966,22 @@ wc.style         = CS_DBLCLKS;   // ���� WM_LBUTTONDBLCLK
         // ���� seek + unpause: ���� FILE_LOADED Ͷ�ݵ�λ��
         {
             double pos = -1.0;
+            bool unpause = false;
             {
                 std::lock_guard<std::mutex> lk(g_autoNextMtx);
                 if (g_resumeSeekPending) { pos = g_resumeSeekPos; g_resumeSeekPending = false; }
+                if (g_needsUnpause) { unpause = true; g_needsUnpause = false; }
             }
-            if (g_needsUnpause && g_mpv && g_mpv->hasMedia()) {
-                if (pos > 1.0) {
-                    LOG_INFO("MAIN", "resume at %.1fs", pos);
-                    g_mpv->seek(pos);
-                    char msg[48];
-                    std::snprintf(msg, sizeof(msg), "%s %02d:%02d",
-                        T("已续播", "Resumed at"), (int)(pos / 60), (int)pos % 60);
-                    showToast(msg);
-                }
-                // P4-1: seek ��ɺ� unpause (�� resume Ҳ unpause)
+            if (pos > 1.0 && g_mpv && g_mpv->hasMedia()) {
+                LOG_INFO("MAIN", "resume at %.1fs", pos);
+                g_mpv->seek(pos);
+                char msg[48];
+                std::snprintf(msg, sizeof(msg), "%s %02d:%02d",
+                    T("已续播", "Resumed at"), (int)(pos / 60), (int)pos % 60);
+                showToast(msg);
+            }
+            if (unpause && g_mpv && g_mpv->hasMedia()) {
                 g_mpv->unpause();
-                g_needsUnpause = false;
             }
         }
 
