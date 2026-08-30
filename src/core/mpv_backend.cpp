@@ -80,6 +80,16 @@ bool MpvBackend::init(HWND hwnd, bool enableZeroCopy) {
         return false;
     }
 
+    // 初始化后设置音频声道（仅一次，运行时通过 reinit 切换）
+    {
+        const char* chModes[] = {"auto-safe", "5.1", "7.1", "auto"};
+        int mode = audioOutput_;
+        if (mode >= 0 && mode < 4) {
+            mpv_set_property_string(mpv_, "audio-channels", chModes[mode]);
+            LOG_INFO("MPV", "audio-channels -> %s", chModes[mode]);
+        }
+    }
+
     // 回读画质关键项确认生效
     {
         const char* props[] = { "scale", "dscale", "cscale", "deband",
@@ -182,13 +192,6 @@ bool MpvBackend::loadFile(const std::string& path) {
     int paused = 1;
     mpv_set_property(mpv_, "pause", MPV_FORMAT_FLAG, &paused);
 
-    // 在 loadfile 前设置 audio-channels（每次加载时应用最新配置）
-    const char* chModes[] = {"auto-safe", "5.1", "7.1", "auto"};
-    int mode = audioOutput_;
-    if (mode >= 0 && mode < 4) {
-        mpv_set_property_string(mpv_, "audio-channels", chModes[mode]);
-    }
-
     const char* cmd[] = { "loadfile", path.c_str(), NULL };
     int ret = mpv_command(mpv_, cmd);
     if (ret < 0) {
@@ -212,8 +215,9 @@ bool MpvBackend::loadFile(const std::string& path) {
 void MpvBackend::close() {
     if (!mpv_ || !hasMedia_.load()) return;
 
+    // 用 async stop 避免 mpv 忙时阻塞 UI 线程
     const char* cmd[] = { "stop", NULL };
-    mpv_command(mpv_, cmd);
+    mpv_command_async(mpv_, 0, cmd);
 
     hasMedia_.store(false);
     state_.store(State::Idle);
