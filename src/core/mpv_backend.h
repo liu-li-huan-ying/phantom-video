@@ -29,6 +29,7 @@ public:
         float speed = 1.0f;
         bool eqEnabled = false;
         float eqGains[6] = {};
+        bool audioExclusive = false;
     };
     ReinitSnapshot reinit(HWND hwnd, bool enableZeroCopy);
 
@@ -98,6 +99,8 @@ public:
     // ---- 音频输出模式 ----
     void setAudioOutput(int mode) { audioOutput_ = mode; }
     int  audioOutput() const { return audioOutput_; }
+    void setAudioExclusive(bool on) { audioExclusive_ = on; }
+    bool audioExclusive() const { return audioExclusive_; }
 
     // ---- 音频均衡器 ----
     struct EQBand { const char* freq; float gain; };  // gain: -12..+12 dB
@@ -166,6 +169,7 @@ private:
     int    debandLevel_ = 2;                // 去色带等级 0-3
     int    aspectIdx_ = 0;                  // 画面比例索引 0=auto 1=16:9 2=4:3 3=1:1
     int    audioOutput_ = 0;                // 音频输出模式 0=立体声 1=5.1 2=7.1 3=直通
+    bool   audioExclusive_ = false;         // WASAPI 独占模式
     bool   eqEnabled_ = false;              // 均衡器开关
     float  eqGains_[6] = {};                // 均衡器 6 频段增益
 };

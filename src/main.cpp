@@ -334,8 +334,8 @@ void applySetting(const char* key, int value) {
     else if (std::strcmp(key, "excl") == 0) {
         g_cfg.audioExclusive = (value != 0);
         if (g_mpv) {
+            g_mpv->setAudioExclusive(value != 0);
             auto snap = g_mpv->reinit(g_mpvHwnd, g_cfg.enableZeroCopy != 0);
-            mpvSetOpt("audio-exclusive", value ? "yes" : "no");
             if (!snap.path.empty() && snap.pos > 1.0) {
                 g_pendingResumePos = snap.pos;
                 if (snap.wasPaused) g_suppressNextUnpause = true;
@@ -922,7 +922,6 @@ wc.style         = CS_DBLCLKS;   // ���� WM_LBUTTONDBLCLK
     UpdateWindow(g_parentHwnd);
 
     // Deferred mpv options (non-critical, applied after window visible)
-    mpvSetOpt("audio-exclusive", g_cfg.audioExclusive ? "yes" : "no");
     rebuildAudioFilters();
     // 注意: 不在启动时调用 applyAudioOutput，避免 audio-channels 变更阻塞
     // 用户在设置面板切换时才生效

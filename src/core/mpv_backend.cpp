@@ -74,6 +74,11 @@ bool MpvBackend::init(HWND hwnd, bool enableZeroCopy) {
         mpv_set_option_string(mpv_, "wid", widStr);
     }
 
+    // WASAPI 独占模式（必须在 mpv_initialize 前设置）
+    if (audioExclusive_) {
+        mpv_set_option_string(mpv_, "audio-exclusive", "yes");
+    }
+
     if (mpv_initialize(mpv_) < 0) {
         LOG_ERROR("MPV", "mpv_initialize failed");
         mpv_destroy(mpv_);
@@ -155,6 +160,7 @@ MpvBackend::ReinitSnapshot MpvBackend::reinit(HWND hwnd, bool enableZeroCopy) {
         snap.volume = volume_.load();
         snap.speed = speed_.load();
         snap.eqEnabled = eqEnabled_;
+        snap.audioExclusive = audioExclusive_;
         std::memcpy(snap.eqGains, eqGains_, sizeof(eqGains_));
     }
 
