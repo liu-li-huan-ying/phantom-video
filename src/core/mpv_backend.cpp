@@ -31,12 +31,11 @@ bool MpvBackend::init(HWND hwnd, bool enableZeroCopy) {
     mpv_set_option_string(mpv_, "input-vo-keyboard", "no");
     mpv_set_option_string(mpv_, "cursor-autohide", "0");
 
-    // ---- 音频质量优化 ----
-    // 声道映射: auto-safe 安全降混, 保留多声道布局直到最终输出
-    mpv_set_option_string(mpv_, "audio-channels", "auto-safe");
-    // 采样率: 0=使用源采样率(避免不必要的重采样)
+    // ---- 音频 ----
+    // 声道: mpv 默认 auto-safe，不在 init 里设 audio-channels（运行时变更需 ao-reload）
+    // 采样率: 0=使用源采样率
     mpv_set_option_string(mpv_, "audio-samplerate", "0");
-    // 音频同步: 用音频时钟作为主时钟(最稳定)
+    // 音频同步: 用音频时钟作为主时钟
     mpv_set_option_string(mpv_, "video-sync", "audio");
     // 音高校正: 变速时保持音高
     mpv_set_option_string(mpv_, "audio-pitch-correction", "yes");
@@ -182,6 +181,13 @@ bool MpvBackend::loadFile(const std::string& path) {
     // 避免 audio 先于 video 开始播放导致启动冻结
     int paused = 1;
     mpv_set_property(mpv_, "pause", MPV_FORMAT_FLAG, &paused);
+
+    // 在 loadfile 前设置 audio-channels（每次加载时应用最新配置）
+    const char* chModes[] = {"auto-safe", "5.1", "7.1", "auto"};
+    int mode = audioOutput_;
+    if (mode >= 0 && mode < 4) {
+        mpv_set_property_string(mpv_, "audio-channels", chModes[mode]);
+    }
 
     const char* cmd[] = { "loadfile", path.c_str(), NULL };
     int ret = mpv_command(mpv_, cmd);

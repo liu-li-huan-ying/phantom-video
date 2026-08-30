@@ -95,6 +95,10 @@ public:
     static constexpr const char* ASPECT_NAMES[] = {"auto", "16:9", "4:3", "1:1"};
     static constexpr int ASPECT_COUNT = 4;
 
+    // ---- 音频输出模式 ----
+    void setAudioOutput(int mode) { audioOutput_ = mode; }
+    int  audioOutput() const { return audioOutput_; }
+
     // ---- 音频均衡器 ----
     struct EQBand { const char* freq; float gain; };  // gain: -12..+12 dB
     void setEQBand(int band, float gain);  // band 0-5
@@ -161,6 +165,7 @@ private:
     double loopB_ = -1.0;                   // AB 循环 B 点
     int    debandLevel_ = 2;                // 去色带等级 0-3
     int    aspectIdx_ = 0;                  // 画面比例索引 0=auto 1=16:9 2=4:3 3=1:1
+    int    audioOutput_ = 0;                // 音频输出模式 0=立体声 1=5.1 2=7.1 3=直通
     bool   eqEnabled_ = false;              // 均衡器开关
     float  eqGains_[6] = {};                // 均衡器 6 频段增益
 };

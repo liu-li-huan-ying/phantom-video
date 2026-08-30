@@ -25,7 +25,7 @@ struct AppConfig {
     int enableZeroCopy = 0; // D3D11VA 零拷贝 (默认关, 需要手动启用; 有驱动风险)
     int volNorm = 0;       // 音量标准化(loudnorm)
     int nightMode = 0;     // 夜间模式(acompressor 动态压缩)
-    int audioExclusive = 0;// WASAPI 独占输出
+    int audioExclusive = 0;// WASAPI 独占输出 (默认关, 独占模式可能导致音频冻结)
     int audioOutput = 0;    // 音频输出: 0=立体声 1=5.1环绕 2=7.1环绕 3=直通(passthrough)
     int motionInterp = 0;  // 运动插值(display-resample + oversample)
     int hiQScale = 0;      // 高质量缩放(ewa_lanczossharp, GPU 开销较高)

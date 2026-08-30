@@ -261,13 +261,8 @@ static void mpvSetOpt(const char* prop, const char* val) {
 // volNorm/nightMode 音频滤镜链重建
 static void rebuildAudioFilters() {
     std::string af;
-    if (g_cfg.volNorm) {
-        // 音量归一化: 使用 volume 滤镜的 dynaudnorm（动态归一化，seek 稳定）
-        // 替代 loudnorm（单遍模式在 seek 时产生瞬态噪声）
-        af += "dynaudnorm=f=250:g=15:p=0.9:m=100:s=12";
-    }
-    if (g_cfg.nightMode && !g_cfg.volNorm) {
-        // acompressor: 仅在 volNorm 关闭时使用（避免叠加噪声）
+    if (g_cfg.nightMode) {
+        // acompressor: 轻度动态压缩，避免广告突然炸耳
         af += "@night:acompressor=threshold=-25dB:ratio=6:attack=20:release=100";
     }
     mpvSetOpt("af", af.c_str());
@@ -281,13 +276,11 @@ static const int   AUDIO_MODE_COUNT  = 4;
 
 static void applyAudioOutput(int mode) {
     if (mode < 0 || mode >= AUDIO_MODE_COUNT) mode = 0;
-    // 只切换声道布局，不改变 exclusive 模式（运行时切换会丢设备）
-    mpvSetOpt("audio-channels", AUDIO_CH_MODES[mode]);
-    // 切换声道后 unpause 确保音频管线恢复（WASAPI 重配置后可能静默）
-    if (g_mpv && g_mpv->hasMedia()) {
-        g_mpv->unpause();
-    }
-    LOG_INFO("MPV", "audio output mode -> %s (channels=%s)", AUDIO_LABELS[mode], AUDIO_CH_MODES[mode]);
+    // audio-channels 运行时变更不会自动重初始化音频输出(mpv 限制)
+    // 仅记录配置，下次打开文件时通过 loadFile → mpv_set_property_string 生效
+    if (g_mpv) g_mpv->setAudioOutput(mode);
+    LOG_INFO("MPV", "audio output mode -> %s (channels=%s, takes effect on next file)",
+             AUDIO_LABELS[mode], AUDIO_CH_MODES[mode]);
 }
 
 // 运动插值
