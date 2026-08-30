@@ -9,11 +9,7 @@ const char* PHANTOM_VERSION = "0.1.0";
 #include <windows.h>
 #include <shellapi.h>
 #include <dwmapi.h>
-#include <commdlg.h>
-#include <shlobj.h>
-
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
 #include <cmath>
 #include <ctime>
@@ -701,12 +697,6 @@ static LRESULT CALLBACK overlaySubclassProc(HWND h, UINT msg, WPARAM wp, LPARAM 
 }
 
 // ---- SDL2 overlay ----
-// ������ alpha �ϳ�(UpdateLayeredWindow): ��Ⱦ��� ReadPixels ��Ԥ�� alpha,
-// �� ULW_ALPHA ������֧�����͸��(��������/ѹ������/ģ̬����), �� colorkey
-// ��ֵ͸���Ķ���αװ�������͸���� WS_EX_TRANSPARENT ��֤��
-static const Uint8 TRANSPARENT_R = 0;
-static const Uint8 TRANSPARENT_G = 0;
-static const Uint8 TRANSPARENT_B = 0;
 
 static bool createOverlay(HWND parent, int w, int h) {
     // �����ޱ߿򴰿ڣ���ϵͳ��֧�� WS_EX_LAYERED �Ӵ��ڣ�ʵ�� err=87��

@@ -4,7 +4,6 @@
 #define SDL_MAIN_HANDLED
 #endif
 #include <SDL.h>
-#include <SDL_syswm.h>
 
 #include <windows.h>
 #include <cstdio>
@@ -12,7 +11,6 @@
 #include <cstring>
 #include <cmath>
 #include <algorithm>
-#include <filesystem>
 #include <string>
 #include <vector>
 #include <map>
@@ -385,8 +383,6 @@ static void drawThumbCover(const std::string& path, SDL_Rect rc, int rad) {
 // renderOverlay() — the main UI rendering function
 // ================================================================
 
-static Uint32 s_frameCount = 0;
-static Uint32 s_renderTimeAcc = 0;
 void renderOverlay() {
     if (!g_sdlRdr || !g_sdlWin) return;
 

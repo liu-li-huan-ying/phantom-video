@@ -8,9 +8,7 @@
 #include <windows.h>
 #include <shellapi.h>
 #include <dwmapi.h>
-#include <shlobj.h>
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
 #include <cmath>
 #include <algorithm>

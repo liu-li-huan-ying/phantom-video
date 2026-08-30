@@ -39,8 +39,6 @@ add_executable(phantom_video ${PLAYER_SOURCES})
 
 target_include_directories(phantom_video PRIVATE
   ${SDL2_INCLUDE_DIRS}
-  "${DEV_DIR}/sdl2_image/x86_64-w64-mingw32/include/SDL2"
-  "${DEV_DIR}/sdl2_ttf/include/SDL2/SDL2"
   ${FFMPEG_INCLUDE_DIRS}
   ${MPV_INCLUDE_DIRS}
   "${DEV_DIR}/sonic"
