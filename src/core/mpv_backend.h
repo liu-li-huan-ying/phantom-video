@@ -19,6 +19,19 @@ public:
     bool init(HWND hwnd = nullptr, bool enableZeroCopy = false);
     void shutdown();
 
+    // 销毁并重建 mpv 上下文（用于 audio-exclusive 等需要重置 AO 的场景）
+    // 返回之前播放的文件路径和位置，调用方负责恢复播放状态
+    struct ReinitSnapshot {
+        std::string path;
+        double pos = -1.0;
+        bool wasPaused = false;
+        float volume = 0.8f;
+        float speed = 1.0f;
+        bool eqEnabled = false;
+        float eqGains[6] = {};
+    };
+    ReinitSnapshot reinit(HWND hwnd, bool enableZeroCopy);
+
     bool loadFile(const std::string& path);
     void close();
 

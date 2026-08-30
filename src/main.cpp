@@ -302,19 +302,21 @@ void applySetting(const char* key, int value) {
     if      (std::strcmp(key, "hw") == 0)      mpvSetOpt("hwdec", value ? (g_cfg.enableZeroCopy ? "auto-safe" : "auto-copy-safe") : "no");
     else if (std::strcmp(key, "sub") == 0)     mpvSetOpt("sub-auto", value ? "fuzzy" : "no");
     else if (std::strcmp(key, "excl") == 0) {
-        mpvSetOpt("audio-exclusive", value ? "yes" : "no");
-        if (g_mpv && g_mpv->hasMedia()) {
-            std::string cur = g_mpv->path();
-            double pos = g_mpv->clock();
-            bool wasPaused = (g_mpv->state() == MpvBackend::State::Paused);
-            if (!cur.empty() && pos > 0) {
-                g_mpv->close();
-                // 强制 mpv 在下次加载时重新选择音频设备，否则 audio-exclusive 切换不生效
-                mpv_set_property_string(g_mpv->mpv(), "audio-device", "auto");
-                g_pendingResumePos = pos;
-                g_mpv->loadFile(cur);
-                g_needsUnpause = !wasPaused;
+        g_cfg.audioExclusive = (value != 0);
+        if (g_mpv) {
+            // audio-exclusive 是 WASAPI AO 选项，运行时改属性不会重置已打开的 exclusive 设备
+            // 必须完整销毁+重建 mpv 上下文才能释放 WASAPI exclusive 独占
+            auto snap = g_mpv->reinit(g_mpvHwnd, g_cfg.enableZeroCopy != 0);
+            // reinit 后重新设置 audio-exclusive（init 不设置此选项）
+            mpvSetOpt("audio-exclusive", value ? "yes" : "no");
+            // 恢复播放
+            if (!snap.path.empty() && snap.pos > 1.0) {
+                g_pendingResumePos = snap.pos;
+                g_mpv->loadFile(snap.path);
+                g_needsUnpause = !snap.wasPaused;
             }
+            // 更新全局指针（reinit 不改变 MpvBackend 地址，但确认安全）
+            // g_mpv 已指向同一个栈上对象，无需更新
         }
         showToast(value ? i18n::exclusiveAudio() : i18n::exclusiveAudio());
     }
@@ -545,8 +547,10 @@ void playPath(const std::string& path, bool forceResume) {
     if (!g_mpv || path.empty()) return;
     g_pendingResumePos = -1.0;
     auto it = g_cfg.history.find(path);
-    if ((forceResume || g_cfg.resume) && it != g_cfg.history.end() && it->second.pos > 1.0)
-        g_pendingResumePos = it->second.pos;
+    bool found = (forceResume || g_cfg.resume) && it != g_cfg.history.end() && it->second.pos > 1.0;
+    if (found) g_pendingResumePos = it->second.pos;
+    LOG_INFO("MAIN", "playPath: force=%d resume_cfg=%d found=%d pos=%.1f path=%s",
+             forceResume, g_cfg.resume, found, g_pendingResumePos, path.c_str());
     if (!g_mpv->loadFile(path)) {
         showToast(i18n::failedOpen());
         return;
@@ -828,14 +832,14 @@ wc.style         = CS_DBLCLKS;   // ���� WM_LBUTTONDBLCLK
     if (g_cfg.speed >= 0.25f && g_cfg.speed <= 4.0f && std::abs(g_cfg.speed - 1.0f) > 0.01f)
         mpv.setSpeed(g_cfg.speed);
     mpv.onFileLoaded = [&]() {
-        // �������¼��߳�ֻͶ�ݴ� seek λ��, UI ��ѭ��ִ��
-        // (�¼��߳�ֱ�ӵ� mpv.seek/showToast ���� UI �߳̾���)
         double pos = g_pendingResumePos;
         g_pendingResumePos = -1.0;
+        LOG_INFO("MPV", "file loaded, pendingResumePos=%.1f", pos);
         if (pos > 1.0) {
             std::lock_guard<std::mutex> lk(g_autoNextMtx);
             g_resumeSeekPos = pos;
             g_resumeSeekPending = true;
+            LOG_INFO("MPV", "resume seek queued: %.1f", pos);
         }
     };
     mpv.onPlaybackEnded = [&]() {

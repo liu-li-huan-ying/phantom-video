@@ -115,6 +115,49 @@ void MpvBackend::shutdown() {
     LOG_INFO("MPV", "mpv backend shutdown");
 }
 
+MpvBackend::ReinitSnapshot MpvBackend::reinit(HWND hwnd, bool enableZeroCopy) {
+    ReinitSnapshot snap;
+
+    // 1. 快照当前状态
+    snap.path = path_;
+    if (hasMedia_ && mpv_) {
+        // 读取当前播放位置
+        double pos = clock();
+        if (pos > 0) snap.pos = pos;
+        snap.wasPaused = (state_ == State::Paused);
+        snap.volume = volume_.load();
+        snap.speed = speed_.load();
+        snap.eqEnabled = eqEnabled_;
+        std::memcpy(snap.eqGains, eqGains_, sizeof(eqGains_));
+    }
+
+    LOG_INFO("MPV", "reinit: snapshot path=%s pos=%.1f paused=%d",
+             snap.path.c_str(), snap.pos, snap.wasPaused);
+
+    // 2. 完全销毁 mpv（释放 WASAPI exclusive 设备）
+    shutdown();
+
+    // 3. 重建
+    if (!init(hwnd, enableZeroCopy)) {
+        LOG_ERROR("MPV", "reinit: init failed");
+        return snap;
+    }
+
+    // 4. 恢复状态
+    setVolume(snap.volume);
+    if (std::abs(snap.speed - 1.0f) > 0.01f)
+        setSpeed(snap.speed);
+    if (snap.eqEnabled) {
+        eqEnabled_ = true;
+        for (int i = 0; i < 6; ++i)
+            setEQBand(i, snap.eqGains[i]);
+    }
+
+    LOG_INFO("MPV", "reinit: complete, restored vol=%.0f spd=%.2f",
+             snap.volume * 100, snap.speed);
+    return snap;
+}
+
 bool MpvBackend::loadFile(const std::string& path) {
     if (!mpv_) return false;
 
