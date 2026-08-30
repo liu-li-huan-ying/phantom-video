@@ -1177,8 +1177,8 @@ void renderOverlay() {
         fillCircle(g_sdlRdr, menuX + menuW - cr, menuY + menuH - cr, cr, 24, 24, 26, 255);
         // ����
         g_text.drawText(menuX + U(10), menuY + U(10), i18n::equalizer(), Tpt(13), 255, 255, 255);
-        // ����״̬
-        const char* st = g_mpv->eqEnabled() ? "ON" : "OFF";
+        // 开关状态
+        const char* st = g_mpv->eqEnabled() ? i18n::eqOn() : i18n::eqOff();
         Uint8 sr = g_mpv->eqEnabled() ? 59 : 161, sg = g_mpv->eqEnabled() ? 130 : 161, sb = g_mpv->eqEnabled() ? 246 : 166;
         g_text.drawText(menuX + menuW - U(40), menuY + U(10), st, Tpt(12), sr, sg, sb);
 
@@ -1219,11 +1219,15 @@ void renderOverlay() {
         // P1-6: EQ Ԥ�谴ť
         struct EqPreset { const char* name; float bands[6]; };
         static const EqPreset presets[] = {
-            { "Flat",    { 0,  0,  0,  0,  0,  0 } },
-            { "Bass",    { 6,  4,  1, -1, -2, -3 } },
-            { "Treble",  {-3, -2, -1,  1,  4,  6 } },
-            { "Vocal",   {-2, -1,  3,  4,  2, -1 } },
-            { "Rock",    { 5,  3, -1, -1,  3,  5 } },
+            { nullptr,    { 0,  0,  0,  0,  0,  0 } },  // Flat — 指针占位，运行时用 i18n
+            { nullptr,    { 6,  4,  1, -1, -2, -3 } },  // Bass
+            { nullptr,    {-3, -2, -1,  1,  4,  6 } },  // Treble
+            { nullptr,    {-2, -1,  3,  4,  2, -1 } },  // Vocal
+            { nullptr,    { 5,  3, -1, -1,  3,  5 } },  // Rock
+        };
+        static const char* presetNames[] = {
+            i18n::presetFlat(), i18n::presetBass(), i18n::presetTreble(),
+            i18n::presetVocal(), i18n::presetRock()
         };
         static const int kPresetCount = (int)(sizeof(presets) / sizeof(presets[0]));
         int presetY = resetY + U(30);
@@ -1242,7 +1246,7 @@ void renderOverlay() {
             SDL_SetRenderDrawColor(g_sdlRdr, match ? 59 : 48, match ? 130 : 48, match ? 246 : 52, 255);
             SDL_Rect btnRc = {bx, by, bw, bh};
             SDL_RenderFillRect(g_sdlRdr, &btnRc);
-            g_text.drawText(bx + U(4), by + U(4), presets[i].name, Tpt(9),
+            g_text.drawText(bx + U(4), by + U(4), presetNames[i], Tpt(9),
                             match ? 255 : 180, match ? 255 : 180, match ? 255 : 186);
             // �洢��ť����
             static SDL_Rect s_presetRects[5];

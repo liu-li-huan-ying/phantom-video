@@ -770,14 +770,18 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                             for (int i = 0; i < 6; ++i) g_mpv->setEQBand(i, 0.0f);
                             showToast(i18n::eqReset());
                         }
-                        // P1-6: EQ 预锟斤拷锟斤拷
+                        // P1-6: EQ preset buttons
                         struct EqPreset { const char* name; float bands[6]; };
                         static const EqPreset presets[] = {
-                            { "Flat",    { 0,  0,  0,  0,  0,  0 } },
-                            { "Bass",    { 6,  4,  1, -1, -2, -3 } },
-                            { "Treble",  {-3, -2, -1,  1,  4,  6 } },
-                            { "Vocal",   {-2, -1,  3,  4,  2, -1 } },
-                            { "Rock",    { 5,  3, -1, -1,  3,  5 } },
+                            { nullptr,    { 0,  0,  0,  0,  0,  0 } },
+                            { nullptr,    { 6,  4,  1, -1, -2, -3 } },
+                            { nullptr,    {-3, -2, -1,  1,  4,  6 } },
+                            { nullptr,    {-2, -1,  3,  4,  2, -1 } },
+                            { nullptr,    { 5,  3, -1, -1,  3,  5 } },
+                        };
+                        static const char* presetNames[] = {
+                            i18n::presetFlat(), i18n::presetBass(), i18n::presetTreble(),
+                            i18n::presetVocal(), i18n::presetRock()
                         };
                         int presetY = resetY + U(30) + U(14);
                         int presetBtnW = (menuW - U(20)) / 5;
@@ -787,7 +791,7 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                             if (mx >= bx && mx <= bx + bw && my >= presetY && my <= presetY + U(22)) {
                                 for (int b = 0; b < 6; ++b)
                                     g_mpv->setEQBand(b, presets[i].bands[b]);
-                                showToast(presets[i].name);
+                                showToast(presetNames[i]);
                                 break;
                             }
                         }

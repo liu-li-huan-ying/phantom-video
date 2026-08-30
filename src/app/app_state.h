@@ -188,6 +188,13 @@ namespace i18n {
     inline const char* playlistReordered() { return T("列表已重排", "Playlist reordered"); }
     inline const char* failedOpen()     { return T("打开失败", "Failed to open file"); }
     inline const char* eqReset()        { return T("EQ 已重置", "EQ reset"); }
+    inline const char* eqOn()           { return T("已开启", "ON"); }
+    inline const char* eqOff()          { return T("已关闭", "OFF"); }
+    inline const char* presetFlat()     { return T("平坦", "Flat"); }
+    inline const char* presetBass()     { return T("低音", "Bass"); }
+    inline const char* presetTreble()   { return T("高音", "Treble"); }
+    inline const char* presetVocal()    { return T("人声", "Vocal"); }
+    inline const char* presetRock()     { return T("摇滚", "Rock"); }
     inline const char* noPrev()         { return T("无上一曲", "No previous track"); }
     inline const char* noNext()         { return T("无下一曲", "No next track"); }
     inline const char* screenshotSaved() { return T("截图已保存", "Screenshot saved"); }

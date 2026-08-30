@@ -85,6 +85,13 @@ const char* T(const char* zh, const char* en) {
 static WNDPROC g_mpvOldProc = nullptr;
 static LRESULT CALLBACK mpvRelayProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
+    case WM_ERASEBKGND: {
+        // 阻止默认灰色背景：mpv 第一帧渲染前填充纯黑
+        RECT rc; GetClientRect(hwnd, &rc);
+        HBRUSH br = (HBRUSH)GetStockObject(BLACK_BRUSH);
+        FillRect((HDC)wp, &rc, br);
+        return 1;  // 已擦除
+    }
     case WM_MOUSEMOVE:
         SetFocus(g_parentHwnd);   // ���̽����ջ� parent
         [[fallthrough]];
