@@ -10,6 +10,7 @@ MpvBackend::~MpvBackend() {
 }
 
 bool MpvBackend::init(HWND hwnd, bool enableZeroCopy) {
+    auto t0 = SDL_GetTicks();
     mpv_ = mpv_create();
     if (!mpv_) {
         LOG_ERROR("MPV", "mpv_create failed");
@@ -79,6 +80,7 @@ bool MpvBackend::init(HWND hwnd, bool enableZeroCopy) {
         mpv_ = nullptr;
         return false;
     }
+    LOG_INFO("MPV", "mpv_initialize took %u ms", SDL_GetTicks() - t0);
 
     // 初始化后设置音频声道（仅一次，运行时通过 reinit 切换）
     {
@@ -100,6 +102,7 @@ bool MpvBackend::init(HWND hwnd, bool enableZeroCopy) {
             mpv_free(v);
         }
     }
+    LOG_INFO("MPV", "post-init properties took %u ms", SDL_GetTicks() - t0);
 
     // 桥接 mpv 内部日志(warn+) 到统一 Logger —— 否则解码/加载失败静默
     mpv_request_log_messages(mpv_, "warn");

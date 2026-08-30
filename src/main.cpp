@@ -766,6 +766,7 @@ static void enableDpiAwareness() {
 
 // ---- main ----
 int main(int argc, char** argv) {
+    auto t0 = SDL_GetTicks();
     enableDpiAwareness();
     (void)argc; (void)argv;
 
@@ -907,6 +908,7 @@ wc.style         = CS_DBLCLKS;   // ���� WM_LBUTTONDBLCLK
     };
 
     if (!mpv.init(g_mpvHwnd, g_cfg.enableZeroCopy != 0)) { LOG_ERROR("MAIN", "mpv init failed"); return 1; }
+    LOG_INFO("MAIN", "mpv.init took %u ms", SDL_GetTicks() - t0);
 
     // Essential mpv options only (critical for first frame)
     mpvSetOpt("hwdec", g_cfg.hwDecode ? (g_cfg.enableZeroCopy ? "auto-safe" : "auto-copy-safe") : "no");
@@ -914,6 +916,7 @@ wc.style         = CS_DBLCLKS;   // ���� WM_LBUTTONDBLCLK
 
     // ---- SDL2 overlay ----
     if (!createOverlay(g_parentHwnd, rc.right, rc.bottom)) { return 1; }
+    LOG_INFO("MAIN", "overlay created, total %u ms", SDL_GetTicks() - t0);
 
     ShowWindow(g_parentHwnd, SW_SHOW);
     UpdateWindow(g_parentHwnd);

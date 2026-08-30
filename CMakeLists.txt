@@ -62,9 +62,7 @@ foreach(f ${SDL2_CFLAGS_OTHER})
   endif()
 endforeach()
 
-target_link_libraries(phantom_video PRIVATE ${SDL2_LINK} ${FFMPEG_LIBS} sonic ${MPV_LIB} shell32 dwmapi msimg32
-  "${DEV_DIR}/sdl2_image/x86_64-w64-mingw32/lib/libSDL2_image.dll.a"
-  "${DEV_DIR}/sdl2_ttf/lib/libSDL2_ttf.dll.a")
+target_link_libraries(phantom_video PRIVATE ${SDL2_LINK} ${FFMPEG_LIBS} sonic ${MPV_LIB} shell32 dwmapi msimg32)
 
 # 拷贝运行时 DLL 到构建目录
 add_custom_command(TARGET phantom_video POST_BUILD
@@ -75,8 +73,6 @@ add_custom_command(TARGET phantom_video POST_BUILD
     "${FFMPEG_ROOT}/bin/swresample-7.dll"
     "${FFMPEG_ROOT}/bin/swscale-10.dll"
     "${DEV_DIR}/sdl2/x86_64-w64-mingw32/bin/SDL2.dll"
-    "${DEV_DIR}/sdl2_image/x86_64-w64-mingw32/bin/SDL2_image.dll"
-    "${DEV_DIR}/sdl2_ttf/bin/SDL2_ttf.dll"
     "${MPV_ROOT}/libmpv-2.dll"
     $<TARGET_FILE_DIR:phantom_video>
   COMMENT "拷贝运行时 DLL")
