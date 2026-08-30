@@ -36,9 +36,8 @@
 * **6 段音频均衡器**：60Hz/170Hz/310Hz/600Hz/3kHz/12kHz，5 种预设（平坦/低音/高音/人声/摇滚）
 * **多声道输出**：立体声 / 5.1 环绕 / 7.1 环绕 / 直通（Passthrough 到功放）
 * **高清音频直通**：DTS / Dolby Digital / TrueHD / DTS-HD MA 源码输出
-* **音量归一化**：EBU R128 标准 loudnorm（I=-16 LUFS）
 * **夜间模式**：acompressor 动态压缩，避免广告突然炸耳
-* **WASAPI 独占输出**：减少延迟和重采样
+* **WASAPI 独占输出**：减少延迟和重采样（默认关闭，设置面板可开启）
 
 ### 画面
 
@@ -122,10 +121,10 @@ subautoload=1       # 同名字幕自动加载 (fuzzy)
 thumbcache=1        # 缩略图磁盘缓存
 hwdecode=1          # 硬件解码
 zerocopy=0          # D3D11VA 零拷贝 (默认关, 有驱动风险)
-volnorm=0           # loudnorm 音量标准化
+volnorm=0           # 音量归一化 (已停用, 保留配置兼容)
 night=0             # 夜间模式 (acompressor)
-exclusive=0         # WASAPI 独占输出
-audioout=0          # 音频输出: 0=立体声 1=5.1 2=7.1 3=直通
+exclusive=0         # WASAPI 独占输出 (默认关)
+audioout=0          # 音频输出: 0=立体声 1=5.1 2=7.1 3=直通 (需重启生效)
 interp=0            # 运动插值 (display-resample)
 hiq=0               # 高质量缩放 (ewa_lanczossharp)
 pos=x,y,w,h         # 窗口位置记忆

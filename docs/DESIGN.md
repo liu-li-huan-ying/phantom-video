@@ -34,6 +34,11 @@
 - 播放器只需通过 `mpv_set_property` / `mpv_command` 控制 mpv
 - 通过 `mpv_observe_property` 监听状态变化（音量/速度/hwdec/EOF 等）
 
+**音频初始化注意事项：**
+- `audio-channels` 必须在 `mpv_initialize` 后立即设置，不可运行时变更（mpv 限制，运行时改需 `ao-reload`）
+- `audio-exclusive` 默认关闭（WASAPI 独占模式可能导致音频冻结）
+- 音频滤镜（`acompressor` 等）通过 `af` 属性设置，seek 时无瞬态噪声
+
 **线程模型（3 线程）：**
 
 | 线程 | 职责 |
@@ -118,6 +123,13 @@ Overlay 是 `WS_EX_TRANSPARENT`：
 - 视频区：overlay → mpv 子窗口 → parent
 - 控制栏：overlay → parent 直接处理
 
+### 4.3 系统对话框 Z-order
+
+系统对话框（`GetOpenFileNameW` / `SHBrowseForFolderW`）由 Windows 管理，Z-order 低于 `HWND_TOPMOST` 的 overlay：
+- 打开对话框前：`SetWindowPos(overlay, HWND_NOTOPMOST)` 临时取消 topmost
+- 对话框关闭后：`SetWindowPos(overlay, HWND_TOPMOST)` 恢复 topmost
+- **不用** `ShowWindow(SW_HIDE)` — 隐藏 overlay 会露出黑色的 mpv 子窗口背景
+
 ## 5. 状态管理
 
 ### 5.1 全局状态
@@ -141,21 +153,21 @@ Overlay 是 `WS_EX_TRANSPARENT`：
 
 ```
 src/
-├── main.cpp              主循环、配置、mpv 初始化
+├── main.cpp              主循环、配置、mpv 初始化、音频滤镜
 ├── app/
-│   ├── app_state.h       全局状态、缩放函数、i18n
+│   └── app_state.h       全局状态、缩放函数、i18n
 ├── core/
-│   ├── mpv_backend.h/cpp mpv 后端封装
-│   ├── config.h/cpp      配置读写
+│   ├── mpv_backend.h/cpp mpv 后端封装（init/loadFile/close/reinit）
+│   ├── config.h/cpp      配置读写（phantom.ini）
 │   ├── logger.h/cpp      统一日志
 │   └── thumbnail_extractor.h/cpp  缩略图提取
 └── ui/
-    ├── wndproc.h/cpp     Win32 窗口过程
-    ├── render_overlay.h/cpp  SDL overlay 渲染
-    ├── gdi_text.h/cpp    GDI 文字渲染
+    ├── wndproc.h/cpp     Win32 窗口过程（快捷键/设置面板点击）
+    ├── render_overlay.h/cpp  SDL overlay 渲染（控制栏/列表/面板）
+    ├── gdi_text.h/cpp    GDI 文字渲染（luma-alpha）
     ├── svgicon.h/cpp     SVG 图标光栅化
     ├── helpers.h/cpp     通用工具函数
-    ├── dialogs.h/cpp     Win32 对话框
+    ├── dialogs.h/cpp     Win32 对话框（文件/字幕/URL/文件夹）
     ├── ulw.h             UpdateLayeredWindow 封装
-    └── primitives.h/cpp  绘图基元
+    └── primitives.h/cpp  绘图基元（圆角矩形/圆点等）
 ```
