@@ -245,7 +245,7 @@ extern const QualityPreset QUALITY_PRESETS[];
 struct Row1Layout {
     SDL_Rect prev, play, next;
     int timeX;
-    SDL_Rect subBtn, audioBtn, chapterBtn, speedBtn, qualityBtn, setBtn, fullBtn;
+    SDL_Rect subBtn, audioBtn, chapterBtn, speedBtn, qualityBtn, abBtn, eqBtn, setBtn, fullBtn;
     int volIconCx;
     int volSliderX, volSliderW;
     int cy;

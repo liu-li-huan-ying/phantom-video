@@ -203,6 +203,8 @@ void layoutRow1(int w, int barTopY, bool volOpen, Row1Layout& L) {
     placeRight(L.subBtn, g_text.measureText(i18n::subtitles(), Tpt(12)) + U(26));
     placeRight(L.audioBtn, g_text.measureText(i18n::audioTrack(), Tpt(12)) + U(26));
     placeRight(L.chapterBtn, g_text.measureText(i18n::chapName(), Tpt(12)) + U(26));
+    placeRight(L.abBtn, U(38));   // AB loop: 固定宽度 "AB" 文字
+    placeRight(L.eqBtn, U(38));   // EQ: 固定宽度 "EQ" 文字
     // ����: �ȷŻ���(չ��̬), �ٷ�ͼ��; ������ͼ���Ҳ�
     L.volSliderW = volOpen ? U(80) : 0;
     if (volOpen) {

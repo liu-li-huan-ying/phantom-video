@@ -279,7 +279,7 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 break;
             }
             case VK_DELETE: {
-                // Delete: 锟接诧拷锟斤拷锟叫憋拷锟狡筹拷锟斤拷前锟斤拷
+                // Delete: 移除播放列表中当前项
                 if (g_mpv && g_mpv->hasMedia() && g_playlist.size() > 1) {
                     int curIdx = playlistIndexOf(g_mpv->path());
                     if (curIdx >= 0) {
@@ -293,6 +293,31 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 }
                 break;
             }
+            case 'H': {  // 上一曲
+                int idx = playlistIndexOf(g_mpv->path());
+                int n = (int)g_playlist.size();
+                if (idx > 0) { playIndex(idx - 1); showToast(T("上一曲", "Previous")); }
+                else showToast(i18n::noPrev());
+                break;
+            }
+            case 'J': {  // 下一曲
+                int idx = playlistIndexOf(g_mpv->path());
+                int n = (int)g_playlist.size();
+                if (idx >= 0 && idx + 1 < n) { playIndex(idx + 1); showToast(T("下一曲", "Next")); }
+                else showToast(i18n::noNext());
+                break;
+            }
+            case 'L':  // 播放列表开关
+                g_ui.playlistOpen = !g_ui.playlistOpen;
+                LOG_DBG("MAIN", "playlist toggle (key): %d", g_ui.playlistOpen ? 1 : 0);
+                break;
+            case VK_SNAPSHOT:  // PrintScreen: 截图
+                if (g_mpv && g_mpv->hasMedia()) {
+                    const char* cmd[] = { "screenshot", NULL };
+                    int r = mpv_command(g_mpv->mpv(), cmd);
+                    showToast(r < 0 ? i18n::screenshotFailed() : i18n::screenshotSaved());
+                }
+                break;
             } // switch (wp)
         } // if (g_mpv)
         g_ui.visible = true;
@@ -959,6 +984,22 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 } else {
                     showToast(T("无章节信息", "No chapters"));
                 }
+            }
+            else if (inRc(L.abBtn)) {
+                if (!g_mpv->looping()) {
+                    g_mpv->setLoopA();
+                    showToast(i18n::loopASet());
+                } else if (g_mpv->loopA() >= 0 && g_mpv->loopB() < 0) {
+                    g_mpv->setLoopB();
+                    showToast(i18n::loopActive());
+                } else {
+                    g_mpv->clearLoop();
+                    showToast(i18n::loopCleared());
+                }
+            }
+            else if (inRc(L.eqBtn)) {
+                g_ui.eqMenuOpen = !g_ui.eqMenuOpen;
+                g_ui.eqDraggingBand = -1;
             }
             else if (inRc(L.qualityBtn)) {
                 g_ui.qualityMenuOpen = !g_ui.qualityMenuOpen;

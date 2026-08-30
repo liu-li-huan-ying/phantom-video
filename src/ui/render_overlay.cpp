@@ -936,7 +936,23 @@ void renderOverlay() {
             Uint8 ic = g_mpv->chapters().size() > 1 ? 255 : 110;
             drawTextBtn(L.chapterBtn, i18n::chapName(), "list", ic, ic, ic);
         }
-        // ����
+        // AB loop
+        {
+            bool abActive = g_mpv->looping();
+            Uint8 r = abActive ? ui::ACCENT2_R : ui::TEXT_DIM;
+            Uint8 gv = abActive ? ui::ACCENT2_G : ui::TEXT_DIM;
+            Uint8 b = abActive ? ui::ACCENT2_B : ui::TEXT_DIM + 5;
+            g_text.drawText(L.abBtn.x + U(8), L.abBtn.y + U(10), "AB", Tpt(12), r, gv, b);
+        }
+        // EQ
+        {
+            bool eqOn = g_mpv->eqEnabled();
+            Uint8 r = eqOn ? ui::ACCENT2_R : ui::TEXT_DIM;
+            Uint8 gv = eqOn ? ui::ACCENT2_G : ui::TEXT_DIM;
+            Uint8 b = eqOn ? ui::ACCENT2_B : ui::TEXT_DIM + 5;
+            g_text.drawText(L.eqBtn.x + U(8), L.eqBtn.y + U(10), "EQ", Tpt(12), r, gv, b);
+        }
+        // speed
         {
             char spd[16];
             float s = g_mpv->speed();
