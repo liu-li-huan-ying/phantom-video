@@ -128,6 +128,9 @@ bool MpvBackend::init(HWND hwnd, bool enableZeroCopy) {
     mpv_observe_property(mpv_, 11, "eof-reached", MPV_FORMAT_FLAG);
 
     running_.store(true);
+    hasMedia_.store(false);
+    state_.store(State::Idle);
+    path_.clear();
     eventThread_ = std::thread(&MpvBackend::eventLoop, this);
 
     LOG_INFO("MPV", "mpv backend initialized, hwdec=%s zero_copy=%d",
