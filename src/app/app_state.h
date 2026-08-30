@@ -111,6 +111,9 @@ struct UiState {
     // OSD info overlay
     bool   osdActive = false;
     Uint32 osdStart  = 0;
+
+    // Shortcuts help overlay
+    bool   shortcutsOpen = false;
 };
 
 // ---- extern globals (defined in main.cpp) ----

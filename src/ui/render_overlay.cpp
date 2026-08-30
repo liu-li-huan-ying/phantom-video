@@ -1752,5 +1752,76 @@ void renderOverlay() {
         }
     }
 
+    // --- Shortcuts help overlay (? key) ---
+    if (g_ui.shortcutsOpen) {
+        // Semi-transparent backdrop
+        SDL_SetRenderDrawBlendMode(g_sdlRdr, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(g_sdlRdr, 0, 0, 0, 180);
+        SDL_Rect fullBg = {0, 0, w, h};
+        SDL_RenderFillRect(g_sdlRdr, &fullBg);
+
+        int panelW = U(480), panelH = U(520);
+        int px = (w - panelW) / 2, py = (h - panelH) / 2;
+        int cr = U(10);
+        // Panel background
+        SDL_SetRenderDrawColor(g_sdlRdr, 20, 20, 22, 245);
+        SDL_Rect bgRc = {px + cr, py, panelW - cr * 2, panelH};
+        SDL_RenderFillRect(g_sdlRdr, &bgRc);
+        SDL_Rect midH = {px, py + cr, panelW, panelH - cr * 2};
+        SDL_RenderFillRect(g_sdlRdr, &midH);
+        fillCircle(g_sdlRdr, px + cr, py + cr, cr, 20, 20, 22, 245);
+        fillCircle(g_sdlRdr, px + panelW - cr, py + cr, cr, 20, 20, 22, 245);
+        fillCircle(g_sdlRdr, px + cr, py + panelH - cr, cr, 20, 20, 22, 245);
+        fillCircle(g_sdlRdr, px + panelW - cr, py + panelH - cr, cr, 20, 20, 22, 245);
+
+        // Title
+        g_text.drawText(px + U(20), py + U(16), T("快捷键", "Shortcuts"), Tpt(16), 255, 255, 255);
+
+        // Close hint
+        g_text.drawText(px + panelW - U(80), py + U(18), T("按 ? 关闭", "Press ? to close"), Tpt(10), 140, 140, 148);
+
+        // Shortcut list (two columns)
+        struct Shortcut { const char* key; const char* desc; };
+        static const Shortcut shortcuts[] = {
+            { "Space",     T("播放/暂停", "Play/Pause") },
+            { "F",         T("全屏切换", "Fullscreen") },
+            { "M",         T("静音切换", "Mute") },
+            { "Left/Right", T("快退/快进 5s", "Seek -5s/+5s") },
+            { "N / P",     T("快进/快退 10s", "Seek +10s/-10s") },
+            { "Up / Down", T("音量 +/-5%", "Volume +/-5%") },
+            { "[ / ]",     T("变速 -/+0.25x", "Speed -/+0.25x") },
+            { "H / J",     T("上一曲/下一曲", "Prev/Next track") },
+            { "A",         T("AB 循环", "AB Loop") },
+            { "C / S",     T("字幕开关", "Toggle subtitles") },
+            { "X / Z",     T("字幕延迟 -/+0.5s", "Sub delay -/+0.5s") },
+            { "B",         T("字幕位置循环", "Sub position cycle") },
+            { "V",         T("音轨切换", "Cycle audio track") },
+            { "G",         T("下一章节", "Next chapter") },
+            { "D",         T("去色带等级", "Deband level") },
+            { "R",         T("画面比例循环", "Cycle aspect ratio") },
+            { "E",         T("均衡器开关", "EQ toggle") },
+            { "I",         T("信息叠加层", "Info overlay") },
+            { "L",         T("播放列表开关", "Toggle playlist") },
+            { "Ctrl+O",    T("打开文件", "Open file") },
+            { "Ctrl+U",    T("打开 URL", "Open URL") },
+            { "Insert",    T("添加到列表", "Add to playlist") },
+            { "Delete",    T("从列表移除", "Remove from playlist") },
+            { "Ctrl+Shift+Del", T("清除播放历史", "Clear history") },
+            { "PrintScreen", T("截图", "Screenshot") },
+        };
+        static const int kSCCount = (int)(sizeof(shortcuts) / sizeof(shortcuts[0]));
+        int colW = panelW / 2 - U(20);
+        int lineH = U(18);
+        int startY = py + U(50);
+        for (int i = 0; i < kSCCount; ++i) {
+            int col = i / 12;
+            int row = i % 12;
+            int sx = px + U(20) + col * colW;
+            int sy = startY + row * lineH;
+            g_text.drawText(sx, sy, shortcuts[i].key, Tpt(10), ui::ACCENT2_R, ui::ACCENT2_G, ui::ACCENT2_B);
+            g_text.drawText(sx + U(90), sy, shortcuts[i].desc, Tpt(10), 200, 200, 206);
+        }
+    }
+
     overlayPresent();
 }

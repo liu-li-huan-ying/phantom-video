@@ -243,15 +243,27 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 showToast(msg);
                 break;
             }
+            case 'R': {  // 画面比例循环
+                g_mpv->cycleAspectRatio();
+                const char* names[] = {"auto", "16:9", "4:3", "1:1"};
+                char msg[32];
+                std::snprintf(msg, sizeof(msg), "%s: %s", T("比例", "Ratio"), names[g_mpv->aspectRatioIndex()]);
+                showToast(msg);
+                break;
+            }
             case 'E': {  // 锟斤拷频锟斤拷锟斤拷锟斤拷: 锟斤拷/锟截闭碉拷锟斤拷
                 g_ui.eqMenuOpen = !g_ui.eqMenuOpen;
                 g_ui.eqDraggingBand = -1;
                 break;
             }
             case VK_ESCAPE:
-                if (g_ui.speedMenuOpen) g_ui.speedMenuOpen = false;
+                if (g_ui.shortcutsOpen) g_ui.shortcutsOpen = false;
+                else if (g_ui.speedMenuOpen) g_ui.speedMenuOpen = false;
                 else if (g_ui.eqMenuOpen) g_ui.eqMenuOpen = false;
                 else if (g_ui.volumeSliderOpen) g_ui.volumeSliderOpen = false;
+                break;
+            case VK_OEM_2:  // ? key (Shift + /)
+                g_ui.shortcutsOpen = !g_ui.shortcutsOpen;
                 break;
             case 'F':
                 toggleFullscreen(hwnd);
@@ -283,8 +295,18 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 break;
             }
             case VK_DELETE: {
-                // Delete: 移除播放列表中当前项
-                if (g_mpv && g_mpv->hasMedia() && g_playlist.size() > 1) {
+                bool ctrl = GetKeyState(VK_CONTROL) & 0x8000;
+                bool shift = GetKeyState(VK_SHIFT) & 0x8000;
+                if (ctrl && shift) {
+                    // Ctrl+Shift+Delete: 清除全部播放历史
+                    int n = g_cfg.historyCount();
+                    g_cfg.clearHistory();
+                    saveConfig(configPath(), g_cfg);
+                    char msg[64];
+                    std::snprintf(msg, sizeof(msg), "%s (%d %s)", T("已清除播放历史", "History cleared"), n, T("条", "items"));
+                    showToast(msg);
+                } else if (g_mpv && g_mpv->hasMedia() && g_playlist.size() > 1) {
+                    // Delete: 移除播放列表中当前项
                     int curIdx = playlistIndexOf(g_mpv->path());
                     if (curIdx >= 0) {
                         std::string fn = fileNameOf(g_playlist[curIdx]);

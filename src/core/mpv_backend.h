@@ -89,6 +89,12 @@ public:
     void setDebandLevel(int level);        // 0=关 1=轻 2=中 3=强
     int  debandLevel() const;
 
+    // ---- 画面比例 ----
+    void cycleAspectRatio();                // 循环: auto → 16:9 → 4:3 → 1:1 → auto
+    int  aspectRatioIndex() const { return aspectIdx_; }
+    static constexpr const char* ASPECT_NAMES[] = {"auto", "16:9", "4:3", "1:1"};
+    static constexpr int ASPECT_COUNT = 4;
+
     // ---- 音频均衡器 ----
     struct EQBand { const char* freq; float gain; };  // gain: -12..+12 dB
     void setEQBand(int band, float gain);  // band 0-5
@@ -154,6 +160,7 @@ private:
     double loopA_ = -1.0;                   // AB 循环 A 点
     double loopB_ = -1.0;                   // AB 循环 B 点
     int    debandLevel_ = 2;                // 去色带等级 0-3
+    int    aspectIdx_ = 0;                  // 画面比例索引 0=auto 1=16:9 2=4:3 3=1:1
     bool   eqEnabled_ = false;              // 均衡器开关
     float  eqGains_[6] = {};                // 均衡器 6 频段增益
 };

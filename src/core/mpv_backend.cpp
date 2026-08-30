@@ -542,6 +542,15 @@ int MpvBackend::debandLevel() const {
     return debandLevel_;
 }
 
+// ---- 画面比例 ----
+void MpvBackend::cycleAspectRatio() {
+    if (!mpv_) return;
+    aspectIdx_ = (aspectIdx_ + 1) % ASPECT_COUNT;
+    const char* ratios[] = {"auto", "16:9", "4:3", "1:1"};
+    mpv_set_property_string(mpv_, "video-aspect-override", ratios[aspectIdx_]);
+    LOG_INFO("MPV", "aspect ratio -> %s", ratios[aspectIdx_]);
+}
+
 // ---- 音频均衡器 ----
 // 6 频段: 60Hz, 170Hz, 310Hz, 600Hz, 3kHz, 12kHz
 void MpvBackend::setEQBand(int band, float gain) {
