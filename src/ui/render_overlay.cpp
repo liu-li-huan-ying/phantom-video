@@ -1717,90 +1717,177 @@ void renderOverlay() {
         if (SDL_GetTicks() - g_ui.osdStart > 8000) {
             g_ui.osdActive = false;
         } else {
-            std::string vfmt   = mpvStr("video-format");
-            std::string vcodec = mpvStr("video-codec");
-            std::string vfps   = mpvStr("container-fps");
-            std::string vflops = mpvStr("video-params/fps");
-            std::string dfps   = mpvStr("display-fps");
-            std::string vbr    = formatBitrate(mpvStr("video-bitrate"));
-            std::string afmt   = mpvStr("audio-codec-name");
-            std::string asr    = mpvStr("audio-params/samplerate");
-            std::string ach    = mpvStr("audio-params/channel-count");
-            std::string hwdec  = mpvStr("hwdec-current");
-            std::string vf     = mpvStr("vf");
+            // ===== 所有数据直接查询 mpv 属性，无任何伪造 =====
+            std::string vcodec   = mpvStr("video-codec");
+            std::string vfmt     = mpvStr("video-format");
+            std::string vparams  = mpvStr("video-params/pixelformat");
+            std::string vfps     = mpvStr("video-params/fps");        // 视频流实际帧率
+            std::string cfps     = mpvStr("container-fps");           // 容器元数据帧率
+            std::string dfps     = mpvStr("display-fps");             // 显示器刷新率
+            std::string evfps    = mpvStr("estimated-vf-fps");        // 滤镜后预估帧率
+            std::string vbr      = mpvStr("video-bitrate");           // 视频码率 bps
+            std::string abr      = mpvStr("audio-bitrate");           // 音频码率
+            std::string acodec   = mpvStr("audio-codec");
+            std::string afmt    = mpvStr("audio-codec-name");
+            std::string asr     = mpvStr("audio-params/samplerate");
+            std::string ach     = mpvStr("audio-params/channel-count");
+            std::string apfmt   = mpvStr("audio-params/format");     // 音频采样格式
+            std::string hwdec   = mpvStr("hwdec-current");
+            std::string hwdesc  = mpvStr("hwdec-interop");           // hwdec 实际实现名
+            std::string vf      = mpvStr("vf");                      // 视频滤镜链
+            std::string af      = mpvStr("af");                      // 音频滤镜链
+            std::string speed   = mpvStr("speed");
+            std::string vol     = mpvStr("volume");
+            std::string mute    = mpvStr("mute");
+            std::string pos     = mpvStr("time-pos");
+            std::string dur     = mpvStr("duration");
+            std::string paused  = mpvStr("pause");
+            std::string title   = mpvStr("media-title");
+            std::string format  = mpvStr("file-format");             // 容器格式
+            std::string vwidth  = mpvStr("width");
+            std::string vheight = mpvStr("height");
+            std::string aspect  = mpvStr("video-aspect-override");
+
             int vw = g_mpv->videoWidth(), vh = g_mpv->videoHeight();
 
-            bool vsActive = !vf.empty();
+            // ===== 格式化每一行 =====
+            char lines_buf[12][256] = {};
+            int lineCount = 0;
 
-            // 第1行: 编解码 + 分辨率
-            char line1[128] = {};
-            if (!vfmt.empty())
-                std::snprintf(line1, sizeof(line1), "%s  %dx%d", vfmt.c_str(), vw, vh);
+            // 1. 标题
+            if (!title.empty())
+                std::snprintf(lines_buf[lineCount], 256, "%s", title.c_str()), lineCount++;
 
-            // 第2行: 帧率信息 — 清晰区分源帧率和显示器刷新率
-            char line2[160] = {};
+            // 2. 视频编码 + 分辨率 + 像素格式
             {
-                const char* srcFps = !vflops.empty() ? vflops.c_str() : (!vfps.empty() ? vfps.c_str() : "?");
-                const char* dispFps = dfps.empty() ? "?" : dfps.c_str();
-                std::snprintf(line2, sizeof(line2), "src: %s fps | display: %s Hz%s",
-                    srcFps, dispFps,
-                    vsActive ? " | VS ON" : "");
+                char* p = lines_buf[lineCount];
+                int n = 0;
+                if (!vcodec.empty()) n += std::snprintf(p+n, 256-n, "%s", vcodec.c_str());
+                if (!vfmt.empty())   n += std::snprintf(p+n, 256-n, " [%s]", vfmt.c_str());
+                if (vw > 0 && vh > 0) n += std::snprintf(p+n, 256-n, "  %dx%d", vw, vh);
+                if (!vparams.empty()) n += std::snprintf(p+n, 256-n, " %s", vparams.c_str());
+                if (n > 0) lineCount++;
             }
 
-            // 第3行: 码率
-            char line3[96] = {};
-            if (!vbr.empty()) std::snprintf(line3, sizeof(line3), "%s", vbr.c_str());
-
-            // 第4行: 音频
-            char line4[96] = {};
-            if (!afmt.empty()) {
-                int sr = std::atoi(asr.c_str());
-                std::snprintf(line4, sizeof(line4), "%s %s Hz %sch",
-                    afmt.c_str(),
-                    sr > 0 ? asr.c_str() : "?",
-                    ach.empty() ? "?" : ach.c_str());
+            // 3. 帧率: 三个真实值并列
+            {
+                char* p = lines_buf[lineCount];
+                int n = 0;
+                if (!vfps.empty())  n += std::snprintf(p+n, 256-n, "stream: %s", vfps.c_str());
+                if (!cfps.empty())  n += std::snprintf(p+n, 256-n, "  container: %s", cfps.c_str());
+                if (!dfps.empty())  n += std::snprintf(p+n, 256-n, "  display: %s Hz", dfps.c_str());
+                if (n > 0) lineCount++;
             }
 
-            // 第5行: 硬件解码 + 滤镜链
-            char line5[128] = {};
+            // 4. 滤镜后帧率 (仅当与源帧率不同时显示，表示有插帧或滤镜)
+            if (!evfps.empty() && evfps != vfps) {
+                std::snprintf(lines_buf[lineCount], 256, "vf-fps (estimated): %s", evfps.c_str());
+                lineCount++;
+            }
+
+            // 5. 码率
+            {
+                char* p = lines_buf[lineCount];
+                int n = 0;
+                if (!vbr.empty()) {
+                    long long bps = std::atoll(vbr.c_str());
+                    if (bps >= 1000000) n += std::snprintf(p+n, 256-n, "video: %.1f Mbps", bps / 1000000.0);
+                    else if (bps > 0)  n += std::snprintf(p+n, 256-n, "video: %d kbps", (int)(bps / 1000));
+                }
+                if (!abr.empty()) {
+                    long long bps = std::atoll(abr.c_str());
+                    if (n > 0) n += std::snprintf(p+n, 256-n, "  ");
+                    if (bps >= 1000) n += std::snprintf(p+n, 256-n, "audio: %d kbps", (int)(bps / 1000));
+                }
+                if (n > 0) lineCount++;
+            }
+
+            // 6. 音频
+            {
+                char* p = lines_buf[lineCount];
+                int n = 0;
+                if (!afmt.empty()) n += std::snprintf(p+n, 256-n, "%s", afmt.c_str());
+                if (!asr.empty())  n += std::snprintf(p+n, 256-n, " %s Hz", asr.c_str());
+                if (!ach.empty())  n += std::snprintf(p+n, 256-n, " %sch", ach.c_str());
+                if (!apfmt.empty()) n += std::snprintf(p+n, 256-n, " %s", apfmt.c_str());
+                if (n > 0) lineCount++;
+            }
+
+            // 7. 硬件解码
             if (!hwdec.empty() && hwdec != "no") {
-                std::snprintf(line5, sizeof(line5), "hwdec: %s%s",
-                    hwdec.c_str(),
-                    g_mpv->hwdecRetryCount() > 0 ? " (fallback)" : "");
+                char* p = lines_buf[lineCount];
+                int n = std::snprintf(p, 256, "hwdec: %s", hwdec.c_str());
+                if (!hwdesc.empty() && hwdesc != hwdec)
+                    n += std::snprintf(p+n, 256-n, " (%s)", hwdesc.c_str());
+                if (g_mpv->hwdecRetryCount() > 0)
+                    n += std::snprintf(p+n, 256-n, " [fallback #%d]", g_mpv->hwdecRetryCount());
+                lineCount++;
             }
 
-            // 第6行: VapourSynth 滤镜详情
-            char line6[160] = {};
-            if (vsActive) {
-                // 截取 vf 前 80 字符显示
-                std::string vfShort = vf.length() > 80 ? vf.substr(0, 80) + "..." : vf;
-                std::snprintf(line6, sizeof(line6), "vf: %s", vfShort.c_str());
+            // 8. 速度 + 音量
+            {
+                char* p = lines_buf[lineCount];
+                int n = 0;
+                if (!speed.empty()) n += std::snprintf(p+n, 256-n, "speed: %sx", speed.c_str());
+                if (!vol.empty())   n += std::snprintf(p+n, 256-n, "  vol: %s%%", vol.c_str());
+                if (!mute.empty() && mute == "yes") n += std::snprintf(p+n, 256-n, "  [MUTED]");
+                if (n > 0) lineCount++;
             }
 
-            int lines = 0;
-            if (line1[0]) ++lines;
-            if (line2[0]) ++lines;
-            if (line3[0]) ++lines;
-            if (line4[0]) ++lines;
-            if (line5[0]) ++lines;
-            if (line6[0]) ++lines;
-            if (lines > 0) {
-                int padX = U(14), padY = U(10), lineH = U(22);
-                int boxW = U(420), boxH = padY * 2 + lines * lineH;
+            // 9. 进度
+            if (!pos.empty() || !dur.empty()) {
+                char* p = lines_buf[lineCount];
+                int n = 0;
+                double pSec = std::atof(pos.c_str());
+                double dSec = std::atof(dur.c_str());
+                int pm = (int)(pSec / 60), ps = (int)pSec % 60;
+                int dm = (int)(dSec / 60), ds = (int)dSec % 60;
+                n += std::snprintf(p+n, 256-n, "%d:%02d", pm, ps);
+                if (dSec > 0) n += std::snprintf(p+n, 256-n, " / %d:%02d", dm, ds);
+                if (!paused.empty() && paused == "yes") n += std::snprintf(p+n, 256-n, "  [PAUSED]");
+                lineCount++;
+            }
+
+            // 10. 容器格式
+            if (!format.empty()) {
+                std::snprintf(lines_buf[lineCount], 256, "container: %s", format.c_str());
+                lineCount++;
+            }
+
+            // 11. 视频滤镜链
+            if (!vf.empty()) {
+                std::string vfShow = vf.length() > 120 ? vf.substr(0, 120) + "..." : vf;
+                std::snprintf(lines_buf[lineCount], 256, "vf: %s", vfShow.c_str());
+                lineCount++;
+            }
+
+            // 12. 音频滤镜链
+            if (!af.empty()) {
+                std::string afShow = af.length() > 120 ? af.substr(0, 120) + "..." : af;
+                std::snprintf(lines_buf[lineCount], 256, "af: %s", afShow.c_str());
+                lineCount++;
+            }
+
+            // ===== 渲染 =====
+            if (lineCount > 0) {
+                int padX = U(14), padY = U(10), lineH = U(20);
+                int boxW = U(480), boxH = padY * 2 + lineCount * lineH;
                 int boxX = U(16), boxY = curTopH() + U(12);
                 SDL_Rect bg = {boxX, boxY, boxW, boxH};
-                SDL_SetRenderDrawColor(g_sdlRdr, 11, 11, 11, 200);
+                SDL_SetRenderDrawColor(g_sdlRdr, 11, 11, 11, 210);
                 SDL_RenderFillRect(g_sdlRdr, &bg);
                 SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 30);
                 SDL_RenderDrawRect(g_sdlRdr, &bg);
 
                 int ty = boxY + padY;
-                if (line1[0]) { g_text.drawText(boxX + padX, ty, line1, Tpt(12), 255, 255, 255); ty += lineH; }
-                if (line2[0]) { g_text.drawText(boxX + padX, ty, line2, Tpt(12), ui::ACCENT2_R, ui::ACCENT2_G, ui::ACCENT2_B); ty += lineH; }
-                if (line3[0]) { g_text.drawText(boxX + padX, ty, line3, Tpt(12), ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B); ty += lineH; }
-                if (line4[0]) { g_text.drawText(boxX + padX, ty, line4, Tpt(12), ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B); ty += lineH; }
-                if (line5[0]) { g_text.drawText(boxX + padX, ty, line5, Tpt(12), 0, 200, 120); ty += lineH; }
-                if (line6[0]) { g_text.drawText(boxX + padX, ty, line6, Tpt(11), 180, 180, 180); }
+                for (int i = 0; i < lineCount; ++i) {
+                    // 第0行白色(标题), 第1行白色(编码), 其余灰色调
+                    if (i <= 1)
+                        g_text.drawText(boxX + padX, ty, lines_buf[i], Tpt(11), 255, 255, 255);
+                    else
+                        g_text.drawText(boxX + padX, ty, lines_buf[i], Tpt(11), 200, 200, 200);
+                    ty += lineH;
+                }
             }
         }
     }
