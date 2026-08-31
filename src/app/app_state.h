@@ -254,6 +254,24 @@ namespace i18n {
     inline const char* gmPerceptual()  { return T("感知", "Perceptual"); }
     inline const char* gmClip()        { return T("裁剪", "Clip"); }
     inline const char* gmRelative()    { return T("相对色度", "Relative"); }
+
+    // OSD 信息面板标签
+    inline const char* osdStream()     { return T("流", "stream"); }
+    inline const char* osdContainer()  { return T("容器", "container"); }
+    inline const char* osdDisplay()    { return T("显示器", "display"); }
+    inline const char* osdVfFps()      { return T("滤镜帧率", "vf-fps"); }
+    inline const char* osdVideo()      { return T("视频码率", "video"); }
+    inline const char* osdAudio()      { return T("音频码率", "audio"); }
+    inline const char* osdSpeed()      { return T("倍速", "speed"); }
+    inline const char* osdVol()        { return T("音量", "vol"); }
+    inline const char* osdMuted()      { return T("已静音", "MUTED"); }
+    inline const char* osdPaused()     { return T("已暂停", "PAUSED"); }
+    inline const char* osdHwdec()      { return T("硬件解码", "hwdec"); }
+    inline const char* osdFallback()   { return T("降级", "fallback"); }
+    inline const char* osdVfChain()    { return T("视频滤镜", "vf"); }
+    inline const char* osdAfChain()    { return T("音频滤镜", "af"); }
+    inline const char* osdPixelFmt()   { return T("像素格式", "pixfmt"); }
+    inline const char* osdContainerFmt() { return T("容器格式", "container"); }
 }
 
 // ---- format helpers ----

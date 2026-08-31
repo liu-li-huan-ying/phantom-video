@@ -1721,21 +1721,20 @@ void renderOverlay() {
             std::string vcodec   = mpvStr("video-codec");
             std::string vfmt     = mpvStr("video-format");
             std::string vparams  = mpvStr("video-params/pixelformat");
-            std::string vfps     = mpvStr("video-params/fps");        // 视频流实际帧率
-            std::string cfps     = mpvStr("container-fps");           // 容器元数据帧率
-            std::string dfps     = mpvStr("display-fps");             // 显示器刷新率
-            std::string evfps    = mpvStr("estimated-vf-fps");        // 滤镜后预估帧率
-            std::string vbr      = mpvStr("video-bitrate");           // 视频码率 bps
-            std::string abr      = mpvStr("audio-bitrate");           // 音频码率
-            std::string acodec   = mpvStr("audio-codec");
+            std::string vfps     = mpvStr("video-params/fps");
+            std::string cfps     = mpvStr("container-fps");
+            std::string dfps     = mpvStr("display-fps");
+            std::string evfps    = mpvStr("estimated-vf-fps");
+            std::string vbr      = mpvStr("video-bitrate");
+            std::string abr      = mpvStr("audio-bitrate");
             std::string afmt    = mpvStr("audio-codec-name");
             std::string asr     = mpvStr("audio-params/samplerate");
             std::string ach     = mpvStr("audio-params/channel-count");
-            std::string apfmt   = mpvStr("audio-params/format");     // 音频采样格式
+            std::string apfmt   = mpvStr("audio-params/format");
             std::string hwdec   = mpvStr("hwdec-current");
-            std::string hwdesc  = mpvStr("hwdec-interop");           // hwdec 实际实现名
-            std::string vf      = mpvStr("vf");                      // 视频滤镜链
-            std::string af      = mpvStr("af");                      // 音频滤镜链
+            std::string hwdesc  = mpvStr("hwdec-interop");
+            std::string vf      = mpvStr("vf");
+            std::string af      = mpvStr("af");
             std::string speed   = mpvStr("speed");
             std::string vol     = mpvStr("volume");
             std::string mute    = mpvStr("mute");
@@ -1743,15 +1742,12 @@ void renderOverlay() {
             std::string dur     = mpvStr("duration");
             std::string paused  = mpvStr("pause");
             std::string title   = mpvStr("media-title");
-            std::string format  = mpvStr("file-format");             // 容器格式
-            std::string vwidth  = mpvStr("width");
-            std::string vheight = mpvStr("height");
-            std::string aspect  = mpvStr("video-aspect-override");
+            std::string format  = mpvStr("file-format");
 
             int vw = g_mpv->videoWidth(), vh = g_mpv->videoHeight();
 
-            // ===== 格式化每一行 =====
-            char lines_buf[12][256] = {};
+            // ===== 格式化每一行，标签跟随 i18n 语言 =====
+            char lines_buf[14][256] = {};
             int lineCount = 0;
 
             // 1. 标题
@@ -1769,19 +1765,20 @@ void renderOverlay() {
                 if (n > 0) lineCount++;
             }
 
-            // 3. 帧率: 三个真实值并列
+            // 3. 帧率: stream / container / display
             {
                 char* p = lines_buf[lineCount];
                 int n = 0;
-                if (!vfps.empty())  n += std::snprintf(p+n, 256-n, "stream: %s", vfps.c_str());
-                if (!cfps.empty())  n += std::snprintf(p+n, 256-n, "  container: %s", cfps.c_str());
-                if (!dfps.empty())  n += std::snprintf(p+n, 256-n, "  display: %s Hz", dfps.c_str());
+                if (!vfps.empty())  n += std::snprintf(p+n, 256-n, "%s: %s", i18n::osdStream(), vfps.c_str());
+                if (!cfps.empty())  n += std::snprintf(p+n, 256-n, "  %s: %s", i18n::osdContainer(), cfps.c_str());
+                if (!dfps.empty())  n += std::snprintf(p+n, 256-n, "  %s: %s Hz", i18n::osdDisplay(), dfps.c_str());
                 if (n > 0) lineCount++;
             }
 
-            // 4. 滤镜后帧率 (仅当与源帧率不同时显示，表示有插帧或滤镜)
+            // 4. 滤镜后帧率 (仅当 != stream fps 时)
             if (!evfps.empty() && evfps != vfps) {
-                std::snprintf(lines_buf[lineCount], 256, "vf-fps (estimated): %s", evfps.c_str());
+                std::snprintf(lines_buf[lineCount], 256, "%s (%s): %s",
+                    i18n::osdVfFps(), T("估算", "estimated"), evfps.c_str());
                 lineCount++;
             }
 
@@ -1791,13 +1788,13 @@ void renderOverlay() {
                 int n = 0;
                 if (!vbr.empty()) {
                     long long bps = std::atoll(vbr.c_str());
-                    if (bps >= 1000000) n += std::snprintf(p+n, 256-n, "video: %.1f Mbps", bps / 1000000.0);
-                    else if (bps > 0)  n += std::snprintf(p+n, 256-n, "video: %d kbps", (int)(bps / 1000));
+                    if (bps >= 1000000) n += std::snprintf(p+n, 256-n, "%s: %.1f Mbps", i18n::osdVideo(), bps / 1000000.0);
+                    else if (bps > 0)  n += std::snprintf(p+n, 256-n, "%s: %d kbps", i18n::osdVideo(), (int)(bps / 1000));
                 }
                 if (!abr.empty()) {
                     long long bps = std::atoll(abr.c_str());
                     if (n > 0) n += std::snprintf(p+n, 256-n, "  ");
-                    if (bps >= 1000) n += std::snprintf(p+n, 256-n, "audio: %d kbps", (int)(bps / 1000));
+                    if (bps >= 1000) n += std::snprintf(p+n, 256-n, "%s: %d kbps", i18n::osdAudio(), (int)(bps / 1000));
                 }
                 if (n > 0) lineCount++;
             }
@@ -1808,7 +1805,7 @@ void renderOverlay() {
                 int n = 0;
                 if (!afmt.empty()) n += std::snprintf(p+n, 256-n, "%s", afmt.c_str());
                 if (!asr.empty())  n += std::snprintf(p+n, 256-n, " %s Hz", asr.c_str());
-                if (!ach.empty())  n += std::snprintf(p+n, 256-n, " %sch", ach.c_str());
+                if (!ach.empty())  n += std::snprintf(p+n, 256-n, " %s", T("声道", "ch"));
                 if (!apfmt.empty()) n += std::snprintf(p+n, 256-n, " %s", apfmt.c_str());
                 if (n > 0) lineCount++;
             }
@@ -1816,11 +1813,11 @@ void renderOverlay() {
             // 7. 硬件解码
             if (!hwdec.empty() && hwdec != "no") {
                 char* p = lines_buf[lineCount];
-                int n = std::snprintf(p, 256, "hwdec: %s", hwdec.c_str());
+                int n = std::snprintf(p, 256, "%s: %s", i18n::osdHwdec(), hwdec.c_str());
                 if (!hwdesc.empty() && hwdesc != hwdec)
                     n += std::snprintf(p+n, 256-n, " (%s)", hwdesc.c_str());
                 if (g_mpv->hwdecRetryCount() > 0)
-                    n += std::snprintf(p+n, 256-n, " [fallback #%d]", g_mpv->hwdecRetryCount());
+                    n += std::snprintf(p+n, 256-n, " [%s #%d]", i18n::osdFallback(), g_mpv->hwdecRetryCount());
                 lineCount++;
             }
 
@@ -1828,9 +1825,9 @@ void renderOverlay() {
             {
                 char* p = lines_buf[lineCount];
                 int n = 0;
-                if (!speed.empty()) n += std::snprintf(p+n, 256-n, "speed: %sx", speed.c_str());
-                if (!vol.empty())   n += std::snprintf(p+n, 256-n, "  vol: %s%%", vol.c_str());
-                if (!mute.empty() && mute == "yes") n += std::snprintf(p+n, 256-n, "  [MUTED]");
+                if (!speed.empty()) n += std::snprintf(p+n, 256-n, "%s: %sx", i18n::osdSpeed(), speed.c_str());
+                if (!vol.empty())   n += std::snprintf(p+n, 256-n, "  %s: %s%%", i18n::osdVol(), vol.c_str());
+                if (!mute.empty() && mute == "yes") n += std::snprintf(p+n, 256-n, "  [%s]", i18n::osdMuted());
                 if (n > 0) lineCount++;
             }
 
@@ -1844,34 +1841,34 @@ void renderOverlay() {
                 int dm = (int)(dSec / 60), ds = (int)dSec % 60;
                 n += std::snprintf(p+n, 256-n, "%d:%02d", pm, ps);
                 if (dSec > 0) n += std::snprintf(p+n, 256-n, " / %d:%02d", dm, ds);
-                if (!paused.empty() && paused == "yes") n += std::snprintf(p+n, 256-n, "  [PAUSED]");
+                if (!paused.empty() && paused == "yes") n += std::snprintf(p+n, 256-n, "  [%s]", i18n::osdPaused());
                 lineCount++;
             }
 
             // 10. 容器格式
             if (!format.empty()) {
-                std::snprintf(lines_buf[lineCount], 256, "container: %s", format.c_str());
+                std::snprintf(lines_buf[lineCount], 256, "%s: %s", i18n::osdContainerFmt(), format.c_str());
                 lineCount++;
             }
 
             // 11. 视频滤镜链
             if (!vf.empty()) {
-                std::string vfShow = vf.length() > 120 ? vf.substr(0, 120) + "..." : vf;
-                std::snprintf(lines_buf[lineCount], 256, "vf: %s", vfShow.c_str());
+                std::string vfShow = vf.length() > 100 ? vf.substr(0, 100) + "..." : vf;
+                std::snprintf(lines_buf[lineCount], 256, "%s: %s", i18n::osdVfChain(), vfShow.c_str());
                 lineCount++;
             }
 
             // 12. 音频滤镜链
             if (!af.empty()) {
-                std::string afShow = af.length() > 120 ? af.substr(0, 120) + "..." : af;
-                std::snprintf(lines_buf[lineCount], 256, "af: %s", afShow.c_str());
+                std::string afShow = af.length() > 100 ? af.substr(0, 100) + "..." : af;
+                std::snprintf(lines_buf[lineCount], 256, "%s: %s", i18n::osdAfChain(), afShow.c_str());
                 lineCount++;
             }
 
             // ===== 渲染 =====
             if (lineCount > 0) {
                 int padX = U(14), padY = U(10), lineH = U(20);
-                int boxW = U(480), boxH = padY * 2 + lineCount * lineH;
+                int boxW = U(500), boxH = padY * 2 + lineCount * lineH;
                 int boxX = U(16), boxY = curTopH() + U(12);
                 SDL_Rect bg = {boxX, boxY, boxW, boxH};
                 SDL_SetRenderDrawColor(g_sdlRdr, 11, 11, 11, 210);
@@ -1881,7 +1878,6 @@ void renderOverlay() {
 
                 int ty = boxY + padY;
                 for (int i = 0; i < lineCount; ++i) {
-                    // 第0行白色(标题), 第1行白色(编码), 其余灰色调
                     if (i <= 1)
                         g_text.drawText(boxX + padX, ty, lines_buf[i], Tpt(11), 255, 255, 255);
                     else
