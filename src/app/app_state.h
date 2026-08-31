@@ -169,6 +169,8 @@ namespace i18n {
     inline const char* nightMode()      { return T("夜间模式", "Night Mode"); }
     inline const char* exclusiveAudio() { return T("独占音频", "Exclusive Audio"); }
     inline const char* motionInterp()   { return T("运动插值", "Motion Interpolation"); }
+    inline const char* vsInterp()       { return T("VS 插帧", "VS Frame Interp"); }
+    inline const char* vsSuperRes()     { return T("VS 超分", "VS Super Res"); }
     inline const char* hiQScaling()     { return T("高质量缩放", "HQ Scaling"); }
     inline const char* playbackMode()   { return T("播放模式", "Playback Mode"); }
     inline const char* modeSingle()     { return T("单曲", "Single"); }
@@ -294,7 +296,7 @@ struct SettingsGeom {
     int panelX, panelY, panelW, panelH;
     int closeCx, closeCy, closeR;
     int swX, swW, swH;
-    int rowY[10];
+    int rowY[12];
     int modeRowY;
     int chipY, chipH, chipW;
     int langRowY;

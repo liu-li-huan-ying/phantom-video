@@ -680,9 +680,11 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 int* vals[SET_ROW_COUNT] = { &g_cfg.hwDecode, &g_cfg.volNorm,
                     &g_cfg.subAutoLoad, &g_cfg.thumbCache, &g_cfg.resume,
                     &g_cfg.nightMode, &g_cfg.audioExclusive, &g_cfg.motionInterp,
-                    &g_cfg.hiQScale, &g_cfg.audioOutput };
+                    &g_cfg.hiQScale, &g_cfg.interpolation, &g_cfg.superRes,
+                    &g_cfg.audioOutput };
                 const char* keys[SET_ROW_COUNT] = { "hw", "vol", "sub", "thumb",
-                    "resume", "night", "excl", "interp", "hiq", "audioOut" };
+                    "resume", "night", "excl", "interp", "hiq", "vsinterp", "vssr",
+                    "audioOut" };
                 bool handled = false;
                 for (int i = 0; i < SET_ROW_COUNT && !handled; ++i) {
                     if (my >= sg.rowY[i] - U(5) && my <= sg.rowY[i] + sg.swH + U(5) &&
@@ -700,7 +702,8 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                             applySetting(keys[i], *vals[i]);
                             const char* tNames[] = { i18n::hwDecode(), i18n::volNorm(), i18n::subAutoLoad(),
                                 i18n::thumbCache(), i18n::resume(), i18n::nightMode(),
-                                i18n::exclusiveAudio(), i18n::motionInterp(), i18n::hiQScaling() };
+                                i18n::exclusiveAudio(), i18n::motionInterp(), i18n::hiQScaling(),
+                                i18n::vsInterp(), i18n::vsSuperRes() };
                             showToast(tNames[i]);
                         }
                         LOG_INFO("MAIN", "setting %s -> %d", keys[i], *vals[i]);

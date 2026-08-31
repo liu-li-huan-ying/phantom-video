@@ -674,6 +674,32 @@ void MpvBackend::setHdrPeakDetect(bool on) {
     LOG_DBG("MPV", "hdr-compute-peak -> %s", on ? "on" : "off");
 }
 
+// ---- VapourSynth 滤镜 ----
+void MpvBackend::applyVapourSynthFilter(int interp, int superRes) {
+    if (!mpv_) return;
+    std::string scriptsDir = exeDir() + "vapoursynth\\scripts\\";
+    std::string vf;
+    if (interp && superRes) {
+        vf = "vapoursynth=" + scriptsDir + "interp_upscale.vpy:buffered-frames=8:concurrent-frames=2";
+    } else if (interp) {
+        vf = "vapoursynth=" + scriptsDir + "mvtools_interp.vpy:buffered-frames=8:concurrent-frames=2";
+    } else if (superRes) {
+        vf = "vapoursynth=" + scriptsDir + "realcugan_upscale.vpy:buffered-frames=4:concurrent-frames=1";
+    }
+    if (vf.empty()) {
+        clearVapourSynthFilter();
+        return;
+    }
+    int r = mpv_set_property_string(mpv_, "vf", vf.c_str());
+    LOG_INFO("MPV", "vf -> %s ret=%d", vf.c_str(), r);
+}
+
+void MpvBackend::clearVapourSynthFilter() {
+    if (!mpv_) return;
+    int r = mpv_set_property_string(mpv_, "vf", "");
+    LOG_DBG("MPV", "vf cleared ret=%d", r);
+}
+
 double MpvBackend::clock() const {
     if (!mpv_) return 0.0;
     std::lock_guard<std::mutex> lock(propMutex_);

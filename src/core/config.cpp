@@ -91,6 +91,10 @@ bool loadConfig(const std::string& path, AppConfig& out) {
             out.gamutMapping = std::clamp(std::atoi(line.c_str() + 13), 0, 3);
         } else if (line.rfind("hdrpeakdetect=", 0) == 0) {
             out.hdrPeakDetect = std::atoi(line.c_str() + 14) != 0 ? 1 : 0;
+        } else if (line.rfind("superres=", 0) == 0) {
+            out.superRes = std::atoi(line.c_str() + 9) != 0 ? 1 : 0;
+        } else if (line.rfind("interpolation=", 0) == 0) {
+            out.interpolation = std::atoi(line.c_str() + 14) != 0 ? 1 : 0;
         } else if (line.rfind("lang=", 0) == 0) {
             int l = std::atoi(line.c_str() + 5);
             if (l >= 0 && l <= 1) out.lang = l;
@@ -149,6 +153,8 @@ bool saveConfig(const std::string& path, const AppConfig& cfg) {
     out << "tonemapping=" << cfg.toneMapping << "\n";
     out << "gamutmapping=" << cfg.gamutMapping << "\n";
     out << "hdrpeakdetect=" << cfg.hdrPeakDetect << "\n";
+    out << "superres=" << cfg.superRes << "\n";
+    out << "interpolation=" << cfg.interpolation << "\n";
     out << "lang=" << cfg.lang << "\n";
     if (cfg.posX != AppConfig::INVALID_POS && cfg.posW > 0)
         out << "pos=" << cfg.posX << "," << cfg.posY << "," << cfg.posW << "," << cfg.posH << "\n";

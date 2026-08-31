@@ -1603,11 +1603,13 @@ void renderOverlay() {
         int toggleVals[SET_ROW_COUNT] = { g_cfg.hwDecode, g_cfg.volNorm,
             g_cfg.subAutoLoad, g_cfg.thumbCache, g_cfg.resume,
             g_cfg.nightMode, g_cfg.audioExclusive, g_cfg.motionInterp,
-            g_cfg.hiQScale, 1 /* audioOutput placeholder: always "on" */ };
+            g_cfg.hiQScale, g_cfg.interpolation, g_cfg.superRes,
+            1 /* audioOutput placeholder: always "on" */ };
         const char* rowLabels[SET_ROW_COUNT] = {
             i18n::hwDecode(), i18n::volNorm(), i18n::subAutoLoad(),
             i18n::thumbCache(), i18n::resume(), i18n::nightMode(),
             i18n::exclusiveAudio(), i18n::motionInterp(), i18n::hiQScaling(),
+            i18n::vsInterp(), i18n::vsSuperRes(),
             T("音频输出模式", "Audio Output"),
         };
         for (int i = 0; i < SET_ROW_COUNT; ++i) {

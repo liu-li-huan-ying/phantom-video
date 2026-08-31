@@ -121,6 +121,10 @@ public:
     void setGamutMapping(int mode);  // 0=auto 1=perceptual 2=clip 3=relative-colorimetric
     void setHdrPeakDetect(bool on);
 
+    // ---- VapourSynth 滤镜（插帧 / 超分） ----
+    void applyVapourSynthFilter(int interp, int superRes);  // interp=0/1, superRes=0/1
+    void clearVapourSynthFilter();
+
     State state() const { return state_.load(); }
     double clock() const;
     double duration() const;

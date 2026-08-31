@@ -291,11 +291,11 @@ static void applyMotionInterp(bool on) {
     if (on) mpvSetOpt("tscale", "oversample");
 }
 
-const int SET_ROW_COUNT = 10;
+const int SET_ROW_COUNT = 12;
 
 SettingsGeom settingsGeom(int w, int h) {
     SettingsGeom g;
-    g.panelW = U(400); g.panelH = U(560);
+    g.panelW = U(400); g.panelH = U(640);
     g.panelX = (w - g.panelW) / 2;
     g.panelY = (h - g.panelH) / 2;
     // С����: ��御������̧���������Ϸ�, �ײ��в����ڵ�
@@ -348,6 +348,16 @@ void applySetting(const char* key, int value) {
     else if (std::strcmp(key, "vol") == 0 ||
              std::strcmp(key, "night") == 0)   rebuildAudioFilters();
     else if (std::strcmp(key, "interp") == 0)  applyMotionInterp(value != 0);
+    else if (std::strcmp(key, "vsinterp") == 0) {
+        g_cfg.interpolation = value;
+        if (g_mpv) g_mpv->applyVapourSynthFilter(value, g_cfg.superRes);
+        showToast(value ? "MVTools: ON" : "MVTools: OFF");
+    }
+    else if (std::strcmp(key, "vssr") == 0) {
+        g_cfg.superRes = value;
+        if (g_mpv) g_mpv->applyVapourSynthFilter(g_cfg.interpolation, value);
+        showToast(value ? "Real-CUGAN 2x: ON" : "Real-CUGAN 2x: OFF");
+    }
     else if (std::strcmp(key, "hiq") == 0) {
         const char* s = value ? "ewa_lanczossharp" : "spline36";
         mpvSetOpt("scale", s);
@@ -815,6 +825,13 @@ int main(int argc, char** argv) {
 
     loadConfig(configPath(), g_cfg);
 
+    // VapourSynth: 设置 VSSCRIPT_PATH 环境变量，使 mpv 能找到 VSScript.dll
+    {
+        std::string vsDir = exeDir() + "vapoursynth\\runtime\\";
+        SetEnvironmentVariableA("VSSCRIPT_PATH", vsDir.c_str());
+        LOG_INFO("MAIN", "VSSCRIPT_PATH -> %s", vsDir.c_str());
+    }
+
     SDL_SetMainReady();
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         LOG_ERROR("MAIN", "SDL_Init: %s", SDL_GetError());
@@ -962,6 +979,7 @@ wc.style         = CS_DBLCLKS;   // ���� WM_LBUTTONDBLCLK
     // 注意: 不在启动时调用 applyAudioOutput，避免 audio-channels 变更阻塞
     // 用户在设置面板切换时才生效
     if (g_cfg.motionInterp) applyMotionInterp(true);
+    if (g_cfg.interpolation || g_cfg.superRes) g_mpv->applyVapourSynthFilter(g_cfg.interpolation, g_cfg.superRes);
     if (g_cfg.hiQScale) {
         mpvSetOpt("scale", "ewa_lanczossharp");
         mpvSetOpt("cscale", "ewa_lanczossharp");

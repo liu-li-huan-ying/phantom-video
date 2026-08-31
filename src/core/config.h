@@ -39,6 +39,8 @@ struct AppConfig {
     int toneMapping = 0;    // 0=auto 1=clip 2=bt.2390 3=bt.2446a 4=st2094-10
     int gamutMapping = 0;   // 0=auto 1=perceptual 2=clip 3=relative-colorimetric
     int hdrPeakDetect = 1;  // HDR 峰值检测 0=off 1=on
+    int superRes = 0;       // 超分辨率 0=off 1=Real-CUGAN 2x
+    int interpolation = 0;  // 帧插值 0=off 1=MVTools 2x
     int lang = 0;           // 语言: 0=中文 1=English
     // 窗口位置（物理像素；x==INVALID_POS 表示未记忆）
     static const int INVALID_POS = -32001;
