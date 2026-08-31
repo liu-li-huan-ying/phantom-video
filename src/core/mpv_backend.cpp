@@ -671,6 +671,7 @@ void MpvBackend::setHdrPeakDetect(bool on) {
     if (!mpv_) return;
     int flag = on ? 1 : 0;
     mpv_set_property(mpv_, "hdr-compute-peak", MPV_FORMAT_FLAG, &flag);
+    LOG_DBG("MPV", "hdr-compute-peak -> %s", on ? "on" : "off");
 }
 
 double MpvBackend::clock() const {
