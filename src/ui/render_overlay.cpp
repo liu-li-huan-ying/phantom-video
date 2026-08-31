@@ -1914,39 +1914,35 @@ void renderOverlay() {
         g_text.drawText(panelX + U(16), swY + U(4), i18n::deinterlaceLabel(), Tpt(11), 180, 180, 188);
         int swX = panelX + panelW - U(64);
         bool deintOn = g_cfg.deinterlace;
-        // 胶囊开关
-        SDL_SetRenderDrawColor(g_sdlRdr, deintOn ? 59 : 48, deintOn ? 130 : 48, deintOn ? 246 : 52, 255);
-        SDL_Rect swRc = {swX, swY + U(2), U(44), U(20)};
-        SDL_RenderFillRect(g_sdlRdr, &swRc);
-        fillCircle(g_sdlRdr, swX + (deintOn ? U(34) : U(10)), swY + U(12), U(7), 255, 255, 255, 255);
+        // 胶囊开关 (圆角)
+        roundedRectFill(g_sdlRdr, swX, swY + U(2), U(44), U(20), U(10),
+                        deintOn ? 59 : 48, deintOn ? 130 : 48, deintOn ? 246 : 52, 255);
+        int swKnobX = swX + (deintOn ? U(34) : U(10));
+        fillCircle(g_sdlRdr, swKnobX, swY + U(12), U(8), 255, 255, 255, 255);
 
         // --- 色调映射 ---
         int tmY = swY + U(34);
         g_text.drawText(panelX + U(16), tmY + U(4), i18n::toneMappingLabel(), Tpt(11), 180, 180, 188);
         const char* tmNames[] = {i18n::tmAuto(), i18n::tmClip(), i18n::tmBT2390(), i18n::tmBT2446A(), i18n::tmST209410()};
         int tmX = panelX + panelW - U(84);
-        SDL_SetRenderDrawColor(g_sdlRdr, 38, 38, 42, 255);
-        SDL_Rect tmBg = {tmX, tmY + U(2), U(72), U(22)};
-        SDL_RenderFillRect(g_sdlRdr, &tmBg);
+        roundedRectFill(g_sdlRdr, tmX, tmY + U(2), U(72), U(22), U(6), 38, 38, 42, 255);
         g_text.drawText(tmX + U(6), tmY + U(4), tmNames[g_cfg.toneMapping], Tpt(10), ui::ACCENT2_R, ui::ACCENT2_G, ui::ACCENT2_B);
 
         // --- 色域映射 ---
         int gmY = tmY + U(32);
         g_text.drawText(panelX + U(16), gmY + U(4), i18n::gamutMappingLabel(), Tpt(11), 180, 180, 188);
         const char* gmNames[] = {i18n::gmAuto(), i18n::gmPerceptual(), i18n::gmClip(), i18n::gmRelative()};
-        SDL_SetRenderDrawColor(g_sdlRdr, 38, 38, 42, 255);
-        SDL_Rect gmBg = {tmX, gmY + U(2), U(72), U(22)};
-        SDL_RenderFillRect(g_sdlRdr, &gmBg);
+        roundedRectFill(g_sdlRdr, tmX, gmY + U(2), U(72), U(22), U(6), 38, 38, 42, 255);
         g_text.drawText(tmX + U(6), gmY + U(4), gmNames[g_cfg.gamutMapping], Tpt(10), ui::ACCENT2_R, ui::ACCENT2_G, ui::ACCENT2_B);
 
         // --- HDR 峰值检测 ---
         int hpY = gmY + U(32);
         g_text.drawText(panelX + U(16), hpY + U(4), i18n::hdrPeakLabel(), Tpt(11), 180, 180, 188);
         bool hpOn = g_cfg.hdrPeakDetect;
-        SDL_SetRenderDrawColor(g_sdlRdr, hpOn ? 59 : 48, hpOn ? 130 : 48, hpOn ? 246 : 52, 255);
-        SDL_Rect hpRc = {swX, hpY + U(2), U(44), U(20)};
-        SDL_RenderFillRect(g_sdlRdr, &hpRc);
-        fillCircle(g_sdlRdr, swX + (hpOn ? U(34) : U(10)), hpY + U(12), U(7), 255, 255, 255, 255);
+        roundedRectFill(g_sdlRdr, swX, hpY + U(2), U(44), U(20), U(10),
+                        hpOn ? 59 : 48, hpOn ? 130 : 48, hpOn ? 246 : 52, 255);
+        int hpKnobX = swX + (hpOn ? U(34) : U(10));
+        fillCircle(g_sdlRdr, hpKnobX, hpY + U(12), U(8), 255, 255, 255, 255);
     }
 
     overlayPresent();

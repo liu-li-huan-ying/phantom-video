@@ -891,32 +891,34 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     if (!hitSlider) {
                         int swY = baseY + 4 * rowH + U(4);
                         int swX = panelX + panelW - U(64);
-                        if (mx >= swX && mx <= swX + U(44) && my >= swY && my <= swY + U(24)) {
+                        if (mx >= panelX + U(16) && mx <= panelX + panelW - U(16) && my >= swY && my <= swY + U(24)) {
                             applySetting("deint", g_cfg.deinterlace ? 0 : 1);
                             g_dirty.store(true);
                             return 0;
                         }
                         int tmY = swY + U(34);
-                        int tmX = panelX + panelW - U(84);
-                        if (mx >= tmX && mx <= tmX + U(72) && my >= tmY && my <= tmY + U(26)) {
+                        if (mx >= panelX + U(16) && mx <= panelX + panelW - U(16) && my >= tmY && my <= tmY + U(26)) {
                             g_cfg.toneMapping = (g_cfg.toneMapping + 1) % 5;
                             applySetting("tm", g_cfg.toneMapping);
                             g_dirty.store(true);
                             return 0;
                         }
                         int gmY = tmY + U(32);
-                        if (mx >= tmX && mx <= tmX + U(72) && my >= gmY && my <= gmY + U(26)) {
+                        if (mx >= panelX + U(16) && mx <= panelX + panelW - U(16) && my >= gmY && my <= gmY + U(26)) {
                             g_cfg.gamutMapping = (g_cfg.gamutMapping + 1) % 4;
                             applySetting("gm", g_cfg.gamutMapping);
                             g_dirty.store(true);
                             return 0;
                         }
                         int hpY = gmY + U(32);
-                        if (mx >= swX && mx <= swX + U(44) && my >= hpY && my <= hpY + U(24)) {
+                        if (mx >= panelX + U(16) && mx <= panelX + panelW - U(16) && my >= hpY && my <= hpY + U(24)) {
                             applySetting("hdrpk", g_cfg.hdrPeakDetect ? 0 : 1);
                             g_dirty.store(true);
                             return 0;
                         }
+                        // 面板内点击但未命中任何控件 → 消费事件
+                        g_dirty.store(true);
+                        return 0;
                     }
                 } else {
                     g_ui.imageMenuOpen = false;
