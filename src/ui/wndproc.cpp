@@ -468,10 +468,10 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
         // 图像面板滑块拖拽
         if (g_ui.imageDraggingSlider >= 0 && g_mpv) {
-            int panelW = U(320);
+            int panelW = U(380);
             int panelX = g_ui.winW / 2 - panelW / 2;
-            int sliderX = panelX + U(80);
-            int sliderW = panelW - U(160);
+            int sliderX = panelX + U(90);
+            int sliderW = panelW - U(180);
             float norm = (float)(g_ui.mouseX - sliderX) / sliderW;
             if (norm < 0.0f) norm = 0.0f; if (norm > 1.0f) norm = 1.0f;
             int val = (int)(norm * 200.0f - 100.0f);
@@ -745,7 +745,7 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         // 锟斤拷锟斤拷说锟斤拷锟?锟斤拷效; 锟斤拷锟斤拷说锟斤拷锟?锟斤拷锟截闭★拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷频锟斤拷停/锟斤拷锟斤拷锟斤拷/锟斤拷钮,
         // 锟斤拷锟斤拷"锟斤拷锟斤拷锟斤拷锟斤拷透锟斤拷锟矫碉拷锟斤拷锟斤拷"锟斤拷锟斤拷锟解。
         if (g_ui.speedMenuOpen || g_ui.qualityMenuOpen || g_ui.eqMenuOpen ||
-            g_ui.subMenuOpen || g_ui.audioMenuOpen) {
+            g_ui.subMenuOpen || g_ui.audioMenuOpen || g_ui.imageMenuOpen) {
             if (g_ui.speedMenuOpen) {
                 Row1Layout L;
                 layoutRow1(g_ui.winW, sbTopY(), false, L);
@@ -854,29 +854,26 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             }
             // --- 图像调节面板 ---
             if (g_ui.imageMenuOpen) {
-                int panelW = U(320), panelH = U(280);
+                int panelW = U(380), panelH = U(340);
                 int panelX = g_ui.winW / 2 - panelW / 2;
                 int panelY = g_ui.winH / 2 - panelH / 2;
-                int cr = U(8);
                 // 关闭按钮
                 int closeR = U(10);
-                int closeCx = panelX + panelW - U(20);
-                int closeCy = panelY + U(18);
+                int closeCx = panelX + panelW - U(22);
+                int closeCy = panelY + U(20);
                 if (mx >= closeCx - closeR && mx <= closeCx + closeR &&
                     my >= closeCy - closeR && my <= closeCy + closeR) {
                     g_ui.imageMenuOpen = false;
                     g_dirty.store(true);
                     return 0;
                 }
-                // 面板内?
                 if (mx >= panelX && mx <= panelX + panelW && my >= panelY && my <= panelY + panelH) {
-                    int sliderX = panelX + U(80);
-                    int sliderW = panelW - U(160);
-                    int rowH = U(36);
-                    int baseY = panelY + U(36);
+                    int sliderX = panelX + U(90);
+                    int sliderW = panelW - U(180);
+                    int rowH = U(44);
+                    int baseY = panelY + U(44);
                     const char* keys[] = {"brt", "con", "sat", "gam"};
                     bool hitSlider = false;
-                    // 4 个滑块行
                     for (int i = 0; i < 4; ++i) {
                         int ry = baseY + i * rowH;
                         if (mx >= sliderX - U(8) && mx <= sliderX + sliderW + U(8) &&
@@ -892,42 +889,34 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                         }
                     }
                     if (!hitSlider) {
-                        // 去隔行开关
-                        int swY = baseY + 4 * rowH + U(2);
-                        int swX = panelX + panelW - U(60);
-                        if (mx >= swX && mx <= swX + U(40) && my >= swY && my <= swY + U(26)) {
+                        int swY = baseY + 4 * rowH + U(4);
+                        int swX = panelX + panelW - U(64);
+                        if (mx >= swX && mx <= swX + U(44) && my >= swY && my <= swY + U(24)) {
                             applySetting("deint", g_cfg.deinterlace ? 0 : 1);
                             g_dirty.store(true);
                             return 0;
                         }
-                        // 色调映射循环
-                        int tmY = swY + U(32);
-                        int tmX = panelX + panelW - U(80);
-                        if (mx >= tmX && mx <= tmX + U(70) && my >= tmY && my <= tmY + U(26)) {
+                        int tmY = swY + U(34);
+                        int tmX = panelX + panelW - U(84);
+                        if (mx >= tmX && mx <= tmX + U(72) && my >= tmY && my <= tmY + U(26)) {
                             g_cfg.toneMapping = (g_cfg.toneMapping + 1) % 5;
                             applySetting("tm", g_cfg.toneMapping);
                             g_dirty.store(true);
                             return 0;
                         }
-                        // 色域映射循环
-                        int gmY = tmY + U(30);
-                        if (mx >= tmX && mx <= tmX + U(70) && my >= gmY && my <= gmY + U(26)) {
+                        int gmY = tmY + U(32);
+                        if (mx >= tmX && mx <= tmX + U(72) && my >= gmY && my <= gmY + U(26)) {
                             g_cfg.gamutMapping = (g_cfg.gamutMapping + 1) % 4;
                             applySetting("gm", g_cfg.gamutMapping);
                             g_dirty.store(true);
                             return 0;
                         }
-                        // HDR 峰值检测开关
-                        int hpY = gmY + U(30);
-                        if (mx >= swX && mx <= swX + U(40) && my >= hpY && my <= hpY + U(26)) {
+                        int hpY = gmY + U(32);
+                        if (mx >= swX && mx <= swX + U(44) && my >= hpY && my <= hpY + U(24)) {
                             applySetting("hdrpk", g_cfg.hdrPeakDetect ? 0 : 1);
                             g_dirty.store(true);
                             return 0;
                         }
-                        // 点击面板空白区域也关闭
-                        g_ui.imageMenuOpen = false;
-                        g_dirty.store(true);
-                        return 0;
                     }
                 } else {
                     g_ui.imageMenuOpen = false;
