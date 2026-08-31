@@ -357,14 +357,40 @@ void applySetting(const char* key, int value) {
         applyAudioOutput(value);
     }
     // 画面调节
-    else if (std::strcmp(key, "brt") == 0) { g_cfg.brightness = value; if (g_mpv) g_mpv->setBrightness(value); }
-    else if (std::strcmp(key, "con") == 0) { g_cfg.contrast = value; if (g_mpv) g_mpv->setContrast(value); }
-    else if (std::strcmp(key, "sat") == 0) { g_cfg.saturation = value; if (g_mpv) g_mpv->setSaturation(value); }
-    else if (std::strcmp(key, "gam") == 0) { g_cfg.gamma = value; if (g_mpv) g_mpv->setGamma(value); }
-    else if (std::strcmp(key, "deint") == 0) { g_cfg.deinterlace = value; if (g_mpv) g_mpv->setDeinterlace(value != 0); }
-    else if (std::strcmp(key, "tm") == 0) { g_cfg.toneMapping = value; if (g_mpv) g_mpv->setToneMapping(value); }
-    else if (std::strcmp(key, "gm") == 0) { g_cfg.gamutMapping = value; if (g_mpv) g_mpv->setGamutMapping(value); }
-    else if (std::strcmp(key, "hdrpk") == 0) { g_cfg.hdrPeakDetect = value; if (g_mpv) g_mpv->setHdrPeakDetect(value != 0); }
+    else if (std::strcmp(key, "brt") == 0) {
+        g_cfg.brightness = value; if (g_mpv) g_mpv->setBrightness(value);
+        char m[32]; std::snprintf(m, sizeof(m), "%s: %d", i18n::brightness(), value); showToast(m);
+    }
+    else if (std::strcmp(key, "con") == 0) {
+        g_cfg.contrast = value; if (g_mpv) g_mpv->setContrast(value);
+        char m[32]; std::snprintf(m, sizeof(m), "%s: %d", i18n::contrast(), value); showToast(m);
+    }
+    else if (std::strcmp(key, "sat") == 0) {
+        g_cfg.saturation = value; if (g_mpv) g_mpv->setSaturation(value);
+        char m[32]; std::snprintf(m, sizeof(m), "%s: %d", i18n::saturation(), value); showToast(m);
+    }
+    else if (std::strcmp(key, "gam") == 0) {
+        g_cfg.gamma = value; if (g_mpv) g_mpv->setGamma(value);
+        char m[32]; std::snprintf(m, sizeof(m), "%s: %d", i18n::gammaLabel(), value); showToast(m);
+    }
+    else if (std::strcmp(key, "deint") == 0) {
+        g_cfg.deinterlace = value; if (g_mpv) g_mpv->setDeinterlace(value != 0);
+        showToast(value ? i18n::deinterlaceLabel() : i18n::deinterlaceLabel());
+    }
+    else if (std::strcmp(key, "tm") == 0) {
+        g_cfg.toneMapping = value; if (g_mpv) g_mpv->setToneMapping(value);
+        const char* names[] = {"auto","clip","bt.2390","bt.2446a","st2094-10"};
+        char m[48]; std::snprintf(m, sizeof(m), "%s: %s", i18n::toneMappingLabel(), names[std::clamp(value,0,4)]); showToast(m);
+    }
+    else if (std::strcmp(key, "gm") == 0) {
+        g_cfg.gamutMapping = value; if (g_mpv) g_mpv->setGamutMapping(value);
+        const char* names[] = {"auto","perceptual","clip","relative"};
+        char m[48]; std::snprintf(m, sizeof(m), "%s: %s", i18n::gamutMappingLabel(), names[std::clamp(value,0,3)]); showToast(m);
+    }
+    else if (std::strcmp(key, "hdrpk") == 0) {
+        g_cfg.hdrPeakDetect = value; if (g_mpv) g_mpv->setHdrPeakDetect(value != 0);
+        showToast(value ? i18n::hdrPeakLabel() : i18n::hdrPeakLabel());
+    }
     // thumbCache/resume �����أ�����֪ͨ mpv
 }
 

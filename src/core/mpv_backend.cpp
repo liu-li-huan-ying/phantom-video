@@ -625,38 +625,47 @@ void MpvBackend::setBrightness(int v) {
     if (!mpv_) return;
     double val = (double)std::clamp(v, -100, 100);
     mpv_set_property(mpv_, "brightness", MPV_FORMAT_DOUBLE, &val);
+    LOG_DBG("MPV", "brightness -> %.0f", val);
 }
 void MpvBackend::setContrast(int v) {
     if (!mpv_) return;
     double val = (double)std::clamp(v, -100, 100);
     mpv_set_property(mpv_, "contrast", MPV_FORMAT_DOUBLE, &val);
+    LOG_DBG("MPV", "contrast -> %.0f", val);
 }
 void MpvBackend::setSaturation(int v) {
     if (!mpv_) return;
     double val = (double)std::clamp(v, -100, 100);
     mpv_set_property(mpv_, "saturation", MPV_FORMAT_DOUBLE, &val);
+    LOG_DBG("MPV", "saturation -> %.0f", val);
 }
 void MpvBackend::setGamma(int v) {
     if (!mpv_) return;
     double val = (double)std::clamp(v, -100, 100);
     mpv_set_property(mpv_, "gamma", MPV_FORMAT_DOUBLE, &val);
+    LOG_DBG("MPV", "gamma -> %.0f", val);
 }
 void MpvBackend::setDeinterlace(bool on) {
     if (!mpv_) return;
     int flag = on ? 1 : 0;
     mpv_set_property(mpv_, "deinterlace", MPV_FORMAT_FLAG, &flag);
+    LOG_DBG("MPV", "deinterlace -> %s", on ? "on" : "off");
 }
 
 // ---- 色彩空间映射 ----
 void MpvBackend::setToneMapping(int mode) {
     if (!mpv_) return;
     const char* modes[] = {"auto", "clip", "bt.2390", "bt.2446a", "st2094-10"};
-    mpv_set_property_string(mpv_, "tone-mapping", modes[std::clamp(mode, 0, 4)]);
+    int m = std::clamp(mode, 0, 4);
+    mpv_set_property_string(mpv_, "tone-mapping", modes[m]);
+    LOG_DBG("MPV", "tone-mapping -> %s", modes[m]);
 }
 void MpvBackend::setGamutMapping(int mode) {
     if (!mpv_) return;
     const char* modes[] = {"auto", "perceptual", "clip", "relative-colorimetric"};
-    mpv_set_property_string(mpv_, "gamut-mapping-mode", modes[std::clamp(mode, 0, 3)]);
+    int m = std::clamp(mode, 0, 3);
+    mpv_set_property_string(mpv_, "gamut-mapping-mode", modes[m]);
+    LOG_DBG("MPV", "gamut-mapping-mode -> %s", modes[m]);
 }
 void MpvBackend::setHdrPeakDetect(bool on) {
     if (!mpv_) return;
