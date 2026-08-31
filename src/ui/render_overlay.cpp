@@ -1840,13 +1840,9 @@ void renderOverlay() {
 
     // --- 图像调节面板 ---
     if (g_ui.imageMenuOpen) {
-        Row1Layout L;
-        layoutRow1(w, barTop, g_ui.volumeSliderOpen || g_ui.volumeDragging, L);
         int panelW = U(320), panelH = U(280);
-        int panelX = L.imgBtn.x - panelW + U(10);
-        int panelY = barTop - panelH - U(10);
-        if (panelX < U(8)) panelX = U(8);
-        if (panelY < U(8)) panelY = U(8);
+        int panelX = w / 2 - panelW / 2;
+        int panelY = h / 2 - panelH / 2;
         // 圆角背景
         int cr = U(8);
         SDL_SetRenderDrawColor(g_sdlRdr, 24, 24, 26, 255);
@@ -1874,37 +1870,37 @@ void renderOverlay() {
         int vals[] = {g_cfg.brightness, g_cfg.contrast, g_cfg.saturation, g_cfg.gamma};
         int sliderX = panelX + U(80);
         int sliderW = panelW - U(160);
-        int rowH = U(40);
-        int baseY = panelY + U(40);
+        int rowH = U(36);
+        int baseY = panelY + U(36);
         for (int i = 0; i < 4; ++i) {
             int ry = baseY + i * rowH;
-            g_text.drawText(panelX + U(12), ry + U(10), sliderLabels[i], Tpt(11), ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B);
+            g_text.drawText(panelX + U(12), ry + U(8), sliderLabels[i], Tpt(11), ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B);
             // 滑轨
             SDL_SetRenderDrawColor(g_sdlRdr, 58, 58, 62, 255);
-            SDL_Rect trk = {sliderX, ry + U(16), sliderW, U(4)};
+            SDL_Rect trk = {sliderX, ry + U(14), sliderW, U(4)};
             SDL_RenderFillRect(g_sdlRdr, &trk);
             // thumb 位置: val -100..100 -> 0..1
             float norm = (vals[i] + 100.0f) / 200.0f;
             if (norm < 0.0f) norm = 0.0f; if (norm > 1.0f) norm = 1.0f;
             int thumbX = sliderX + (int)(norm * sliderW);
-            fillCircle(g_sdlRdr, thumbX, ry + U(18), U(6), ui::ACCENT2_R, ui::ACCENT2_G, ui::ACCENT2_B, 255);
+            fillCircle(g_sdlRdr, thumbX, ry + U(16), U(6), ui::ACCENT2_R, ui::ACCENT2_G, ui::ACCENT2_B, 255);
             // 数值
             char val[16];
             std::snprintf(val, sizeof(val), "%d", vals[i]);
-            g_text.drawText(sliderX + sliderW + U(8), ry + U(10), val, Tpt(11), ui::ICON_BRIGHT, ui::ICON_BRIGHT, 231);
+            g_text.drawText(sliderX + sliderW + U(8), ry + U(8), val, Tpt(11), ui::ICON_BRIGHT, ui::ICON_BRIGHT, 231);
         }
 
         // 去隔行开关
-        int swY = baseY + 4 * rowH;
-        g_text.drawText(panelX + U(12), swY + U(6), i18n::deinterlaceLabel(), Tpt(11), ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B);
+        int swY = baseY + 4 * rowH + U(2);
+        g_text.drawText(panelX + U(12), swY + U(4), i18n::deinterlaceLabel(), Tpt(11), ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B);
         int swX = panelX + panelW - U(60);
         SDL_SetRenderDrawColor(g_sdlRdr, g_cfg.deinterlace ? 59 : 48, g_cfg.deinterlace ? 130 : 48, g_cfg.deinterlace ? 246 : 52, 255);
-        SDL_Rect swRc = {swX, swY + U(4), U(40), U(22)};
+        SDL_Rect swRc = {swX, swY + U(2), U(40), U(22)};
         SDL_RenderFillRect(g_sdlRdr, &swRc);
-        g_text.drawText(swX + U(8), swY + U(6), g_cfg.deinterlace ? "ON" : "OFF", Tpt(10), 255, 255, 255);
+        g_text.drawText(swX + U(8), swY + U(4), g_cfg.deinterlace ? "ON" : "OFF", Tpt(10), 255, 255, 255);
 
         // 色调映射
-        int tmY = swY + U(36);
+        int tmY = swY + U(32);
         g_text.drawText(panelX + U(12), tmY + U(4), i18n::toneMappingLabel(), Tpt(11), ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B);
         const char* tmNames[] = {i18n::tmAuto(), i18n::tmClip(), i18n::tmBT2390(), i18n::tmBT2446A(), i18n::tmST209410()};
         int tmX = panelX + panelW - U(80);

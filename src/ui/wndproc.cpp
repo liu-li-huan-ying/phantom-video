@@ -468,11 +468,8 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
         // 图像面板滑块拖拽
         if (g_ui.imageDraggingSlider >= 0 && g_mpv) {
-            Row1Layout L;
-            layoutRow1(g_ui.winW, sbTopY(), false, L);
             int panelW = U(320);
-            int panelX = L.imgBtn.x - panelW + U(10);
-            int panelY = sbTopY() - U(300);
+            int panelX = g_ui.winW / 2 - panelW / 2;
             int sliderX = panelX + U(80);
             int sliderW = panelW - U(160);
             float norm = (float)(g_ui.mouseX - sliderX) / sliderW;
@@ -857,13 +854,9 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             }
             // --- 图像调节面板 ---
             if (g_ui.imageMenuOpen) {
-                Row1Layout L;
-                layoutRow1(g_ui.winW, sbTopY(), false, L);
                 int panelW = U(320), panelH = U(280);
-                int panelX = L.imgBtn.x - panelW + U(10);
-                int panelY = sbTopY() - panelH - U(10);
-                if (panelX < U(8)) panelX = U(8);
-                if (panelY < U(8)) panelY = U(8);
+                int panelX = g_ui.winW / 2 - panelW / 2;
+                int panelY = g_ui.winH / 2 - panelH / 2;
                 int cr = U(8);
                 // 关闭按钮
                 int closeR = U(10);
@@ -879,9 +872,8 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 if (mx >= panelX && mx <= panelX + panelW && my >= panelY && my <= panelY + panelH) {
                     int sliderX = panelX + U(80);
                     int sliderW = panelW - U(160);
-                    int rowH = U(40);
-                    int baseY = panelY + U(40);
-                    int vals[] = {g_cfg.brightness, g_cfg.contrast, g_cfg.saturation, g_cfg.gamma};
+                    int rowH = U(36);
+                    int baseY = panelY + U(36);
                     const char* keys[] = {"brt", "con", "sat", "gam"};
                     bool hitSlider = false;
                     // 4 个滑块行
@@ -901,31 +893,39 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     }
                     if (!hitSlider) {
                         // 去隔行开关
-                        int swY = baseY + 4 * rowH;
+                        int swY = baseY + 4 * rowH + U(2);
                         int swX = panelX + panelW - U(60);
-                        if (mx >= swX && mx <= swX + U(40) && my >= swY && my <= swY + U(30)) {
+                        if (mx >= swX && mx <= swX + U(40) && my >= swY && my <= swY + U(26)) {
                             applySetting("deint", g_cfg.deinterlace ? 0 : 1);
+                            g_dirty.store(true);
+                            return 0;
                         }
                         // 色调映射循环
-                        int tmY = swY + U(40);
+                        int tmY = swY + U(32);
                         int tmX = panelX + panelW - U(80);
                         if (mx >= tmX && mx <= tmX + U(70) && my >= tmY && my <= tmY + U(26)) {
                             g_cfg.toneMapping = (g_cfg.toneMapping + 1) % 5;
                             applySetting("tm", g_cfg.toneMapping);
+                            g_dirty.store(true);
+                            return 0;
                         }
                         // 色域映射循环
-                        int gmY = tmY + U(32);
+                        int gmY = tmY + U(30);
                         if (mx >= tmX && mx <= tmX + U(70) && my >= gmY && my <= gmY + U(26)) {
                             g_cfg.gamutMapping = (g_cfg.gamutMapping + 1) % 4;
                             applySetting("gm", g_cfg.gamutMapping);
+                            g_dirty.store(true);
+                            return 0;
                         }
                         // HDR 峰值检测开关
-                        int hpY = gmY + U(32);
-                        if (mx >= swX && mx <= swX + U(40) && my >= hpY && my <= hpY + U(30)) {
+                        int hpY = gmY + U(30);
+                        if (mx >= swX && mx <= swX + U(40) && my >= hpY && my <= hpY + U(26)) {
                             applySetting("hdrpk", g_cfg.hdrPeakDetect ? 0 : 1);
+                            g_dirty.store(true);
+                            return 0;
                         }
-                        g_ui.visible = true;
-                        g_ui.hideAt = SDL_GetTicks() + ui::CTRLBAR_HIDE_MS;
+                        // 点击面板空白区域也关闭
+                        g_ui.imageMenuOpen = false;
                         g_dirty.store(true);
                         return 0;
                     }
