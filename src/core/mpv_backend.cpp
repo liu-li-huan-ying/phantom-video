@@ -1,6 +1,7 @@
 #include "core/mpv_backend.h"
 #include "core/logger.h"
 #include "core/config.h"
+#include <algorithm>
 #include <cstring>
 #include <cstdlib>
 #include <SDL.h>
@@ -617,6 +618,50 @@ void MpvBackend::setEQEnabled(bool on) {
 float MpvBackend::eqGain(int band) const {
     if (band < 0 || band > 5) return 0.0f;
     return eqGains_[band];
+}
+
+// ---- 画面调节 ----
+void MpvBackend::setBrightness(int v) {
+    if (!mpv_) return;
+    double val = (double)std::clamp(v, -100, 100);
+    mpv_set_property(mpv_, "brightness", MPV_FORMAT_DOUBLE, &val);
+}
+void MpvBackend::setContrast(int v) {
+    if (!mpv_) return;
+    double val = (double)std::clamp(v, -100, 100);
+    mpv_set_property(mpv_, "contrast", MPV_FORMAT_DOUBLE, &val);
+}
+void MpvBackend::setSaturation(int v) {
+    if (!mpv_) return;
+    double val = (double)std::clamp(v, -100, 100);
+    mpv_set_property(mpv_, "saturation", MPV_FORMAT_DOUBLE, &val);
+}
+void MpvBackend::setGamma(int v) {
+    if (!mpv_) return;
+    double val = (double)std::clamp(v, -100, 100);
+    mpv_set_property(mpv_, "gamma", MPV_FORMAT_DOUBLE, &val);
+}
+void MpvBackend::setDeinterlace(bool on) {
+    if (!mpv_) return;
+    int flag = on ? 1 : 0;
+    mpv_set_property(mpv_, "deinterlace", MPV_FORMAT_FLAG, &flag);
+}
+
+// ---- 色彩空间映射 ----
+void MpvBackend::setToneMapping(int mode) {
+    if (!mpv_) return;
+    const char* modes[] = {"auto", "clip", "bt.2390", "bt.2446a", "st2094-10"};
+    mpv_set_property_string(mpv_, "tone-mapping", modes[std::clamp(mode, 0, 4)]);
+}
+void MpvBackend::setGamutMapping(int mode) {
+    if (!mpv_) return;
+    const char* modes[] = {"auto", "perceptual", "clip", "relative-colorimetric"};
+    mpv_set_property_string(mpv_, "gamut-mapping-mode", modes[std::clamp(mode, 0, 3)]);
+}
+void MpvBackend::setHdrPeakDetect(bool on) {
+    if (!mpv_) return;
+    int flag = on ? 1 : 0;
+    mpv_set_property(mpv_, "hdr-compute-peak", MPV_FORMAT_FLAG, &flag);
 }
 
 double MpvBackend::clock() const {

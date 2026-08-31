@@ -29,6 +29,16 @@ struct AppConfig {
     int audioOutput = 0;    // 音频输出: 0=立体声 1=5.1环绕 2=7.1环绕 3=直通(passthrough)
     int motionInterp = 0;  // 运动插值(display-resample + oversample)
     int hiQScale = 0;      // 高质量缩放(ewa_lanczossharp, GPU 开销较高)
+    // 画面调节 (-100 ~ 100)
+    int brightness = 0;
+    int contrast = 0;
+    int saturation = 0;
+    int gamma = 0;
+    int deinterlace = 0;    // 去隔行 0=off 1=on
+    // 色彩空间映射
+    int toneMapping = 0;    // 0=auto 1=clip 2=bt.2390 3=bt.2446a 4=st2094-10
+    int gamutMapping = 0;   // 0=auto 1=perceptual 2=clip 3=relative-colorimetric
+    int hdrPeakDetect = 1;  // HDR 峰值检测 0=off 1=on
     int lang = 0;           // 语言: 0=中文 1=English
     // 窗口位置（物理像素；x==INVALID_POS 表示未记忆）
     static const int INVALID_POS = -32001;

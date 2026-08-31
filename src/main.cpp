@@ -218,6 +218,7 @@ void layoutRow1(int w, int barTopY, bool volOpen, Row1Layout& L) {
     placeRight(L.chapterBtn, g_text.measureText(i18n::chapName(), Tpt(12)) + U(26));
     placeRight(L.abBtn, U(38));   // AB loop: 固定宽度 "AB" 文字
     placeRight(L.eqBtn, U(38));   // EQ: 固定宽度 "EQ" 文字
+    placeRight(L.imgBtn, g_text.measureText(i18n::image(), Tpt(12)) + U(26));
     // ����: �ȷŻ���(չ��̬), �ٷ�ͼ��; ������ͼ���Ҳ�
     L.volSliderW = volOpen ? U(80) : 0;
     if (volOpen) {
@@ -355,6 +356,15 @@ void applySetting(const char* key, int value) {
     else if (std::strcmp(key, "audioOut") == 0) {
         applyAudioOutput(value);
     }
+    // 画面调节
+    else if (std::strcmp(key, "brt") == 0) { g_cfg.brightness = value; if (g_mpv) g_mpv->setBrightness(value); }
+    else if (std::strcmp(key, "con") == 0) { g_cfg.contrast = value; if (g_mpv) g_mpv->setContrast(value); }
+    else if (std::strcmp(key, "sat") == 0) { g_cfg.saturation = value; if (g_mpv) g_mpv->setSaturation(value); }
+    else if (std::strcmp(key, "gam") == 0) { g_cfg.gamma = value; if (g_mpv) g_mpv->setGamma(value); }
+    else if (std::strcmp(key, "deint") == 0) { g_cfg.deinterlace = value; if (g_mpv) g_mpv->setDeinterlace(value != 0); }
+    else if (std::strcmp(key, "tm") == 0) { g_cfg.toneMapping = value; if (g_mpv) g_mpv->setToneMapping(value); }
+    else if (std::strcmp(key, "gm") == 0) { g_cfg.gamutMapping = value; if (g_mpv) g_mpv->setGamutMapping(value); }
+    else if (std::strcmp(key, "hdrpk") == 0) { g_cfg.hdrPeakDetect = value; if (g_mpv) g_mpv->setHdrPeakDetect(value != 0); }
     // thumbCache/resume �����أ�����֪ͨ mpv
 }
 
@@ -930,6 +940,16 @@ wc.style         = CS_DBLCLKS;   // ���� WM_LBUTTONDBLCLK
         mpvSetOpt("scale", "ewa_lanczossharp");
         mpvSetOpt("cscale", "ewa_lanczossharp");
     }
+    // 恢复画面调节设置
+    if (g_cfg.brightness != 0) g_mpv->setBrightness(g_cfg.brightness);
+    if (g_cfg.contrast != 0)   g_mpv->setContrast(g_cfg.contrast);
+    if (g_cfg.saturation != 0) g_mpv->setSaturation(g_cfg.saturation);
+    if (g_cfg.gamma != 0)      g_mpv->setGamma(g_cfg.gamma);
+    if (g_cfg.deinterlace)     g_mpv->setDeinterlace(true);
+    // 恢复色彩空间映射设置
+    if (g_cfg.toneMapping != 0)   g_mpv->setToneMapping(g_cfg.toneMapping);
+    if (g_cfg.gamutMapping != 0)  g_mpv->setGamutMapping(g_cfg.gamutMapping);
+    if (!g_cfg.hdrPeakDetect)     g_mpv->setHdrPeakDetect(false);
 
     // ---- command line / resume ----
     auto args = utf8Args();

@@ -109,6 +109,18 @@ public:
     bool eqEnabled() const { return eqEnabled_; }
     float eqGain(int band) const;
 
+    // ---- 画面调节 (-100 ~ 100) ----
+    void setBrightness(int v);
+    void setContrast(int v);
+    void setSaturation(int v);
+    void setGamma(int v);
+    void setDeinterlace(bool on);
+
+    // ---- 色彩空间映射 ----
+    void setToneMapping(int mode);   // 0=auto 1=clip 2=bt.2390 3=bt.2446a 4=st2094-10
+    void setGamutMapping(int mode);  // 0=auto 1=perceptual 2=clip 3=relative-colorimetric
+    void setHdrPeakDetect(bool on);
+
     State state() const { return state_.load(); }
     double clock() const;
     double duration() const;

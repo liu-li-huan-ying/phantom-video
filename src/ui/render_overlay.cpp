@@ -948,6 +948,14 @@ void renderOverlay() {
             Uint8 b = eqOn ? ui::ACCENT2_B : ui::TEXT_DIM + 5;
             g_text.drawText(L.eqBtn.x + U(8), L.eqBtn.y + U(10), "EQ", Tpt(12), r, gv, b);
         }
+        // Image
+        {
+            bool imgOn = g_ui.imageMenuOpen;
+            Uint8 r = imgOn ? ui::ACCENT2_R : ui::TEXT_DIM;
+            Uint8 gv = imgOn ? ui::ACCENT2_G : ui::TEXT_DIM;
+            Uint8 b = imgOn ? ui::ACCENT2_B : ui::TEXT_DIM + 5;
+            g_text.drawText(L.imgBtn.x + U(6), L.imgBtn.y + U(10), i18n::image(), Tpt(12), r, gv, b);
+        }
         // speed
         {
             char spd[16];
@@ -1828,6 +1836,99 @@ void renderOverlay() {
             g_text.drawText(sx, sy, shortcuts[i].key, Tpt(10), ui::ACCENT2_R, ui::ACCENT2_G, ui::ACCENT2_B);
             g_text.drawText(sx + U(90), sy, shortcuts[i].desc, Tpt(10), 200, 200, 206);
         }
+    }
+
+    // --- 图像调节面板 ---
+    if (g_ui.imageMenuOpen) {
+        Row1Layout L;
+        layoutRow1(w, barTop, g_ui.volumeSliderOpen || g_ui.volumeDragging, L);
+        int panelW = U(320), panelH = U(280);
+        int panelX = L.imgBtn.x - panelW + U(10);
+        int panelY = barTop - panelH - U(10);
+        if (panelX < U(8)) panelX = U(8);
+        if (panelY < U(8)) panelY = U(8);
+        // 圆角背景
+        int cr = U(8);
+        SDL_SetRenderDrawColor(g_sdlRdr, 24, 24, 26, 255);
+        SDL_Rect bgRc = {panelX + cr, panelY, panelW - cr * 2, panelH};
+        SDL_RenderFillRect(g_sdlRdr, &bgRc);
+        SDL_Rect midH = {panelX, panelY + cr, panelW, panelH - cr * 2};
+        SDL_RenderFillRect(g_sdlRdr, &midH);
+        fillCircle(g_sdlRdr, panelX + cr, panelY + cr, cr, 24, 24, 26, 255);
+        fillCircle(g_sdlRdr, panelX + panelW - cr, panelY + cr, cr, 24, 24, 26, 255);
+        fillCircle(g_sdlRdr, panelX + cr, panelY + panelH - cr, cr, 24, 24, 26, 255);
+        fillCircle(g_sdlRdr, panelX + panelW - cr, panelY + panelH - cr, cr, 24, 24, 26, 255);
+        // 标题
+        g_text.drawText(panelX + U(12), panelY + U(8), i18n::imageTitle(), Tpt(13), 255, 255, 255);
+        // 关闭按钮
+        int closeR = U(10);
+        int closeCx = panelX + panelW - U(20);
+        int closeCy = panelY + U(18);
+        fillCircle(g_sdlRdr, closeCx, closeCy, closeR, 58, 58, 62, 255);
+        g_text.drawText(closeCx - U(3), closeCy - U(5), "X", Tpt(10), 200, 200, 206);
+
+        // 4 个滑块: 亮度/对比度/饱和度/Gamma
+        static const char* sliderLabels[] = {
+            i18n::brightness(), i18n::contrast(), i18n::saturation(), i18n::gammaLabel()
+        };
+        int vals[] = {g_cfg.brightness, g_cfg.contrast, g_cfg.saturation, g_cfg.gamma};
+        int sliderX = panelX + U(80);
+        int sliderW = panelW - U(160);
+        int rowH = U(40);
+        int baseY = panelY + U(40);
+        for (int i = 0; i < 4; ++i) {
+            int ry = baseY + i * rowH;
+            g_text.drawText(panelX + U(12), ry + U(10), sliderLabels[i], Tpt(11), ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B);
+            // 滑轨
+            SDL_SetRenderDrawColor(g_sdlRdr, 58, 58, 62, 255);
+            SDL_Rect trk = {sliderX, ry + U(16), sliderW, U(4)};
+            SDL_RenderFillRect(g_sdlRdr, &trk);
+            // thumb 位置: val -100..100 -> 0..1
+            float norm = (vals[i] + 100.0f) / 200.0f;
+            if (norm < 0.0f) norm = 0.0f; if (norm > 1.0f) norm = 1.0f;
+            int thumbX = sliderX + (int)(norm * sliderW);
+            fillCircle(g_sdlRdr, thumbX, ry + U(18), U(6), ui::ACCENT2_R, ui::ACCENT2_G, ui::ACCENT2_B, 255);
+            // 数值
+            char val[16];
+            std::snprintf(val, sizeof(val), "%d", vals[i]);
+            g_text.drawText(sliderX + sliderW + U(8), ry + U(10), val, Tpt(11), ui::ICON_BRIGHT, ui::ICON_BRIGHT, 231);
+        }
+
+        // 去隔行开关
+        int swY = baseY + 4 * rowH;
+        g_text.drawText(panelX + U(12), swY + U(6), i18n::deinterlaceLabel(), Tpt(11), ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B);
+        int swX = panelX + panelW - U(60);
+        SDL_SetRenderDrawColor(g_sdlRdr, g_cfg.deinterlace ? 59 : 48, g_cfg.deinterlace ? 130 : 48, g_cfg.deinterlace ? 246 : 52, 255);
+        SDL_Rect swRc = {swX, swY + U(4), U(40), U(22)};
+        SDL_RenderFillRect(g_sdlRdr, &swRc);
+        g_text.drawText(swX + U(8), swY + U(6), g_cfg.deinterlace ? "ON" : "OFF", Tpt(10), 255, 255, 255);
+
+        // 色调映射
+        int tmY = swY + U(36);
+        g_text.drawText(panelX + U(12), tmY + U(4), i18n::toneMappingLabel(), Tpt(11), ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B);
+        const char* tmNames[] = {i18n::tmAuto(), i18n::tmClip(), i18n::tmBT2390(), i18n::tmBT2446A(), i18n::tmST209410()};
+        int tmX = panelX + panelW - U(80);
+        SDL_SetRenderDrawColor(g_sdlRdr, 59, 130, 246, 255);
+        SDL_Rect tmRc = {tmX, tmY + U(2), U(70), U(22)};
+        SDL_RenderFillRect(g_sdlRdr, &tmRc);
+        g_text.drawText(tmX + U(4), tmY + U(4), tmNames[g_cfg.toneMapping], Tpt(10), 255, 255, 255);
+
+        // 色域映射
+        int gmY = tmY + U(30);
+        g_text.drawText(panelX + U(12), gmY + U(4), i18n::gamutMappingLabel(), Tpt(11), ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B);
+        const char* gmNames[] = {i18n::gmAuto(), i18n::gmPerceptual(), i18n::gmClip(), i18n::gmRelative()};
+        SDL_SetRenderDrawColor(g_sdlRdr, 59, 130, 246, 255);
+        SDL_Rect gmRc = {tmX, gmY + U(2), U(70), U(22)};
+        SDL_RenderFillRect(g_sdlRdr, &gmRc);
+        g_text.drawText(tmX + U(4), gmY + U(4), gmNames[g_cfg.gamutMapping], Tpt(10), 255, 255, 255);
+
+        // HDR 峰值检测
+        int hpY = gmY + U(30);
+        g_text.drawText(panelX + U(12), hpY + U(4), i18n::hdrPeakLabel(), Tpt(11), ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B);
+        SDL_SetRenderDrawColor(g_sdlRdr, g_cfg.hdrPeakDetect ? 59 : 48, g_cfg.hdrPeakDetect ? 130 : 48, g_cfg.hdrPeakDetect ? 246 : 52, 255);
+        SDL_Rect hpRc = {swX, hpY + U(2), U(40), U(22)};
+        SDL_RenderFillRect(g_sdlRdr, &hpRc);
+        g_text.drawText(swX + U(8), hpY + U(4), g_cfg.hdrPeakDetect ? "ON" : "OFF", Tpt(10), 255, 255, 255);
     }
 
     overlayPresent();

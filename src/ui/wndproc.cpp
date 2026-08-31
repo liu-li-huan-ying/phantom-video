@@ -466,6 +466,22 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             g_mpv->setEQBand(g_ui.eqDraggingBand, gain);
             g_dirty.store(true);
         }
+        // 图像面板滑块拖拽
+        if (g_ui.imageDraggingSlider >= 0 && g_mpv) {
+            Row1Layout L;
+            layoutRow1(g_ui.winW, sbTopY(), false, L);
+            int panelW = U(320);
+            int panelX = L.imgBtn.x - panelW + U(10);
+            int panelY = sbTopY() - U(300);
+            int sliderX = panelX + U(80);
+            int sliderW = panelW - U(160);
+            float norm = (float)(g_ui.mouseX - sliderX) / sliderW;
+            if (norm < 0.0f) norm = 0.0f; if (norm > 1.0f) norm = 1.0f;
+            int val = (int)(norm * 200.0f - 100.0f);
+            const char* keys[] = {"brt", "con", "sat", "gam"};
+            applySetting(keys[g_ui.imageDraggingSlider], val);
+            g_dirty.store(true);
+        }
 
         TRACKMOUSEEVENT tme = {sizeof(tme), TME_LEAVE, hwnd, 0};
         TrackMouseEvent(&tme);
@@ -517,7 +533,7 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         {
             bool anyModalOpen = g_ui.settingsOpen || g_ui.speedMenuOpen || g_ui.qualityMenuOpen ||
                                 g_ui.eqMenuOpen || g_ui.subMenuOpen || g_ui.audioMenuOpen ||
-                                g_ui.chapterMenuOpen;
+                                g_ui.chapterMenuOpen || g_ui.imageMenuOpen;
             bool inPlArea = (g_ui.playlistOpen && !g_ui.fullscreen && pt.x >= g_ui.winW);
             if (pt.y >= 0 && pt.y <= curTopH() && !anyModalOpen && !inPlArea) {
                 if (hitTestTopbarIcon(pt.x, pt.y, g_ui.winW) < 0)
@@ -557,7 +573,7 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         bool inPlaylistArea = (g_ui.playlistOpen && !g_ui.fullscreen && mx >= g_ui.winW);
         bool anyModalOpen = g_ui.settingsOpen || g_ui.speedMenuOpen || g_ui.qualityMenuOpen ||
                             g_ui.eqMenuOpen || g_ui.subMenuOpen || g_ui.audioMenuOpen ||
-                            g_ui.chapterMenuOpen;
+                            g_ui.chapterMenuOpen || g_ui.imageMenuOpen;
         if (my >= 0 && my <= curTopH() && !inPlaylistArea && !anyModalOpen) {
             int icon = hitTestTopbarIcon(mx, my, g_ui.winW);
             LOG_TRACE("MAIN", "topbar click mx=%d my=%d winW=%d icon=%d", mx, my, g_ui.winW, icon);
@@ -839,6 +855,84 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     g_ui.eqMenuOpen = false;
                 }
             }
+            // --- 图像调节面板 ---
+            if (g_ui.imageMenuOpen) {
+                Row1Layout L;
+                layoutRow1(g_ui.winW, sbTopY(), false, L);
+                int panelW = U(320), panelH = U(280);
+                int panelX = L.imgBtn.x - panelW + U(10);
+                int panelY = sbTopY() - panelH - U(10);
+                if (panelX < U(8)) panelX = U(8);
+                if (panelY < U(8)) panelY = U(8);
+                int cr = U(8);
+                // 关闭按钮
+                int closeR = U(10);
+                int closeCx = panelX + panelW - U(20);
+                int closeCy = panelY + U(18);
+                if (mx >= closeCx - closeR && mx <= closeCx + closeR &&
+                    my >= closeCy - closeR && my <= closeCy + closeR) {
+                    g_ui.imageMenuOpen = false;
+                    g_dirty.store(true);
+                    return 0;
+                }
+                // 面板内?
+                if (mx >= panelX && mx <= panelX + panelW && my >= panelY && my <= panelY + panelH) {
+                    int sliderX = panelX + U(80);
+                    int sliderW = panelW - U(160);
+                    int rowH = U(40);
+                    int baseY = panelY + U(40);
+                    int vals[] = {g_cfg.brightness, g_cfg.contrast, g_cfg.saturation, g_cfg.gamma};
+                    const char* keys[] = {"brt", "con", "sat", "gam"};
+                    bool hitSlider = false;
+                    // 4 个滑块行
+                    for (int i = 0; i < 4; ++i) {
+                        int ry = baseY + i * rowH;
+                        if (mx >= sliderX - U(8) && mx <= sliderX + sliderW + U(8) &&
+                            my >= ry && my <= ry + rowH) {
+                            float norm = (float)(mx - sliderX) / sliderW;
+                            if (norm < 0.0f) norm = 0.0f; if (norm > 1.0f) norm = 1.0f;
+                            int val = (int)(norm * 200.0f - 100.0f);
+                            applySetting(keys[i], val);
+                            g_ui.imageDraggingSlider = i;
+                            SetCapture(hwnd);
+                            hitSlider = true;
+                            break;
+                        }
+                    }
+                    if (!hitSlider) {
+                        // 去隔行开关
+                        int swY = baseY + 4 * rowH;
+                        int swX = panelX + panelW - U(60);
+                        if (mx >= swX && mx <= swX + U(40) && my >= swY && my <= swY + U(30)) {
+                            applySetting("deint", g_cfg.deinterlace ? 0 : 1);
+                        }
+                        // 色调映射循环
+                        int tmY = swY + U(40);
+                        int tmX = panelX + panelW - U(80);
+                        if (mx >= tmX && mx <= tmX + U(70) && my >= tmY && my <= tmY + U(26)) {
+                            g_cfg.toneMapping = (g_cfg.toneMapping + 1) % 5;
+                            applySetting("tm", g_cfg.toneMapping);
+                        }
+                        // 色域映射循环
+                        int gmY = tmY + U(32);
+                        if (mx >= tmX && mx <= tmX + U(70) && my >= gmY && my <= gmY + U(26)) {
+                            g_cfg.gamutMapping = (g_cfg.gamutMapping + 1) % 4;
+                            applySetting("gm", g_cfg.gamutMapping);
+                        }
+                        // HDR 峰值检测开关
+                        int hpY = gmY + U(32);
+                        if (mx >= swX && mx <= swX + U(40) && my >= hpY && my <= hpY + U(30)) {
+                            applySetting("hdrpk", g_cfg.hdrPeakDetect ? 0 : 1);
+                        }
+                        g_ui.visible = true;
+                        g_ui.hideAt = SDL_GetTicks() + ui::CTRLBAR_HIDE_MS;
+                        g_dirty.store(true);
+                        return 0;
+                    }
+                } else {
+                    g_ui.imageMenuOpen = false;
+                }
+            }
             // --- 锟斤拷幕锟斤拷选锟斤拷说锟?---
             if (g_ui.subMenuOpen) {
                 auto subs = g_mpv->subTracks();
@@ -1040,11 +1134,21 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 g_ui.eqMenuOpen = !g_ui.eqMenuOpen;
                 g_ui.eqDraggingBand = -1;
             }
+            else if (inRc(L.imgBtn)) {
+                g_ui.imageMenuOpen = !g_ui.imageMenuOpen;
+                g_ui.eqMenuOpen = false;
+                g_ui.subMenuOpen = false;
+                g_ui.audioMenuOpen = false;
+                g_ui.chapterMenuOpen = false;
+                g_ui.speedMenuOpen = false;
+                g_ui.qualityMenuOpen = false;
+            }
             else if (inRc(L.qualityBtn)) {
                 g_ui.qualityMenuOpen = !g_ui.qualityMenuOpen;
                 g_ui.subMenuOpen = false;
                 g_ui.audioMenuOpen = false;
                 g_ui.chapterMenuOpen = false;
+                g_ui.imageMenuOpen = false;
             }
             else if (mx >= L.volIconCx - U(17) && mx <= L.volIconCx + U(17) &&
                      my >= L.cy - U(17) && my <= L.cy + U(17)) {
@@ -1054,6 +1158,7 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             }
             else if (inRc(L.setBtn)) {
                 g_ui.settingsOpen = !g_ui.settingsOpen;
+                g_ui.imageMenuOpen = false;
                 LOG_INFO("MAIN", "setBtn click (%d,%d) rect[%d,%d %dx%d] -> open=%d",
                          mx, my, L.setBtn.x, L.setBtn.y, L.setBtn.w, L.setBtn.h,
                          g_ui.settingsOpen ? 1 : 0);
@@ -1169,6 +1274,9 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
         if (g_ui.eqDraggingBand >= 0) {
             g_ui.eqDraggingBand = -1;
+        }
+        if (g_ui.imageDraggingSlider >= 0) {
+            g_ui.imageDraggingSlider = -1;
         }
         if (g_ui.sbDragging) {
             g_ui.sbDragging = false;

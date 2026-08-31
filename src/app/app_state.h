@@ -114,6 +114,10 @@ struct UiState {
 
     // Shortcuts help overlay
     bool   shortcutsOpen = false;
+
+    // Image adjustments panel
+    bool   imageMenuOpen = false;
+    int    imageDraggingSlider = -1;  // -1=none, 0=brightness 1=contrast 2=saturation 3=gamma
 };
 
 // ---- extern globals (defined in main.cpp) ----
@@ -228,6 +232,26 @@ namespace i18n {
     inline const char* subBottom()     { return T("底部", "Bottom"); }
     inline const char* subCenter()     { return T("居中", "Center"); }
     inline const char* subTop()        { return T("顶部", "Top"); }
+    // 画面调节面板
+    inline const char* image()         { return T("画面", "Image"); }
+    inline const char* imageTitle()    { return T("画面调节", "Image Adjustments"); }
+    inline const char* brightness()    { return T("亮度", "Brightness"); }
+    inline const char* contrast()      { return T("对比度", "Contrast"); }
+    inline const char* saturation()    { return T("饱和度", "Saturation"); }
+    inline const char* gammaLabel()    { return T("Gamma", "Gamma"); }
+    inline const char* deinterlaceLabel() { return T("去隔行", "Deinterlace"); }
+    inline const char* toneMappingLabel() { return T("色调映射", "Tone Mapping"); }
+    inline const char* gamutMappingLabel(){ return T("色域映射", "Gamut Mapping"); }
+    inline const char* hdrPeakLabel()     { return T("HDR 峰值检测", "HDR Peak Detect"); }
+    inline const char* tmAuto()        { return T("自动", "Auto"); }
+    inline const char* tmClip()        { return T("裁剪", "Clip"); }
+    inline const char* tmBT2390()      { return T("BT.2390", "BT.2390"); }
+    inline const char* tmBT2446A()     { return T("BT.2446A", "BT.2446A"); }
+    inline const char* tmST209410()    { return T("ST2094-10", "ST2094-10"); }
+    inline const char* gmAuto()        { return T("自动", "Auto"); }
+    inline const char* gmPerceptual()  { return T("感知", "Perceptual"); }
+    inline const char* gmClip()        { return T("裁剪", "Clip"); }
+    inline const char* gmRelative()    { return T("相对色度", "Relative"); }
 }
 
 // ---- format helpers ----
@@ -259,7 +283,7 @@ extern const QualityPreset QUALITY_PRESETS[];
 struct Row1Layout {
     SDL_Rect prev, play, next;
     int timeX;
-    SDL_Rect subBtn, audioBtn, chapterBtn, speedBtn, qualityBtn, abBtn, eqBtn, setBtn, fullBtn;
+    SDL_Rect subBtn, audioBtn, chapterBtn, speedBtn, qualityBtn, abBtn, eqBtn, setBtn, fullBtn, imgBtn;
     int volIconCx;
     int volSliderX, volSliderW;
     int cy;
@@ -275,6 +299,18 @@ struct SettingsGeom {
     int chipY, chipH, chipW;
     int langRowY;
     int langSegX, langSegW, langSegH;
+};
+
+// ---- image panel geometry ----
+struct ImagePanelGeom {
+    int panelX, panelY, panelW, panelH;
+    int closeCx, closeCy, closeR;
+    int sliderY[4];       // brightness/contrast/saturation/gamma 行Y
+    int switchY;          // 去隔行行Y
+    int optY[3];          // toneMapping/gamutMapping/hdrPeak 行Y
+    int sliderX, sliderW; // 滑条区左上角X和宽度
+    int minusX, plusX;    // 减/加按钮X
+    int valX;             // 数值显示X
 };
 
 // ---- seekbar geometry (inline, depend on g_ui/g_uiBase) ----
