@@ -854,7 +854,7 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             }
             // --- 图像调节面板 ---
             if (g_ui.imageMenuOpen) {
-                int panelW = U(380), panelH = U(340);
+                int panelW = U(380), panelH = U(370);
                 int panelX = g_ui.winW / 2 - panelW / 2;
                 int panelY = g_ui.winH / 2 - panelH / 2;
                 // 关闭按钮

@@ -1840,7 +1840,7 @@ void renderOverlay() {
 
     // --- 图像调节面板 ---
     if (g_ui.imageMenuOpen) {
-        int panelW = U(380), panelH = U(340);
+        int panelW = U(380), panelH = U(370);
         int panelX = w / 2 - panelW / 2;
         int panelY = h / 2 - panelH / 2;
         // 圆角背景
