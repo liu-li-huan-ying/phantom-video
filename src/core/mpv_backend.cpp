@@ -5,9 +5,51 @@
 #include <cstring>
 #include <cstdlib>
 #include <SDL.h>
+#include <dxgi.h>
 
 MpvBackend::~MpvBackend() {
     shutdown();
+}
+
+// DXGI 枚举适配器，找到独显（NVIDIA/AMD）并返回其描述
+static std::string findDiscreteGpu() {
+    IDXGIFactory1* factory = nullptr;
+    HRESULT hr = CreateDXGIFactory1(__uuidof(IDXGIFactory1), (void**)&factory);
+    if (FAILED(hr) || !factory) return {};
+
+    std::string result;
+    IDXGIAdapter1* bestAdapter = nullptr;
+    SIZE_T bestVram = 0;
+
+    for (UINT i = 0; factory->EnumAdapters1(i, &bestAdapter) != DXGI_ERROR_NOT_FOUND; ++i) {
+        DXGI_ADAPTER_DESC1 desc;
+        if (SUCCEEDED(bestAdapter->GetDesc1(&desc))) {
+            // 跳过软件适配器
+            if (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) {
+                bestAdapter->Release();
+                continue;
+            }
+            LOG_INFO("MPV", "DXGI adapter %d: %S VRAM=%zu MB",
+                     i, desc.Description, desc.DedicatedVideoMemory / (1024*1024));
+            // 选择独显（dedicated VRAM 最大的）
+            if (desc.DedicatedVideoMemory > bestVram) {
+                bestVram = desc.DedicatedVideoMemory;
+                // 释放之前的
+                if (result.empty() == false) {
+                    // result already has previous best name
+                }
+                // 转换为 UTF-8
+                int len = WideCharToMultiByte(CP_UTF8, 0, desc.Description, -1, nullptr, 0, nullptr, nullptr);
+                if (len > 0) {
+                    result.resize(len - 1);
+                    WideCharToMultiByte(CP_UTF8, 0, desc.Description, -1, result.data(), len, nullptr, nullptr);
+                }
+            }
+        }
+        bestAdapter->Release();
+    }
+    factory->Release();
+    return result;
 }
 
 bool MpvBackend::init(HWND hwnd, bool enableZeroCopy) {
@@ -22,7 +64,19 @@ bool MpvBackend::init(HWND hwnd, bool enableZeroCopy) {
     mpv_set_option_string(mpv_, "no-osd-bar", "yes");
     mpv_set_option_string(mpv_, "ao", "wasapi");
     mpv_set_option_string(mpv_, "vo", "gpu-next");
+    mpv_set_option_string(mpv_, "gpu-api", "d3d11");
     mpv_set_option_string(mpv_, "gpu-context", "d3d11");
+
+    // DXGI 枚举独显，强制 mpv 使用独显渲染
+    {
+        std::string gpu = findDiscreteGpu();
+        if (!gpu.empty()) {
+            mpv_set_option_string(mpv_, "gpu-device", gpu.c_str());
+            LOG_INFO("MPV", "gpu-device -> %s (discrete GPU)", gpu.c_str());
+        } else {
+            LOG_WARN("MPV", "no discrete GPU found via DXGI, using default adapter");
+        }
+    }
     // 四级 hwdec 降级链首: auto-copy-safe(最稳基线, 禁用 zero-copy)
     // enableZeroCopy=true 时直接用 auto-safe(允许 zero-copy)
     mpv_set_option_string(mpv_, "hwdec", enableZeroCopy ? "auto-safe" : "auto-copy-safe");

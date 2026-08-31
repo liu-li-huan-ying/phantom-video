@@ -1718,41 +1718,58 @@ void renderOverlay() {
             g_ui.osdActive = false;
         } else {
             std::string vfmt   = mpvStr("video-format");
+            std::string vcodec = mpvStr("video-codec");
             std::string vfps   = mpvStr("container-fps");
-            if (vfps.empty()) vfps = mpvStr("estimated-vf-fps");
+            std::string effps  = mpvStr("estimated-vf-fps");
+            std::string dfps   = mpvStr("display-fps");
             std::string vbr    = formatBitrate(mpvStr("video-bitrate"));
             std::string afmt   = mpvStr("audio-codec-name");
             std::string asr    = mpvStr("audio-params/samplerate");
             std::string ach    = mpvStr("audio-params/channel-count");
+            std::string hwdec  = mpvStr("hwdec-current");
             int vw = g_mpv->videoWidth(), vh = g_mpv->videoHeight();
 
-            char line1[128] = {}, line2[64] = {}, line3[96] = {}, line4[64] = {};
+            // 确定实时帧率: 优先用 estimated-vf-fps (经过滤镜后的实际帧率)
+            std::string realtimeFps = effps.empty() ? vfps : effps;
+            bool vsActive = !mpvStr("vf").empty();
+
+            char line1[128] = {}, line2[128] = {}, line3[96] = {}, line4[96] = {};
+            char line5[96] = {};
             if (!vfmt.empty())
-                std::snprintf(line1, sizeof(line1), "%s  %dx%d%s%s",
-                    vfmt.c_str(), vw, vh,
-                    vfps.empty() ? "" : " @ ", vfps.c_str());
-            if (!vbr.empty()) std::snprintf(line2, sizeof(line2), "%s", vbr.c_str());
+                std::snprintf(line1, sizeof(line1), "%s  %dx%d", vfmt.c_str(), vw, vh);
+            if (!realtimeFps.empty() || !vfps.empty()) {
+                std::snprintf(line2, sizeof(line2), "src:%s fps  out:%s fps",
+                    vfps.empty() ? "?" : vfps.c_str(),
+                    realtimeFps.empty() ? "?" : realtimeFps.c_str());
+            }
+            if (!vbr.empty()) std::snprintf(line3, sizeof(line3), "%s", vbr.c_str());
             if (!afmt.empty()) {
                 int sr = std::atoi(asr.c_str());
-                std::snprintf(line3, sizeof(line3), "%s %s Hz %sch",
+                std::snprintf(line4, sizeof(line4), "%s %s Hz %sch",
                     afmt.c_str(),
                     sr > 0 ? asr.c_str() : "?",
                     ach.empty() ? "?" : ach.c_str());
             }
-            const char* hwPath = g_mpv->hwdecCurrent();
-            if (hwPath && hwPath[0] && std::strcmp(hwPath, "no") != 0)
-                std::snprintf(line4, sizeof(line4), "hwdec: %s%s", hwPath,
-                              g_mpv->hwdecRetryCount() > 0 ? " (fallback)" : "");
+            // hwdec + GPU 信息
+            if (!hwdec.empty() && hwdec != "no") {
+                std::snprintf(line5, sizeof(line5), "hwdec: %s%s%s",
+                    hwdec.c_str(),
+                    g_mpv->hwdecRetryCount() > 0 ? " (fallback)" : "",
+                    vsActive ? "  |  VS active" : "");
+            } else if (vsActive) {
+                std::snprintf(line5, sizeof(line5), "hwdec: no  |  VS active");
+            }
 
-            // ���ߴ�������
+            // 计算总行数
             int lines = 0;
             if (line1[0]) ++lines;
             if (line2[0]) ++lines;
             if (line3[0]) ++lines;
             if (line4[0]) ++lines;
+            if (line5[0]) ++lines;
             if (lines > 0) {
                 int padX = U(14), padY = U(10), lineH = U(22);
-                int boxW = U(340), boxH = padY * 2 + lines * lineH;
+                int boxW = U(380), boxH = padY * 2 + lines * lineH;
                 int boxX = U(16), boxY = curTopH() + U(12);
                 SDL_Rect bg = {boxX, boxY, boxW, boxH};
                 SDL_SetRenderDrawColor(g_sdlRdr, 11, 11, 11, 200);
@@ -1762,9 +1779,10 @@ void renderOverlay() {
 
                 int ty = boxY + padY;
                 if (line1[0]) { g_text.drawText(boxX + padX, ty, line1, Tpt(12), 255, 255, 255); ty += lineH; }
-                if (line2[0]) { g_text.drawText(boxX + padX, ty, line2, Tpt(12), ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B); ty += lineH; }
+                if (line2[0]) { g_text.drawText(boxX + padX, ty, line2, Tpt(12), ui::ACCENT2_R, ui::ACCENT2_G, ui::ACCENT2_B); ty += lineH; }
                 if (line3[0]) { g_text.drawText(boxX + padX, ty, line3, Tpt(12), ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B); ty += lineH; }
-                if (line4[0]) { g_text.drawText(boxX + padX, ty, line4, Tpt(12), 0, 200, 120); }
+                if (line4[0]) { g_text.drawText(boxX + padX, ty, line4, Tpt(12), ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B); ty += lineH; }
+                if (line5[0]) { g_text.drawText(boxX + padX, ty, line5, Tpt(12), 0, 200, 120); }
             }
         }
     }

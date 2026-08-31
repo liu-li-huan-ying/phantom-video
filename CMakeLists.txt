@@ -62,7 +62,7 @@ foreach(f ${SDL2_CFLAGS_OTHER})
   endif()
 endforeach()
 
-target_link_libraries(phantom_video PRIVATE ${SDL2_LINK} ${FFMPEG_LIBS} sonic ${MPV_LIB} shell32 dwmapi msimg32)
+target_link_libraries(phantom_video PRIVATE ${SDL2_LINK} ${FFMPEG_LIBS} sonic ${MPV_LIB} shell32 dwmapi msimg32 dxgi)
 
 # 拷贝运行时 DLL 到构建目录
 add_custom_command(TARGET phantom_video POST_BUILD
