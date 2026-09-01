@@ -1779,10 +1779,17 @@ void renderOverlay() {
             {
                 char* p = lines_buf[lineCount];
                 int n = 0;
-                if (!evfps.empty() && !vfps.empty() && evfps != vfps)
-                    n += std::snprintf(p+n, 256-n, "%s: %s", i18n::osdVfFps(), evfps.c_str());
-                else if (!vfps.empty())
+                bool hasVS = !vf.empty() && vf.find("vapoursynth") != std::string::npos;
+                if (hasVS && !evfps.empty() && evfps != "0" && evfps != "0.000000") {
+                    double ev = std::atof(evfps.c_str());
+                    double sv = std::atof(vfps.c_str());
+                    if (ev > 0 && (sv <= 0 || std::abs(ev - sv) > 0.5))
+                        n += std::snprintf(p+n, 256-n, "%s: %s", i18n::osdVfFps(), evfps.c_str());
+                    else
+                        n += std::snprintf(p+n, 256-n, "%s: -", i18n::osdVfFps());
+                } else {
                     n += std::snprintf(p+n, 256-n, "%s: -", i18n::osdVfFps());
+                }
                 if (n > 0) lineCount++;
             }
 
