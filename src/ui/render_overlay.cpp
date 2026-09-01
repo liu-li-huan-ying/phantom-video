@@ -1779,7 +1779,7 @@ void renderOverlay() {
             {
                 char* p = lines_buf[lineCount];
                 int n = 0;
-                if (!evfps.empty() && evfps != vfps)
+                if (!evfps.empty() && !vfps.empty() && evfps != vfps)
                     n += std::snprintf(p+n, 256-n, "%s: %s", i18n::osdVfFps(), evfps.c_str());
                 else if (!vfps.empty())
                     n += std::snprintf(p+n, 256-n, "%s: -", i18n::osdVfFps());
@@ -1800,10 +1800,6 @@ void renderOverlay() {
                         n += std::snprintf(p+n, 256-n, "%s", i18n::osdVsSuperRes());
                     else
                         n += std::snprintf(p+n, 256-n, "active");
-                    double srcFps = std::atof(vfps.c_str());
-                    double outFps = std::atof(evfps.c_str());
-                    if (srcFps > 0 && outFps > 1.0 && outFps > srcFps * 1.2)
-                        n += std::snprintf(p+n, 256-n, "  %.0f->%.0f fps", srcFps, outFps);
                     lineCount++;
                 }
             }
