@@ -1800,8 +1800,10 @@ void renderOverlay() {
                         n += std::snprintf(p+n, 256-n, "%s", i18n::osdVsSuperRes());
                     else
                         n += std::snprintf(p+n, 256-n, "active");
-                    if (!vfps.empty() && !evfps.empty() && evfps != vfps)
-                        n += std::snprintf(p+n, 256-n, "  %s->%s fps", vfps.c_str(), evfps.c_str());
+                    double srcFps = std::atof(vfps.c_str());
+                    double outFps = std::atof(evfps.c_str());
+                    if (srcFps > 0 && outFps > 1.0 && outFps > srcFps * 1.2)
+                        n += std::snprintf(p+n, 256-n, "  %.0f->%.0f fps", srcFps, outFps);
                     lineCount++;
                 }
             }
