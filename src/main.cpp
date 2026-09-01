@@ -6,7 +6,6 @@
 
 const char* PHANTOM_VERSION = "0.1.0";
 
-#include <windows.h>
 #include <shellapi.h>
 #include <dwmapi.h>
 #include <cstdio>
@@ -823,14 +822,117 @@ int main(int argc, char** argv) {
     Logger::instance().setLevel(diag ? LogLevel::Trace : LogLevel::Info);
     LOG_INFO("MAIN", "phantom video (mpv + SDL2 overlay) starting");
 
+    // Crash handler: write crash info to absolute path
+    {
+        static const char* crashLog = "G:\\vedioplayer\\build\\crash.log";
+        AddVectoredExceptionHandler(1, [](PEXCEPTION_POINTERS ep) -> LONG {
+            auto* rec = ep->ExceptionRecord;
+            FILE* f = fopen(crashLog, "a");
+            if (f) {
+                fprintf(f, "code=0x%08lx addr=%p flags=0x%lx\n",
+                        rec->ExceptionCode, rec->ExceptionAddress, rec->ExceptionFlags);
+                for (DWORD i = 0; i < rec->NumberParameters; i++)
+                    fprintf(f, "  p%lu=0x%p\n", i, (void*)rec->ExceptionInformation[i]);
+                fflush(f);
+                fclose(f);
+            }
+            return EXCEPTION_CONTINUE_SEARCH;
+        });
+        SetUnhandledExceptionFilter([](PEXCEPTION_POINTERS ep) -> LONG {
+            auto* rec = ep->ExceptionRecord;
+            FILE* f = fopen(crashLog, "a");
+            if (f) {
+                fprintf(f, "UNHANDLED code=0x%08lx addr=%p\n",
+                        rec->ExceptionCode, rec->ExceptionAddress);
+                fflush(f);
+                fclose(f);
+            }
+            return EXCEPTION_CONTINUE_SEARCH;
+        });
+        // CRT abort handler
+        _set_purecall_handler([]() {
+            FILE* f = fopen(crashLog, "a");
+            if (f) { fprintf(f, "PURECALL\n"); fclose(f); }
+        });
+        _set_invalid_parameter_handler([](const wchar_t*, const wchar_t*, const wchar_t*, unsigned int, uintptr_t) {
+            FILE* f = fopen(crashLog, "a");
+            if (f) { fprintf(f, "INVALID_PARAM\n"); fclose(f); }
+        });
+    }
+
     loadConfig(configPath(), g_cfg);
 
-    // VapourSynth: 设置 VSSCRIPT_PATH 环境变量，使 mpv 能找到 VSScript.dll
+    // VapourSynth: 设置环境变量，使 mpv 能找到 VSScript.dll 和 Python 模块
     {
         std::string vsDir = exeDir() + "vapoursynth\\runtime\\";
-        SetEnvironmentVariableA("VSSCRIPT_PATH", vsDir.c_str());
-        LOG_INFO("MAIN", "VSSCRIPT_PATH -> %s", vsDir.c_str());
+        // mpv vf_vapoursynth.c 的 drv_vss_init：
+        //   const char *vsscript_path = getenv("VSSCRIPT_PATH");
+        //   dlopen(vsscript_path, dl_mode);  // 直接用环境变量值做 dlopen！
+        // 因此 VSSCRIPT_PATH 必须是完整 DLL 路径，不能是目录！
+        // 但如果 VSSCRIPT_PATH 不设，mpv 会用 dlopen("VSScript") 按名字搜索，
+        // 此时预加载已确保 DLL 在进程中 → LoadLibraryW 直接返回已有句柄。
+        // 最简方案：不设 VSSCRIPT_PATH，依赖预加载 + APPLICATION_DIR 搜索。
+        // SetEnvironmentVariableA("VSSCRIPT_PATH", ...); // 不设！
+        // SetEnvironmentVariableA("VSSCRIPTPATH", ...);  // 不设！
+        // VSSCRIPT_PATH: mpv 的 drv_vss_init 做 dlopen(getenv("VSSCRIPT_PATH"))
+        // 如果不设，mpv 用 dlopen("VSScript") 按名字搜索。
+        // 但 SetDefaultDllDirectories 限制了搜索路径，按名字可能找不到。
+        // 直接指向 runtime 目录的完整 DLL 路径，跟 vspipe 一样的加载路径。
+        std::string vsScriptDll = vsDir + "VSScript.dll";
+        SetEnvironmentVariableA("VSSCRIPT_PATH", vsScriptDll.c_str());
+        LOG_INFO("MAIN", "VSSCRIPT_PATH -> %s", vsScriptDll.c_str());
+        // PYTHONHOME: VSScript.dll 用它定位 Python 标准库 (Lib/, include/ 等)
+        // vsDir 指向包含 python313.dll 的目录结构根
+        SetEnvironmentVariableA("PYTHONHOME", vsDir.c_str());
+        LOG_INFO("MAIN", "PYTHONHOME -> %s", vsDir.c_str());
+        // PYTHONPATH: VSScript.dll 内部用它来 import vapoursynth
+        std::string pyPath = vsDir + "Lib\\site-packages";
+        SetEnvironmentVariableA("PYTHONPATH", pyPath.c_str());
+        LOG_INFO("MAIN", "PYTHONPATH -> %s", pyPath.c_str());
+
+        // 预加载 VapourSynth.dll（VSScript 依赖它）。
+        // 不预加载 VSScript.dll —— 由 mpv 通过 VSSCRIPT_PATH 从 runtime 目录加载
+        // （与 vspipe 一致的加载路径，确保 getLibraryPath() 返回 runtime 路径）。
+        // 不预加载 python313.dll / python3.dll！
+        std::string buildDir = exeDir();
+        auto preloadDll = [&](const char* name) {
+            std::string path = buildDir + name;
+            HMODULE h = LoadLibraryExW(
+                std::wstring(path.begin(), path.end()).c_str(),
+                nullptr, 0x8);  // LOAD_WITH_ALTERED_SEARCH_PATH
+            if (h) {
+                LOG_INFO("MAIN", "VS preload %s OK", name);
+            } else {
+                LOG_WARN("MAIN", "VS preload %s FAILED (err=%lu)", name, GetLastError());
+            }
+        };
+        // 不预加载任何 DLL！让 VSScript 从 runtime 目录加载一切
+        // 避免两份 DLL 加载导致 C++ 异常跨 DLL 边界
+
+        // AddDllDirectory: 将 exe 目录注册到 USER_DIRS 搜索列表
+        // MinGW 无 AddDllDirectory 声明，手动获取
+        typedef PVOID (WINAPI *AddDllDirFunc)(PCWSTR);
+        auto pAddDllDir = (AddDllDirFunc)GetProcAddress(
+            GetModuleHandleW(L"kernel32.dll"), "AddDllDirectory");
+        if (pAddDllDir) {
+            std::wstring wBuildDir(buildDir.begin(), buildDir.end());
+            pAddDllDir(wBuildDir.c_str());
+            LOG_INFO("MAIN", "AddDllDirectory: %s (viaGetProcAddress)", buildDir.c_str());
+        }
+
+        // SetSearchPathMode(BASE_SEARCH_PATH_ENABLE_SAFE_SEARCHMODE) 
+        // 启用安全搜索模式，确保 exe 目录优先被搜索
+        typedef BOOL (WINAPI *SetSearchPathModeFunc)(DWORD);
+        auto pSetSearchPath = (SetSearchPathModeFunc)GetProcAddress(
+            GetModuleHandleW(L"kernel32.dll"), "SetSearchPathMode");
+        if (pSetSearchPath) {
+            pSetSearchPath(0x100);  // BASE_SEARCH_PATH_ENABLE_SAFE_SEARCHMODE
+        }
     }
+
+    // 设置工作目录为 exe 所在目录，确保 VSScript 的相对路径能解析到脚本文件
+    SetCurrentDirectoryA(exeDir().c_str());
+    LOG_INFO("MAIN", "CWD set to %s", exeDir().c_str());
 
     SDL_SetMainReady();
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
@@ -960,6 +1062,10 @@ wc.style         = CS_DBLCLKS;   // ���� WM_LBUTTONDBLCLK
         showToast(msg.c_str());
     };
 
+    // VS 滤镜必须在 mpv_initialize 前设置 --vf 选项
+    if (g_cfg.interpolation || g_cfg.superRes) {
+        mpv.setInitVfOption(g_cfg.interpolation, g_cfg.superRes);
+    }
     if (!mpv.init(g_mpvHwnd, g_cfg.enableZeroCopy != 0)) { LOG_ERROR("MAIN", "mpv init failed"); return 1; }
     LOG_INFO("MAIN", "mpv.init took %u ms", SDL_GetTicks() - t0);
 
@@ -979,7 +1085,7 @@ wc.style         = CS_DBLCLKS;   // ���� WM_LBUTTONDBLCLK
     // 注意: 不在启动时调用 applyAudioOutput，避免 audio-channels 变更阻塞
     // 用户在设置面板切换时才生效
     if (g_cfg.motionInterp) applyMotionInterp(true);
-    if (g_cfg.interpolation || g_cfg.superRes) g_mpv->applyVapourSynthFilter(g_cfg.interpolation, g_cfg.superRes);
+    // 不在启动时设置 VS 滤镜——必须等文件加载后解码器就绪才能设置 vf
     if (g_cfg.hiQScale) {
         mpvSetOpt("scale", "ewa_lanczossharp");
         mpvSetOpt("cscale", "ewa_lanczossharp");

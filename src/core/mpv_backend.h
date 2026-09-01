@@ -122,7 +122,8 @@ public:
     void setHdrPeakDetect(bool on);
 
     // ---- VapourSynth 滤镜（插帧 / 超分） ----
-    void applyVapourSynthFilter(int interp, int superRes);  // interp=0/1, superRes=0/1
+    void setInitVfOption(int interp, int superRes);  // 在 mpv_initialize 前调用
+    void applyVapourSynthFilter(int interp, int superRes);  // 运行时切换
     void clearVapourSynthFilter();
 
     State state() const { return state_.load(); }
@@ -186,6 +187,7 @@ private:
     int    aspectIdx_ = 0;                  // 画面比例索引 0=auto 1=16:9 2=4:3 3=1:1
     int    audioOutput_ = 0;                // 音频输出模式 0=立体声 1=5.1 2=7.1 3=直通
     bool   audioExclusive_ = false;         // WASAPI 独占模式
+    std::string initVfOption_;              // mpv_initialize 前设置的 vf 选项
     bool   eqEnabled_ = false;              // 均衡器开关
     float  eqGains_[6] = {};                // 均衡器 6 频段增益
 };

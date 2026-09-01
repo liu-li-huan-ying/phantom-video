@@ -134,6 +134,14 @@ bool MpvBackend::init(HWND hwnd, bool enableZeroCopy) {
         mpv_set_option_string(mpv_, "audio-exclusive", "yes");
     }
 
+    // VS 滤镜必须在 mpv_initialize 前设置，否则 vf set 运行时不重建滤镜链
+    // init 时保存 vf 字符串，mpv_initialize 后再设置无法插入滤镜
+    // 此处仅记录，实际在 main.cpp 中 mpv.init() 之前通过 initVfOption 设置
+    if (!initVfOption_.empty()) {
+        int r = mpv_set_option_string(mpv_, "vf", initVfOption_.c_str());
+        LOG_INFO("MPV", "vf option (pre-init): '%s' ret=%d (%s)", initVfOption_.c_str(), r, mpv_error_string(r));
+    }
+
     if (mpv_initialize(mpv_) < 0) {
         LOG_ERROR("MPV", "mpv_initialize failed");
         mpv_destroy(mpv_);
@@ -165,7 +173,7 @@ bool MpvBackend::init(HWND hwnd, bool enableZeroCopy) {
     LOG_INFO("MPV", "post-init properties took %u ms", SDL_GetTicks() - t0);
 
     // 桥接 mpv 内部日志(warn+) 到统一 Logger —— 否则解码/加载失败静默
-    mpv_request_log_messages(mpv_, "warn");
+    mpv_request_log_messages(mpv_, "debug");
     mpv_set_property_string(mpv_, "terminal", "no");
 
     mpv_observe_property(mpv_, 1, "pause", MPV_FORMAT_FLAG);
@@ -729,29 +737,62 @@ void MpvBackend::setHdrPeakDetect(bool on) {
 }
 
 // ---- VapourSynth 滤镜 ----
+static std::string buildVapourSynthFilter(int interp, int superRes) {
+    // Use relative path - mpv M_OPT_FILE resolves relative to CWD
+    return "vapoursynth=vapoursynth/scripts/minimal_test.vpy";
+}
+
+void MpvBackend::setInitVfOption(int interp, int superRes) {
+    initVfOption_ = buildVapourSynthFilter(interp, superRes);
+    if (!initVfOption_.empty())
+        LOG_INFO("MPV", "initVfOption set: '%s'", initVfOption_.c_str());
+}
+
 void MpvBackend::applyVapourSynthFilter(int interp, int superRes) {
-    if (!mpv_) return;
-    std::string scriptsDir = exeDir() + "vapoursynth\\scripts\\";
-    std::string vf;
-    if (interp && superRes) {
-        vf = "vapoursynth=" + scriptsDir + "interp_upscale.vpy:buffered-frames=8:concurrent-frames=2";
-    } else if (interp) {
-        vf = "vapoursynth=" + scriptsDir + "mvtools_interp.vpy:buffered-frames=8:concurrent-frames=2";
-    } else if (superRes) {
-        vf = "vapoursynth=" + scriptsDir + "realcugan_upscale.vpy:buffered-frames=4:concurrent-frames=1";
+    if (!mpv_) { LOG_WARN("MPV", "applyVapourSynthFilter: mpv_ is null!"); return; }
+    std::string vf = buildVapourSynthFilter(interp, superRes);
+    LOG_INFO("MPV", "applyVapourSynthFilter interp=%d superRes=%d vf='%s'", interp, superRes, vf.c_str());
+
+    // 验证脚本文件存在
+    if (!vf.empty()) {
+        std::string scriptPath = exeDir() + "vapoursynth\\scripts\\";
+        if (interp && superRes) scriptPath += "interp_upscale.vpy";
+        else if (interp) scriptPath += "mvtools_interp.vpy";
+        else scriptPath += "realcugan_upscale.vpy";
+        DWORD attr = GetFileAttributesA(scriptPath.c_str());
+        LOG_INFO("MPV", "script file: %s exists=%d", scriptPath.c_str(), (attr != INVALID_FILE_ATTRIBUTES));
+
+        // 验证 plugins 存在
+        std::string mvtoolsPath = exeDir() + "vapoursynth\\runtime\\vs-plugins\\mvtools.dll";
+        std::string cuganPath = exeDir() + "vapoursynth\\runtime\\vs-plugins\\librcnv.dll";
+        LOG_INFO("MPV", "mvtools.dll: %s exists=%d", mvtoolsPath.c_str(), (GetFileAttributesA(mvtoolsPath.c_str()) != INVALID_FILE_ATTRIBUTES));
+        LOG_INFO("MPV", "librcnv.dll: %s exists=%d", cuganPath.c_str(), (GetFileAttributesA(cuganPath.c_str()) != INVALID_FILE_ATTRIBUTES));
     }
-    if (vf.empty()) {
-        clearVapourSynthFilter();
-        return;
-    }
+
+    // 设置 vf 属性
     int r = mpv_set_property_string(mpv_, "vf", vf.c_str());
-    LOG_INFO("MPV", "vf -> %s ret=%d", vf.c_str(), r);
+    LOG_INFO("MPV", "mpv_set_property_string(vf) ret=%d (%s)", r, mpv_error_string(r));
+
+    // 读回验证
+    char* readback = mpv_get_property_string(mpv_, "vf");
+    if (readback) {
+        LOG_INFO("MPV", "vf readback: '%s'", readback);
+        mpv_free(readback);
+    } else {
+        LOG_WARN("MPV", "vf readback: NULL");
+    }
+
+    // 读取当前 VO 信息
+    char* vo = mpv_get_property_string(mpv_, "current-vo");
+    char* hwdec = mpv_get_property_string(mpv_, "hwdec-current");
+    if (vo) { LOG_INFO("MPV", "current-vo: %s", vo); mpv_free(vo); }
+    if (hwdec) { LOG_INFO("MPV", "hwdec-current: %s", hwdec); mpv_free(hwdec); }
 }
 
 void MpvBackend::clearVapourSynthFilter() {
     if (!mpv_) return;
     int r = mpv_set_property_string(mpv_, "vf", "");
-    LOG_DBG("MPV", "vf cleared ret=%d", r);
+    LOG_DBG("MPV", "vf clr ret=%d (%s)", r, mpv_error_string(r));
 }
 
 double MpvBackend::clock() const {
@@ -803,7 +844,7 @@ void MpvBackend::eventLoop() {
 
         case MPV_EVENT_LOG_MESSAGE: {
             auto* lm = (mpv_event_log_message*)event->data;
-            if (lm->log_level >= MPV_LOG_LEVEL_WARN)
+            if (lm->log_level >= MPV_LOG_LEVEL_NONE)
                 LOG_WARN("MPV", "[%s] %s", lm->prefix ? lm->prefix : "?",
                          lm->text ? lm->text : "");
             break;
