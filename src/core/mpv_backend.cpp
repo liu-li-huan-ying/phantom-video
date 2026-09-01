@@ -744,9 +744,9 @@ static std::string buildVapourSynthFilter(int interp, int superRes) {
     static const char* VS_SUPERRES    = "vapoursynth=vapoursynth/scripts/realcugan_upscale.vpy";
     static const char* VS_INTERP_SUPER= "vapoursynth=vapoursynth/scripts/interp_upscale.vpy";
 
-    if (interp > 1 && superRes > 1) return VS_INTERP_SUPER;
-    if (interp > 1)                 return VS_INTERP;
-    if (superRes > 1)               return VS_SUPERRES;
+    if (interp >= 1 && superRes >= 1) return VS_INTERP_SUPER;
+    if (interp >= 1)                  return VS_INTERP;
+    if (superRes >= 1)                return VS_SUPERRES;
     return VS_PASSTHROUGH;
 }
 
@@ -763,10 +763,11 @@ void MpvBackend::applyVapourSynthFilter(int interp, int superRes) {
 
     // 验证脚本文件存在
     if (!vf.empty()) {
-        std::string scriptPath = exeDir() + "vapoursynth\\scripts\\";
+        std::string scriptPath = exeDir() + "vapoursynth/scripts/";
         if (interp && superRes) scriptPath += "interp_upscale.vpy";
         else if (interp) scriptPath += "mvtools_interp.vpy";
-        else scriptPath += "realcugan_upscale.vpy";
+        else if (superRes) scriptPath += "realcugan_upscale.vpy";
+        else scriptPath += "passthrough.vpy";
         DWORD attr = GetFileAttributesA(scriptPath.c_str());
         LOG_INFO("MPV", "script file: %s exists=%d", scriptPath.c_str(), (attr != INVALID_FILE_ATTRIBUTES));
 
