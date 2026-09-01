@@ -739,7 +739,6 @@ void MpvBackend::setHdrPeakDetect(bool on) {
 // ---- VapourSynth 滤镜 ----
 static std::string buildVapourSynthFilter(int interp, int superRes) {
     // All paths relative to CWD (set to exeDir in main.cpp)
-    static const char* VS_PASSTHROUGH = "vapoursynth=vapoursynth/scripts/passthrough.vpy";
     static const char* VS_INTERP      = "vapoursynth=vapoursynth/scripts/mvtools_interp.vpy";
     static const char* VS_SUPERRES    = "vapoursynth=vapoursynth/scripts/realcugan_upscale.vpy";
     static const char* VS_INTERP_SUPER= "vapoursynth=vapoursynth/scripts/interp_upscale.vpy";
@@ -747,7 +746,7 @@ static std::string buildVapourSynthFilter(int interp, int superRes) {
     if (interp >= 1 && superRes >= 1) return VS_INTERP_SUPER;
     if (interp >= 1)                  return VS_INTERP;
     if (superRes >= 1)                return VS_SUPERRES;
-    return VS_PASSTHROUGH;
+    return {};  // 关闭时不加载任何 VS 滤镜
 }
 
 void MpvBackend::setInitVfOption(int interp, int superRes) {
@@ -761,8 +760,14 @@ void MpvBackend::applyVapourSynthFilter(int interp, int superRes) {
     std::string vf = buildVapourSynthFilter(interp, superRes);
     LOG_INFO("MPV", "applyVapourSynthFilter interp=%d superRes=%d vf='%s'", interp, superRes, vf.c_str());
 
+    if (vf.empty()) {
+        int r = mpv_set_property_string(mpv_, "vf", "");
+        LOG_INFO("MPV", "vf cleared (both off), ret=%d (%s)", r, mpv_error_string(r));
+        return;
+    }
+
     // 验证脚本文件存在
-    if (!vf.empty()) {
+    {
         std::string scriptPath = exeDir() + "vapoursynth/scripts/";
         if (interp && superRes) scriptPath += "interp_upscale.vpy";
         else if (interp) scriptPath += "mvtools_interp.vpy";
