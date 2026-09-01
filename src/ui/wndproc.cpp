@@ -30,14 +30,14 @@
 #endif
 
 LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
-    g_dirty.store(true);   // 锟轿猴拷锟斤拷息锟斤拷锟斤拷为潜锟斤拷锟接撅拷锟戒化锟斤拷锟斤拷锟酵骋伙拷锟斤拷啵?
+    g_dirty.store(true);   // Mark overlay dirty so it redraws on next idle
     switch (msg) {
 
     case WM_SIZE: {
         if (wp == SIZE_MINIMIZED) return 0;
         RECT rc; GetClientRect(hwnd, &rc);
         g_ui.totalW = rc.right;
-        // 锟叫憋拷锟斤拷锟斤拷(锟斤拷全锟斤拷)时: 锟揭诧拷锟斤拷锟斤拷锟斤拷锟? mpv/overlay 只占锟斤拷频锟斤拷
+        // Playlist panel extra width (fullscreen: no extra)
         int panelExtra = (g_ui.playlistOpen && !g_ui.fullscreen) ? U(430) : 0;
         g_ui.winW = rc.right - panelExtra;
         g_ui.winH = rc.bottom;
@@ -53,12 +53,12 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             SDL_SetWindowSize(g_sdlWin, rc.right, rc.bottom);
             LOG_DBG("MAIN", "overlay repositioned to screen(%d,%d) size(%d,%d)", pt.x, pt.y, rc.right, rc.bottom);
         }
-        // 锟斤拷时锟截伙拷 锟斤拷 锟斤拷锟斤拷锟斤拷循锟斤拷锟斤拷锟斤拷
+        // Force render during WM_SIZE to avoid flicker
         renderOverlay();
         return 0;
     }
     case WM_DPICHANGED: {
-        // 锟斤拷示锟斤拷 DPI 锟戒化锟斤拷锟较碉拷锟斤拷同锟斤拷锟斤拷锟斤拷/锟斤拷系统锟斤拷锟脚ｏ拷
+        // DPI changed: update scale factor and resize window
         int newDpi = HIWORD(wp);
         g_dpi = newDpi / 96.0f;
         RECT* prc = (RECT*)lp;
@@ -76,7 +76,7 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     }
 
-    // ---- 锟斤拷锟斤拷锟斤拷锟? 锟斤拷锟斤拷锟斤拷失去锟斤拷锟斤拷时锟斤拷锟斤拷 overlay, 锟斤拷锟解浮锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷 ----
+    // ---- WM_ACTIVATEAPP: show/hide overlay on focus change ----
     case WM_ACTIVATEAPP: {
         bool active = (wp != 0);
         LOG_DBG("MAIN", "WM_ACTIVATEAPP active=%d mini=%d", active, g_ui.miniMode ? 1 : 0);
@@ -111,7 +111,7 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                      g_ui.mouseX >= sbLeftX()   && g_ui.mouseX <= sbRightX());
         g_ui.seekbarHover = onSB;
 
-        // seekbar 锟斤拷拽: 锟斤拷锟斤拷锟斤拷锟斤拷 seekTarget
+        // Seekbar drag: update seekTarget from mouse position
         if (g_ui.seekingDrag && g_mpv && g_mpv->duration() > 0) {
             double ratio = (double)(g_ui.mouseX - sbLeftX()) / sbWidth();
             if (ratio < 0) ratio = 0; if (ratio > 1) ratio = 1;
@@ -128,7 +128,7 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         // topbar icon hover
         g_ui.topbarHover = onTopbar ? hitTestTopbarIcon(g_ui.mouseX, g_ui.mouseY, g_ui.totalW) : -1;
 
-        // 锟斤拷锟斤拷锟斤拷锟斤拷 hover 锟皆讹拷展锟斤拷锟斤拷锟诫开 0.5s 锟斤拷锟斤拷锟斤拷锟斤拷拽锟叫诧拷锟秸ｏ拷
+        // Volume slider: auto-expand on hover, collapse after 0.5s idle
         if (inVolumeArea(g_ui.mouseX, g_ui.mouseY)) {
             if (!g_ui.volumeSliderOpen) {
                 g_ui.volumeSliderOpen = true;
@@ -142,7 +142,7 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             LOG_DBG("MAIN", "volume slider auto-collapse");
         }
 
-        // 锟斤拷锟斤拷锟斤拷锟斤拷 hover 锟斤拷锟斤拷 (锟斤拷锟接撅拷, 锟斤拷锟斤拷锟斤拷锟斤拷; 锟斤拷锟斤拷锟斤拷锟斤拷只锟节碉拷锟斤拷锟阶?
+        // Volume slider hover hit-test (expanded area, collapsed: only slider)
         g_ui.volumeSliderHover = false;
         if (g_ui.volumeSliderOpen && !g_ui.volumeDragging) {
             Row1Layout L;
@@ -155,7 +155,7 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             }
         }
 
-        // 锟叫憋拷锟斤拷锟斤拷锟斤拷: hover 锟斤拷锟斤拷 + 锟斤拷拽锟斤拷锟斤拷
+        // Playlist scrollbar: hover highlight + drag tracking
         {
             bool over = g_ui.sbTrackX >= 0 &&
                         g_ui.mouseX >= g_ui.sbTrackX - U(5) &&
@@ -176,7 +176,7 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             }
         }
 
-        // 锟叫憋拷锟斤拷拽锟斤拷锟斤拷位锟狡筹拷锟斤拷值锟斤拷锟斤拷锟斤拷拽态
+        // Playlist drag: check if movement exceeds threshold to enter drag mode
         if (!g_ui.sbDragging && g_ui.plDragFrom >= 0 && !g_ui.plDragging &&
             std::abs(g_ui.mouseY - g_ui.plDownY) > U(8)) {
             g_ui.plDragging = true;
@@ -184,7 +184,7 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
         if (g_ui.plDragging) {
             g_ui.plDragY = g_ui.mouseY;
-            // 锟皆讹拷锟斤拷锟斤拷锟斤拷锟较碉拷锟斤拷锟斤拷锟斤拷卤锟皆凳憋拷锟斤拷锟斤拷斜锟?
+            // Auto-scroll playlist when dragging near top/bottom edge
             int panelTop = curTopH(), panelBottom = g_ui.winH - U(10);
             if (g_ui.mouseY < panelTop + U(30) && g_ui.playlistScroll > 0)
                 g_ui.playlistScroll -= U(12);
@@ -242,10 +242,10 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
 
     case WM_NCCALCSIZE: {
-        // 锟睫边匡拷锟皆绘：锟酵伙拷锟斤拷=锟斤拷锟斤拷锟斤拷锟斤拷(锟狡筹拷系统锟斤拷锟斤拷锟斤拷)锟斤拷锟斤拷锟斤拷 DWM 锟斤拷影
+        // NCCALCSIZE: client=window minus frame (system border + DWM shadow)
         if (!wp) break;
         auto* params = (NCCALCSIZE_PARAMS*)lp;
-        if (IsZoomed(hwnd)) {   // 锟斤拷锟绞憋拷战锟斤拷锟侥伙拷呖锟斤拷锟?
+        if (IsZoomed(hwnd)) {   // Maximized: remove frame borders
 #ifndef SM_CXPADDEDBORDER
 #define SM_CXPADDEDBORDER 92
 #endif
@@ -262,7 +262,7 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         POINT pt = { (short)LOWORD(lp), (short)HIWORD(lp) };
         ScreenToClient(hwnd, &pt);
         RECT rc; GetClientRect(hwnd, &rc);
-        // 锟斤拷缘锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷全锟斤拷/锟斤拷锟姐）
+        // Resize borders (8px, excludes fullscreen/mini mode)
         if (!g_ui.fullscreen && !g_ui.miniMode) {
             const int m = U(6);
             bool L = pt.x < m, R = pt.x >= rc.right - m;
@@ -276,9 +276,9 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             if (T) return HTTOP;
             if (B) return HTBOTTOM;
         }
-        // 锟斤拷锟斤拷锟斤拷锟斤拷图锟斤拷锟斤拷锟斤拷为锟斤拷拽锟斤拷锟斤拷
-        // 模态锟斤拷锟?锟剿碉拷锟斤拷时, 锟斤拷锟斤拷锟斤拷为 HTCAPTION(锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷诠乇瞻锟脚?
-        // 锟斤拷锟斤拷锟叫憋拷锟斤拷锟斤拷也锟斤拷锟斤拷锟斤拷(锟叫憋拷锟截闭帮拷钮锟斤拷 topbar Y 锟斤拷围锟斤拷)
+        // Title area: drag window by default
+        // Modal menus open: treat as HTCAPTION (not titlebar area)
+        // But playlist close button (within topbar Y range) excluded
         {
             bool anyModalOpen = g_ui.settingsOpen || g_ui.speedMenuOpen || g_ui.qualityMenuOpen ||
                                 g_ui.eqMenuOpen || g_ui.subMenuOpen || g_ui.audioMenuOpen ||
@@ -299,9 +299,9 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 mx, my, barTop, g_ui.settingsOpen ? 1 : 0, g_ui.playlistOpen ? 1 : 0,
                 g_ui.winW, g_ui.winH);
 
-        // --- 锟斤拷锟斤拷锟叫憋拷锟截憋拷钮: 锟斤拷锟斤拷锟斤拷燃锟?---
-        // (y 锟斤拷 topbar 锟竭讹拷锟节会被 topbar 锟斤拷支锟斤拷锟斤拷: 锟斤拷锟斤拷模式锟斤拷锟斤拷拽, 全锟斤拷时锟斤拷
-        //  应锟矫关憋拷图锟斤拷锟截碉拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟?
+        // --- Playlist close button: handle first ---
+        // (y is below topbar, caught by topbar handler: mini mode drag, fullscreen)
+        //  Should use close icon hit-test for playlist toggle
         if (g_ui.playlistOpen && g_ui.plCloseRect.w > 0) {
             LOG_DBG("MAIN", "plCloseRect(%d,%d,%d,%d) mx=%d my=%d",
                     g_ui.plCloseRect.x, g_ui.plCloseRect.y,
@@ -317,8 +317,8 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         }
 
-        // --- topbar icon clicks (锟叫憋拷展锟斤拷时锟叫憋拷锟斤拷锟斤拷锟斤拷锟斤拷 topbar) ---
-        // 模态锟斤拷锟?锟剿碉拷锟斤拷时, topbar 锟斤拷锟斤拷应锟斤拷锟?锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷诳锟斤拷系墓乇瞻锟脚?
+        // --- topbar icon clicks (expanded panel area excluded from topbar) ---
+        // Modal menus open: topbar should not trigger titlebar drag
         bool inPlaylistArea = (g_ui.playlistOpen && !g_ui.fullscreen && mx >= g_ui.winW);
         bool anyModalOpen = g_ui.settingsOpen || g_ui.speedMenuOpen || g_ui.qualityMenuOpen ||
                             g_ui.eqMenuOpen || g_ui.subMenuOpen || g_ui.audioMenuOpen ||
@@ -336,16 +336,16 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             case 2: // minimize
                 ShowWindow(hwnd, SW_MINIMIZE);
                 return 0;
-            case 3: // playlist锟斤拷锟揭诧拷锟斤拷锟斤拷锟斤拷颍捍锟斤拷锟斤拷锟秸癸拷锟?
+            case 3: // playlist toggle: also adjust panel size
                 g_ui.playlistOpen = !g_ui.playlistOpen;
                 LOG_INFO("MAIN", "pl toggle -> %d (mx=%d my=%d winW=%d)",
                          g_ui.playlistOpen ? 1 : 0, mx, my, g_ui.winW);
                 if (!g_ui.fullscreen) applyPlaylistWindow(hwnd);
                 else g_dirty.store(true);
                 return 0;
-            case 4: { // PIP 锟矫讹拷锟斤拷锟斤拷小锟斤拷
+            case 4: { // PIP: enter mini mode
                 if (g_mpv && g_mpv->hasMedia()) {
-                    if (g_ui.fullscreen) toggleFullscreen(hwnd);  // 全锟斤拷锟斤拷锟剿筹拷
+                    if (g_ui.fullscreen) toggleFullscreen(hwnd);  // Exit fullscreen first
                     toggleMini(hwnd);
                 }
                 return 0;
@@ -390,7 +390,7 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         }
 
-        // --- seekbar锟斤拷锟斤拷直锟捷诧拷锟秸斤拷: 锟斤拷探锟斤拷锟斤拷锟皆碉拷锟矫伙拷锟姐按钮/锟斤拷频锟侥碉拷锟斤拷锟?--
+        // --- seekbar: direct click (higher priority than ctrlBar/video area) ---
         if (g_mpv && my >= barTop - U(8) && my <= barTop + U(12) &&
             mx >= sbLeftX() && mx <= sbRightX() && g_mpv->duration() > 0) {
             g_ui.seekingDrag = true;
@@ -402,7 +402,7 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             g_ui.hideAt = SDL_GetTicks() + ui::CTRLBAR_HIDE_MS;
             LOG_DBG("SEEK", "seekbar press target=%.2f ratio=%.3f (no pause fallthrough)",
                     g_ui.seekTarget, ratio);
-            return 0;  // seekbar 锟斤拷锟斤拷锟斤拷锟酵革拷锟斤拷锟狡碉拷锟?
+            return 0;  // seekbar click takes priority over video area
         }
         // --- controlbar row1 buttons: ---
         if (handleControlBarClick(hwnd, mx, my)) {
@@ -411,15 +411,15 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         }
     videoAreaClick:;
-        // (锟斤拷锟斤拷/锟斤拷锟斤拷/EQ 锟剿碉拷锟斤拷锟斤拷锟斤拷锟斤拷模态锟斤拷统一锟斤拷锟斤拷, 锟剿达拷锟斤拷锟劫可达拷)
-        // --- 锟斤拷锟斤拷图锟斤拷锟斤拷锟斤拷锟叫伙拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷 hover 展锟斤拷锟斤拷 ---
+        // (Speed/Quality/EQ menus are modal, handled above in handleMenuClicks)
+        // --- Mute button click area (volume icon hover region) ---
         if (g_mpv && mx >= g_ui.winW - U(68) && mx <= g_ui.winW - U(40) &&
                  my >= barTop + U(36) && my <= barTop + U(64)) {
             g_mpv->toggleMute();
             showToast(g_mpv->muted() ? i18n::muted() : i18n::unmuted());
             LOG_INFO("MAIN", "mute toggled -> %d", g_mpv->muted() ? 1 : 0);
         }
-        // --- 锟斤拷锟斤拷锟叫憋拷锟斤拷锟斤拷锟斤拷颍汗乇锟脚?-> 锟斤拷锟斤拷锟斤拷 -> 锟叫憋拷锟斤拷锟窖?---
+        // --- Playlist scrollbar click -> seekbar track -> playlist item ---
         else if (g_ui.playlistOpen && mx >= g_ui.winW) {
             if (mx >= g_ui.plCloseRect.x && mx <= g_ui.plCloseRect.x + g_ui.plCloseRect.w &&
                 my >= g_ui.plCloseRect.y && my <= g_ui.plCloseRect.y + g_ui.plCloseRect.h) {
@@ -432,7 +432,7 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 my >= g_ui.sbTrackY && my <= g_ui.sbTrackY + g_ui.sbTrackH) {
                 SetCapture(hwnd);
                 if (my < g_ui.sbBarY || my > g_ui.sbBarY + g_ui.sbBarH) {
-                    // 锟斤拷锟斤拷锟揭? bar 锟斤拷锟侥讹拷锟斤拷锟斤拷锟斤拷
+                    // Click outside scrollbar bar: jump to position
                     int contentH = (int)g_playlist.size() * U(72);
                     int viewH = g_ui.sbTrackH;
                     g_ui.playlistScroll =
@@ -444,19 +444,19 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 g_ui.sbGrabOff = my - g_ui.sbBarY;
             } else {
                 int itemH = U(72);
-                int rel = my - U(45) + g_ui.playlistScroll;   // panelY=0 锟斤拷锟斤拷染一锟斤拷
+                int rel = my - U(45) + g_ui.playlistScroll;   // panelY=0, offset by one header
                 g_ui.plDragFrom = -1; g_ui.plDragging = false;
                 if (rel >= 0) {
                     int itemIdx = rel / itemH;
                     if (itemIdx < (int)g_playlist.size()) {
                         g_ui.plDragFrom = itemIdx;
                         g_ui.plDownY = my;
-                        SetCapture(hwnd);   // 锟斤拷拽/锟斤拷锟街讹拷锟斤拷锟斤拷锟斤拷锟揭诧拷芨锟斤拷锟?
+                        SetCapture(hwnd);   // Drag/keyboard: capture mouse to track outside window
                     }
                 }
             }
         }
-        // --- click on video area锟斤拷锟接筹拷执锟斤拷锟斤拷停锟斤拷双锟斤拷锟斤拷锟斤拷全锟斤拷锟斤拷 ---
+        // --- video area click: single click = pause, double = fullscreen ---
         else {
             if (g_mpv) {
                 g_ui.pendingPause = true;
@@ -471,7 +471,7 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_LBUTTONDBLCLK: {
         int mx = (short)LOWORD(lp), my = (short)HIWORD(lp);
         int barTop = sbTopY();
-        // 锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷双锟斤拷 -> 锟斤拷转锟斤拷锟斤拷锟轿伙拷锟?
+        // Seekbar double-click -> seek to position
         if (g_mpv && g_mpv->duration() > 0 &&
             my >= barTop - U(8) && my <= barTop + U(12) &&
             mx >= sbLeftX() && mx <= sbRightX()) {
@@ -481,7 +481,7 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             g_ui.visible = true;
             g_ui.hideAt = SDL_GetTicks() + ui::CTRLBAR_HIDE_MS;
         }
-        // 锟斤拷频锟斤拷双锟斤拷 -> 全锟斤拷锟叫伙拷锟斤拷取锟斤拷锟斤拷锟斤拷锟斤拷停锟斤拷
+        // Video area double-click -> fullscreen, cancel pending pause
         else if (g_mpv && my > curTopH() && my < barTop - U(6)) {
             KillTimer(hwnd, TIMER_SINGLECLICK);
             g_ui.pendingPause = false;
@@ -518,11 +518,11 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         if (g_ui.sbDragging) {
             g_ui.sbDragging = false;
         }
-        // 锟叫憋拷锟斤拷拽锟斤拷位 / 锟斤拷锟斤拷锟斤拷锟斤拷
+        // Playlist drag release / item click
         if (g_ui.plDragFrom >= 0) {
             if (g_ui.plDragging) {
                 int itemH = U(72);
-                int topY = U(45);   // panelY=0 锟斤拷锟斤拷染一锟斤拷
+                int topY = U(45);   // panelY=0, offset by one header
                 float rel = (float)(g_ui.plDragY - topY) + g_ui.playlistScroll;
                 int drop = (int)(rel / itemH + 0.5f);
                 int n = (int)g_playlist.size();
@@ -539,7 +539,7 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     showToast(i18n::playlistReordered());
                 }
             } else {
-                playIndex(g_ui.plDragFrom);   // 未锟较讹拷 = 锟斤拷锟斤拷锟斤拷锟斤拷
+                playIndex(g_ui.plDragFrom);   // Not dragged = click to play
             }
             g_ui.plDragFrom = -1; g_ui.plDragging = false;
         }
@@ -552,7 +552,7 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         ScreenToClient(hwnd, &pt);
         short d = GET_WHEEL_DELTA_WPARAM(wp);
 
-        // 锟斤拷锟斤拷锟叫憋拷锟斤拷锟斤拷锟斤拷颍汗锟斤拷锟斤拷斜锟?
+        // Playlist area: scroll list vertically
         if (g_ui.playlistOpen && pt.x >= g_ui.winW) {
             int panelH = g_ui.winH - curTopH();
             int contentH = (int)g_playlist.size() * U(72);
@@ -599,7 +599,7 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             buildPlaylistAround(firstPath);
             playPath(firstPath);
         } else if (droppedFiles.size() > 1) {
-            // 锟斤拷锟侥硷拷: 锟斤拷锟斤拷锟斤拷锟斤拷锟叫憋拷, 锟斤拷锟脚碉拷一锟斤拷
+            // Multi-file: merge into playlist, play first
             g_playlist = droppedFiles;
             playPath(firstPath);
             if (!g_ui.playlistOpen) g_ui.playlistOpen = true;
@@ -609,7 +609,7 @@ LRESULT CALLBACK parentProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     }
 
     case WM_CLOSE:
-        saveWindowPos(hwnd);          // 锟斤拷锟斤拷前抓取位锟斤拷
+        saveWindowPos(hwnd);          // Save window position before closing
         DestroyWindow(hwnd);
         return 0;
     case WM_DESTROY:

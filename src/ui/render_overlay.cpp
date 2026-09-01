@@ -1,4 +1,4 @@
-#include "ui/render_overlay.h"
+﻿#include "ui/render_overlay.h"
 
 #ifndef SDL_MAIN_HANDLED
 #define SDL_MAIN_HANDLED
@@ -37,19 +37,19 @@
 // ================================================================
 
 std::mutex g_thumbMtx;
-std::vector<std::string> g_thumbWant;                   // ��ǰ�ɼ�����ȡ����
-std::map<std::string, ThumbRgb> g_thumbRgb;              // path -> RGB24(�� px=ʧ�ܱ��)
+std::vector<std::string> g_thumbWant;                   // Currently visible paths to extract
+std::map<std::string, ThumbRgb> g_thumbRgb;              // path -> RGB24 (empty px = failed)
 std::map<std::string, SDL_Texture*> g_thumbTex;
-std::map<std::string, Uint32>       g_thumbAccess;          // ��Ⱦ�߳�ר��
+std::map<std::string, Uint32>       g_thumbAccess;          // Render-thread only
 std::atomic<bool> g_thumbQuit{false};
 std::thread g_thumbThread;
 
-// ---- ����ͼ���̻��棺exe/cache/thumbs/<fnv1a64>.bin = "VPT1"+w+h+RGB24 ----
+// ---- Thumbnail disk cache: exe/cache/thumbs/<fnv1a64>.bin = "VPT1"+w+h+RGB24 ----
 std::string thumbCacheDir() {
     return exeDir() + "cache\\thumbs";
 }
 
-// ����ʱ�������� keepDays ��Ļ����ļ�
+// Delete cache files older than keepDays days
 void thumbCacheCleanup(int keepDays) {
     if (keepDays <= 0) keepDays = 7;
     std::string dir = thumbCacheDir();
@@ -61,7 +61,7 @@ void thumbCacheCleanup(int keepDays) {
     GetSystemTimeAsFileTime(&now);
     ULARGE_INTEGER ulNow = {{now.dwLowDateTime, now.dwHighDateTime}};
 
-    // �ռ������ļ�
+    // Collect all files
     struct ThumbFile { std::string name; ULARGE_INTEGER mtime; };
     std::vector<ThumbFile> files;
     do {
@@ -72,16 +72,16 @@ void thumbCacheCleanup(int keepDays) {
     FindClose(h);
 
     int removed = 0;
-    // 1) ɾ�������ļ�
+    // 1) Delete expired files
     for (auto& f : files) {
         long long ageDays = (long long)(ulNow.QuadPart - f.mtime.QuadPart) / (10000000LL * 86400);
         if (ageDays > keepDays) {
             DeleteFileA((dir + "\\" + f.name).c_str());
-            f.name.clear();  // �����ɾ
+            f.name.clear();  // Mark as deleted
             ++removed;
         }
     }
-    // 2) �������� 300: ��ʱ��������̭��ɵ�
+    // 2) If count > 300: delete oldest first
     static const int kMaxThumbs = 300;
     files.erase(std::remove_if(files.begin(), files.end(),
         [](const ThumbFile& f) { return f.name.empty(); }), files.end());
@@ -112,7 +112,7 @@ static std::string thumbDiskPath(const std::string& path) {
     return thumbCacheDir() + "\\" + buf;
 }
 
-// ���з��� true ����� out���ļ�����ɾ��
+// Read from disk: true fills out; corrupt file deleted
 static bool thumbDiskLoad(const std::string& path, ThumbRgb& out) {
     FILE* f = fopen(thumbDiskPath(path).c_str(), "rb");
     if (!f) return false;
@@ -130,7 +130,7 @@ static bool thumbDiskLoad(const std::string& path, ThumbRgb& out) {
         ok = true;
     } while (false);
     fclose(f);
-    if (!ok) DeleteFileA(thumbDiskPath(path).c_str());   // �𻵼�ɾ
+    if (!ok) DeleteFileA(thumbDiskPath(path).c_str());   // Delete corrupt file
     return ok;
 }
 
@@ -184,17 +184,17 @@ void thumbWorkerMain() {
         }
         {
             std::lock_guard<std::mutex> lk(g_thumbMtx);
-            g_thumbRgb[path] = std::move(out);   // ʧ��Ҳ�ǿձ�ǣ����ⷴ������
+            g_thumbRgb[path] = std::move(out);   // Failed = empty entry, prevents retry
         }
     }
 }
 
-// ��Ⱦ�̵߳��ã��Ѿ����� RGB ת������
+// Called by render thread: upload completed RGB to GPU textures
 static void uploadThumbs(SDL_Renderer* r) {
     std::lock_guard<std::mutex> lk(g_thumbMtx);
     for (auto it = g_thumbRgb.begin(); it != g_thumbRgb.end(); ) {
         auto& t = it->second;
-        if (t.px.empty()) { ++it; continue; }                 // ʧ�ܱ������
+        if (t.px.empty()) { ++it; continue; }                 // Failed placeholder
         if (g_thumbTex.count(it->first)) { it = g_thumbRgb.erase(it); continue; }
         SDL_Surface* surf = SDL_CreateRGBSurfaceWithFormat(0, t.w, t.h, 24, SDL_PIXELFORMAT_RGB24);
         if (surf) {
@@ -243,7 +243,7 @@ static std::string formatBitrate(const std::string& bpsStr) {
 // Overlay rendering state and helpers (moved from main.cpp)
 // ================================================================
 
-void destroyGradCache();   // ������ drawGradientBar�������������棩
+void destroyGradCache();   // Forward decl (defined in gradient.h/cpp)
 
 UlwCtx g_ulw;
 
@@ -253,14 +253,14 @@ void destroyOverlay() {
     svgicon::shutdown();
     destroyGradCache();
     if (g_sdlRdr) { SDL_DestroyRenderer(g_sdlRdr); g_sdlRdr = nullptr; }
-    if (g_sdlWin) { SDL_DestroyWindow(g_sdlWin);   g_sdlWin = nullptr; }  // ��ͬ HWND һ������
+    if (g_sdlWin) { SDL_DestroyWindow(g_sdlWin);   g_sdlWin = nullptr; }  // Same HWND used once
     g_overlayHwnd = nullptr;
 }
 
 // ---- dithered gradient helper ----
-// �����������ػ��ƴ��� ~13 ��� FillRect/֡; ����Ϊ������ÿ֡һ�� RenderCopy��
-// ͸����(alpha<��ֵ)д�� 0 ���� ��Ʒ�� colorkey ����, ��Ƶ�ճ���͸��
-// P2-2: GradKey/GradCache/drawDitherDim/drawGradientBar ���� ui/gradient.h
+// Optimized gradient: ~13 fewer FillRect/frame; uses per-frame RenderCopy
+// Transparent pixels (alpha<threshold) write 0, using colorkey for clean transparency
+// P2-2: GradKey/GradCache/drawDitherDim/drawGradientBar defined in ui/gradient.h
 GradCache g_gradCache;
 
 void destroyGradCache() {
@@ -268,11 +268,11 @@ void destroyGradCache() {
 }
 
 // ---- rendering ----
-// P2-3: UlwCtx/ulwDestroy/ulwResize ���� ui/ulw.h
-SDL_Texture* g_ovTex = nullptr;   // UI ��������(�� alpha)
+// P2-3: UlwCtx/ulwDestroy/ulwResize defined in ui/ulw.h
+SDL_Texture* g_ovTex = nullptr;   // UI render texture (ARGB with alpha)
 int g_ovTexW = 0, g_ovTexH = 0;
 
-// M36: ��֡Բ�������б� (��Ⱦʱ���, overlayPresent ���Ѻ����)
+// M36: Rounded corner mask list (filled during render, consumed by overlayPresent)
 std::vector<RoundMask> g_roundMasks;
 
 static bool ovTexEnsure(int w, int h) {
@@ -294,7 +294,7 @@ static void overlayPresent() {
     int h = g_ui.winH > 0 ? g_ui.winH : 540;
     if (w <= 0 || h <= 0 || !g_ovTex) return;
 
-    // 1. ������ ARGB �����ض� (�� alpha)
+    // 1. Read back ARGB pixel buffer (with alpha)
     if (SDL_SetRenderTarget(g_sdlRdr, g_ovTex) != 0) return;
     static std::vector<Uint32> px;
     px.resize((size_t)w * h);
@@ -307,7 +307,7 @@ static void overlayPresent() {
     }
     SDL_SetRenderTarget(g_sdlRdr, nullptr);
 
-    // 1.5 M36: Բ������ͼ���� �� ����������ȫ͸��(����Ⱦ�޷��ü�����)
+    // 1.5 M36: Rounded corner masking: zero out corners (hardware rendering cannot clip)
     for (const auto& m : g_roundMasks) {
         int r = std::min(m.r, std::min(m.w, m.h) / 2);
         if (r <= 0) continue;
@@ -333,25 +333,25 @@ static void overlayPresent() {
     }
     g_roundMasks.clear();
 
-    // 2. Ԥ�� alpha + ULW ���� (P2-3: ���� ui/ulw.h)
+    // 2. Pre-multiply alpha + ULW present (see ui/ulw.h)
     ulwPresent(g_ulw, g_overlayHwnd, g_parentHwnd, px.data(), w, h);
 }
 
-// M36: ���ؿ���Լ���ĵ���ʡ�� (UTF-8 ��ȫ, ��������)
+// M36: Truncate text to fit width (UTF-8 safe, character-aware)
 static std::string ellipsize(const std::string& s, int pt, int maxW) {
     if (s.empty() || g_text.measureText(s, Tpt(pt)) <= maxW) return s;
     std::string out = s;
     while (out.size() > 1) {
         size_t n = out.size();
-        while (n > 0 && (out[n - 1] & 0xC0) == 0x80) --n;   // �������ֽ�
-        if (n > 0) --n;                                      // ȥ��һ��ǰ���ֽ�
+        while (n > 0 && (out[n - 1] & 0xC0) == 0x80) --n;   // Skip continuation bytes
+        if (n > 0) --n;                                      // Remove one leading byte
         out.resize(n);
         if (g_text.measureText(out + "...", Tpt(pt)) <= maxW) break;
     }
     return out + "...";
 }
 
-// M36: ����ͼ cover ���� + ע��Բ������; δ����ʱ��ռλ���
+// M36: Draw thumbnail cover + apply rounded mask; placeholder when not loaded
 static void drawThumbCover(const std::string& path, SDL_Rect rc, int rad) {
     auto it = g_thumbTex.find(path);
     if (it == g_thumbTex.end() || !it->second) {
@@ -367,10 +367,10 @@ static void drawThumbCover(const std::string& path, SDL_Rect rc, int rad) {
         SDL_Rect src = {0, 0, tw, th};
         double dstA = (double)rc.w / std::max(1, rc.h);
         double srcA = (double)tw / std::max(1, th);
-        if (srcA > dstA + 0.01) {          // Դ���� �� ������
+        if (srcA > dstA + 0.01) {          // Source wider than dest
             int cw = (int)(th * dstA);
             src.x = (tw - cw) / 2; src.w = cw;
-        } else if (srcA < dstA - 0.01) {   // Դ��խ �� ������
+        } else if (srcA < dstA - 0.01) {   // Source narrower than dest
             int ch = (int)(tw / dstA);
             src.y = (th - ch) / 2; src.h = ch;
         }
@@ -411,24 +411,24 @@ void renderOverlay() {
         }
     }
 
-    // ���� UI �������� ARGB ����(�� alpha); �󱸻��岻ʹ��
-    // ֱ���� g_ui.winW/winH (WM_SIZE �Ѹ���), ���� SDL_GetWindowSize �����ӳ�
+    // All UI renders to ARGB texture (with alpha); back buffer not used
+    // Directly use g_ui.winW/winH (WM_SIZE updated), avoid SDL_GetWindowSize lag
     int ow = g_ui.totalW > 0 ? g_ui.totalW : g_ui.winW;
     int oh = g_ui.winH > 0 ? g_ui.winH : 540;
     if (ow <= 0 || oh <= 0) return;
     if (!ovTexEnsure(ow, oh)) return;
     SDL_SetRenderTarget(g_sdlRdr, g_ovTex);
 
-    SDL_SetRenderDrawColor(g_sdlRdr, 0, 0, 0, 0);   // ȫ͸����(per-pixel alpha)
+    SDL_SetRenderDrawColor(g_sdlRdr, 0, 0, 0, 0);   // Fully transparent clear (per-pixel alpha)
     SDL_RenderClear(g_sdlRdr);
 
     int w = g_ui.winW, h = g_ui.winH, totalW = g_ui.totalW;
 
     if (!g_mpv || !g_mpv->hasMedia()) {
-        // --- M36 welcome page: Apple ���� Hero + YouTube ����ͼ��Ƭ ---
+        // --- M36 welcome page: Apple-style Hero + YouTube-style thumbnails ---
         int w = g_ui.winW, h = g_ui.winH, totalW = g_ui.totalW;
 
-        // �볡���� (�뿪��ӭҳʱ����, ���·����ŷ�֧����)
+        // Intro animation (fades in on first visit, separate from playback fade)
         g_ui.introAlpha = std::min(1.0f, g_ui.introAlpha + 0.055f);
         Uint8 fa8 = (Uint8)(255 * g_ui.introAlpha);
         auto A8 = [&](Uint8 base) { return (Uint8)(base * g_ui.introAlpha); };
@@ -437,14 +437,14 @@ void renderOverlay() {
         g_ui.gridHits.clear();
         std::vector<std::string> wantThumbs;
 
-        // ��ɫ��: ��ý��ʱ mpv �Ӵ����ǰ׵�, ��ӭҳ�����Լ�������ס
+        // Background: when no media mpv shows white flash, welcome page covers it
         SDL_SetRenderDrawBlendMode(g_sdlRdr, SDL_BLENDMODE_BLEND);
         SDL_SetRenderDrawColor(g_sdlRdr, ui::SURFACE0_R, ui::SURFACE0_G,
                                ui::SURFACE0_B, A8(255));
         SDL_Rect fullBg = {0, 0, totalW, h};
         SDL_RenderFillRect(g_sdlRdr, &fullBg);
 
-        // ---- topbar (�벥��̬һ�µ�ȫ��ͼ��) ----
+        // ---- topbar (same as playback mode, full-width icons) ----
         drawGradientBar(g_sdlRdr, 0, 0, 0, totalW, curTopH(), 11, 11, 11,
                         (Uint8)(ui::TOPBAR_A0 * g_ui.introAlpha), 0, g_gradCache);
         {
@@ -472,7 +472,7 @@ void renderOverlay() {
             }
         }
 
-        // ---- Hero: ����Բ��Ӧ��ͼ�� (�������Զ�����) ----
+        // ---- Hero: Rounded rectangle icon (app brand identity) ----
         const int margin = U(48);
         bool compact = (h < U(660));
         int iconSz = compact ? U(60) : U(88);
@@ -480,7 +480,7 @@ void renderOverlay() {
         int iy = curTopH() + (compact ? U(20) : U(36));
         roundedRectFill(g_sdlRdr, ix, iy, iconSz, iconSz, U(20),
                         ui::ACCENT_R_, ui::ACCENT_G_, ui::ACCENT_B_, A8(255));
-        // �ڹ���: ���Ϲ�Դ, ˫��ͬ��Բ (ȫ����ͼ���ڲ�)
+        // Inner glow: inherited from source, dual concentric circles (all within icon)
         fillCircle(g_sdlRdr, ix + U(28), iy + U(28), U(18),
                    ui::ACCENT2_R, ui::ACCENT2_G, ui::ACCENT2_B, A8(38));
         fillCircle(g_sdlRdr, ix + U(28), iy + U(28), U(10),
@@ -488,9 +488,9 @@ void renderOverlay() {
         svgicon::draw(g_sdlRdr, "play", ix + iconSz / 2, iy + iconSz / 2, U(30),
                       255, 255, 255, A8(255));
 
-        // ---- ��Ʒ�� + ���� (��ఴ�ֺ�ʵ�ʸ߶�, ���ص�) ----
+        // ---- App name + tagline (GDI line height, centered) ----
         int namePt = Tpt(ui::T_DISPLAY);
-        int nameHpx = (int)(namePt * g_dpi * 1.4f);   // GDI �и߽���
+        int nameHpx = (int)(namePt * g_dpi * 1.4f);   // GDI line height approximation
         int nameY = iy + iconSz + (compact ? U(10) : U(18));
         {
             std::string nm = i18n::appName();
@@ -506,7 +506,7 @@ void renderOverlay() {
                             170, 170, 178, A8(255));
         }
 
-        // ---- ˫ҩ�谴ť (MD3: ��������� + ��ߴβ���) ----
+        // ---- Dual pill buttons (MD3: filled primary + outlined secondary) ----
         int btnH = compact ? U(40) : U(46);
         int btnY = tagY + U(18) + (compact ? U(6) : U(18));
         {
@@ -524,7 +524,7 @@ void renderOverlay() {
             bool hov2 = (g_ui.mouseX >= bx2 && g_ui.mouseX <= bx2 + w2 &&
                          g_ui.mouseY >= btnY && g_ui.mouseY <= btnY + btnH);
 
-            // ���ʽ����ť: ��, ��ͣ����Ϊ��������
+            // Filled button: red, hover becomes lighter shade
             roundedRectFill(g_sdlRdr, bx1, btnY, w1, btnH, btnH / 2,
                             hov1 ? ui::ACCENT2_R : ui::ACCENT_R_,
                             hov1 ? ui::ACCENT2_G : ui::ACCENT_G_,
@@ -533,7 +533,7 @@ void renderOverlay() {
             g_text.drawText(bx1 + (w1 - t1w) / 2, btnY + U(12), l1,
                             Tpt(ui::T_BODY), 255, 255, 255, A8(255));
 
-            // ���ʽ�ΰ�ť: �����, ��ͣ���𱳾�
+            // Outlined secondary button: transparent, hover lights background
             if (hov2) {
                 SDL_SetRenderDrawBlendMode(g_sdlRdr, SDL_BLENDMODE_BLEND);
                 SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, A8(22));
@@ -546,7 +546,7 @@ void renderOverlay() {
             g_text.drawText(bx2 + (w2 - t2w) / 2, btnY + U(12), l2,
                             Tpt(ui::T_BODY), ui::TEXT_DIM, ui::TEXT_DIM, ui::TEXT_DIM + 5, A8(255));
         }
-        // ��ק��ʾ (������ť�·�)
+        // Drag hint text (below buttons)
         int hintY = btnY + btnH + U(8);
         {
             std::string dh = i18n::dropAnywhere();
@@ -555,7 +555,7 @@ void renderOverlay() {
                             Tpt(ui::T_CAPTION), 140, 140, 148, A8(255));
         }
 
-        // ---- �����ۿ��� (YouTube ����ͼ��Ƭ) ----
+        // ---- Continue watching section (YouTube-style thumbnails) ----
         int contentY = hintY + U(22) + (compact ? U(24) : U(40));
         struct CWItem { std::string path; double pos, dur; long long ts; };
         static std::vector<CWItem> cw;
@@ -580,7 +580,7 @@ void renderOverlay() {
             int maxCards = std::max(1, (totalW - margin * 2 + gap) / (cardW + gap));
             int nShow = std::min((int)cw.size(), maxCards);
             int rowW = nShow * cardW + (nShow - 1) * gap;
-            int gx = ((totalW > w ? totalW : w) - rowW) / 2;   // �б�����ʱ������ȫ�ͻ���
+            int gx = ((totalW > w ? totalW : w) - rowW) / 2;   // Center when wider than viewport
 
             {
                 std::string hd = i18n::continueWatching();
@@ -594,7 +594,7 @@ void renderOverlay() {
                 SDL_Rect trc = {cx, contentY, cardW, thumbH};
                 drawThumbCover(it.path, trc, U(8));
 
-                // ������ (��)
+                // Progress bar (red)
                 if (it.dur > 0) {
                     float frac = (float)std::min(1.0, it.pos / it.dur);
                     int pbH = U(3);
@@ -609,12 +609,12 @@ void renderOverlay() {
                         SDL_RenderFillRect(g_sdlRdr, &pfg);
                     }
                 }
-                // ���� (�������ؼ�ʡ��)
+                // Filename (ellipsized to fit)
                 std::string fn = fileNameOf(it.path);
                 fn = ellipsize(fn, ui::T_BODY, cardW);
                 g_text.drawText(cx, contentY + thumbH + U(8), fn,
                                 Tpt(ui::T_BODY), 235, 235, 240, A8(255));
-                // ������: ���� xx% �� ʱ���
+                // Subtitle: Watched xx% at time
                 char tb1[16];
                 formatTime(tb1, sizeof(tb1), it.pos);
                 std::string sub2 = std::string(T("已播放 ", "Watched ")) +
@@ -629,7 +629,7 @@ void renderOverlay() {
             contentY += cardW * 9 / 16 + (compact ? U(58) : U(76));
         }
 
-        // ---- �ļ��ж������� (����ͼ��) ----
+        // ---- Playlist grid (thumbnail cards) ----
         if (!g_playlist.empty()) {
             {
                 std::string hd = i18n::playlist();
@@ -655,7 +655,7 @@ void renderOverlay() {
                             g_ui.mouseY >= cy && g_ui.mouseY <= cy + thumbH + U(50));
 
                 drawThumbCover(g_playlist[i], {cx, cy, cardW, thumbH}, U(8));
-                // ��ǰ��컷 / ��ͣ�׻�
+                // Current highlight / hover outline
                 if (isCur)
                     roundedRectStroke(g_sdlRdr, cx - U(2), cy - U(2), cardW + U(4),
                                       thumbH + U(4), U(9),
@@ -668,7 +668,7 @@ void renderOverlay() {
                 g_text.drawText(cx, cy + thumbH + U(8), fn,
                                 Tpt(ui::T_CAPTION), isCur ? 255 : 225, isCur ? 255 : 225,
                                 isCur ? 255 : 230, A8(255));
-                // ʱ��/���ȸ�����
+                // Time/progress info
                 auto hit = g_cfg.history.find(g_playlist[i]);
                 double hp = (hit != g_cfg.history.end()) ? hit->second.pos : 0;
                 char sub[40] = "";
@@ -686,7 +686,7 @@ void renderOverlay() {
             }
         }
 
-        // �ύ��ӭҳ�ɼ�����ͼ���� (�벥���б����ϲ�����)
+        // Submit welcome page visible thumbnails (merged with playlist pending)
         if (!wantThumbs.empty()) {
             std::lock_guard<std::mutex> lk(g_thumbMtx);
             for (auto& p : wantThumbs)
@@ -695,7 +695,7 @@ void renderOverlay() {
                     g_thumbWant.push_back(p);
         }
 
-        // ---- �ײ�: ������ʾ(����) + �汾(����) ----
+        // ---- Bottom: keyboard hint (center) + version (right) ----
         {
             std::string hint = T("空格 播放/暂停 → 方向键 快进退 → F 全屏 → M 静音",
                                  "Space Play/Pause \u00bb Arrows Seek \u00bb F Fullscreen \u00bb M Mute");
@@ -712,16 +712,16 @@ void renderOverlay() {
         return;
     }
 
-    g_ui.introAlpha = 0.0f;   // �뿪��ӭҳ, �´ν������µ���
+    g_ui.introAlpha = 0.0f;   // Left welcome page, next visit re-animates
     double dur = g_mpv->duration();
-    // �ٶ��л�����ݶ��������, ��ֹ time-pos ���䵼�¶���
+    // Speed change causes seek jump, freeze time-pos to prevent flicker
     static double s_lastPos = 0.0;
     static Uint32 s_freezeStart = 0;
     double pos;
     if (g_ui.seekingDrag) {
         pos = g_ui.seekTarget;
     } else if (g_mpv->seekbarFrozen()) {
-        // �����ڼ�: �ö���ǰ�� pos + ������ǽ��ʱ�� * ���ٶ� �ƽ�
+        // Frozen during speed change: freeze at pos + elapsed * speed for smooth
         if (s_freezeStart == 0) { s_lastPos = g_mpv->clock(); s_freezeStart = SDL_GetTicks(); }
         double elapsed = (SDL_GetTicks() - s_freezeStart) / 1000.0;
         pos = s_lastPos + elapsed * g_mpv->speed();
@@ -729,15 +729,15 @@ void renderOverlay() {
         if (d > 0 && pos > d) pos = d;
     } else {
         pos = g_mpv->clock();
-        s_freezeStart = 0;  // �ⶳ: ����
+        s_freezeStart = 0;  // Unfreeze: reset
     }
 
-    // �ؼ���������: alpha=0 ʱ��������������������������
+    // Control bar fade: alpha=0 means fully hidden, slides up animation
     float fa = g_ui.ctrlAlpha;
     Uint8 fade = (Uint8)(fa * 255.0f);
     int topOff = -(int)((1.0f - fa) * curTopH() + 0.5f);
 
-    // --- topbar (gradient: glass ��͸��Ч��, ��Ƶ��Լ�ɼ�) ---
+    // --- topbar (gradient: glass transparency effect, low-opacity alpha) ---
     {
         drawGradientBar(g_sdlRdr, 0, 0, topOff, w, U(52), 11, 11, 11,
                         (Uint8)(ui::TOPBAR_A0 * fa), 0, g_gradCache);
@@ -748,7 +748,7 @@ void renderOverlay() {
         if (title.size() > 55) title = title.substr(0, 52) + "...";
         g_text.drawText(U(20), U(14) + topOff, title, Tpt(14), 255, 255, 255);
 
-        // icons (right) �� ����ͼ�� + ��ͣ��������
+        // icons (right) + hover highlight + play state icon
         int topH = U(52);
         int iconY = topH / 2 + topOff;
         auto A = [&](Uint8 base) { return (Uint8)(base * fa); };
@@ -763,11 +763,11 @@ void renderOverlay() {
             {"list"}, {"pip"}, {"camera"}
         };
         for (int i = 0; i < 6; ++i) {
-            // ��ͣ����
+            // Hover highlight
             if (g_ui.topbarHover == i) {
                 SDL_SetRenderDrawBlendMode(g_sdlRdr, SDL_BLENDMODE_BLEND);
                 if (i == 0) {
-                    // close: ��ɫ��ͣ
+                    // close: red hover
                     SDL_SetRenderDrawColor(g_sdlRdr, 232, 17, 35, A(240));
                 } else {
                     SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, A(50));
@@ -775,18 +775,18 @@ void renderOverlay() {
                 SDL_Rect hrc = {rx - hoverR, iconY - hoverR, hoverR * 2, hoverR * 2};
                 SDL_RenderFillRect(g_sdlRdr, &hrc);
             }
-            // ����ͼ��, �Ŵ�Ӵ�
+            // Draw icon, large area
             svgicon::draw(g_sdlRdr, topIcons[i].id, rx, iconY, iconDrawSz,
                           255, 255, 255, A(255));
             rx -= iconSz;
         }
     }
 
-    // �ؼ�����: �������� alpha ��������
+    // Control bar position: slides up based on alpha
     int ctrlH = U(80);
     int barTop = sbTopY() + (int)((1.0f - fa) * ctrlH + 0.5f);
 
-    // --- ��ͣѹ������ + ���벥��ͼ�� (per-pixel alpha ���͸��, ȫ�������) ---
+    // --- Paused dim overlay + centered play icon (per-pixel alpha, full screen) ---
     if (fa > 0.01f && g_mpv->state() == MpvBackend::State::Paused) {
         SDL_SetRenderDrawBlendMode(g_sdlRdr, SDL_BLENDMODE_BLEND);
         SDL_SetRenderDrawColor(g_sdlRdr, 0, 0, 0, (Uint8)(110 * fa));
@@ -797,7 +797,7 @@ void renderOverlay() {
                       255, 255, 255, (Uint8)(220 * fa));
     }
 
-    // --- gradient background (Ч��ͼ: ���㽥�� �ײ�������ȫ͸) ---
+    // --- gradient background (glass effect: top opaque, bottom transparent) ---
     drawGradientBar(g_sdlRdr, 1, 0, barTop, w, ctrlH, 0, 0, 0, ui::CTRLBAR_A0, ui::CTRLBAR_A1, g_gradCache);
 
     // --- seekbar (at very top of bar) ---
@@ -832,24 +832,24 @@ void renderOverlay() {
         // --- seekbar thumb (always-visible small dot + hover/drag enlarged glow) ---
         int cx = tx + progW;
         int cy = ty + th / 2;
-        // Ĭ��̬: СԲ�� (Ʒ��ɫ)
+        // Default: small dot (accent color)
         int rDefault = std::max(ui::THUMB_R_DEFAULT, (int)(g_ui.winW * 0.003f));
         fillCircle(g_sdlRdr, cx, cy, rDefault,
                    ui::ACCENT_R_, ui::ACCENT_G_, ui::ACCENT_B_, 255);
-        // hover/drag ̬: �Ŵ��Բ + ��͸������
+        // Hover/drag: enlarged circle + glow ring
         if (thumbActive) {
             int rHov = std::max(ui::THUMB_R_HOVER, (int)(g_ui.winW * 0.006f));
-            // ��Ȧ���� (ͬɫ��͸��)
+            // Outer glow ring (same color, transparent)
             fillCircle(g_sdlRdr, cx, cy, rHov + ui::THUMB_GLOW_R,
                        ui::ACCENT_R_, ui::ACCENT_G_, ui::ACCENT_B_, 50);
-            // ��ɫʵ��Բ
+            // White filled circle
             fillCircle(g_sdlRdr, cx, cy, rHov, 255, 255, 255, 255);
         }
 
-        // ʱ��Ԥ������ (hover/drag only)
+        // Time preview tooltip (hover/drag only)
         if (thumbActive) {
 
-            // Ԥ��ʱ�������
+            // Preview time from cursor
             double hoverPos = dur * ((double)(g_ui.mouseX - tx) / tw);
             if (hoverPos < 0) hoverPos = 0;
             if (hoverPos > dur) hoverPos = dur;
@@ -861,7 +861,7 @@ void renderOverlay() {
             if (bx < tx) bx = tx;
             if (bx + bw > tx + tw) bx = tx + tw - bw;
             int by = ty - bh - U(10);
-            // ���ݱ���(Բ�ǽ���)
+            // Bubble background (rounded rectangle)
             SDL_SetRenderDrawColor(g_sdlRdr, 20, 20, 22, 235);
             SDL_Rect bubble = {bx + U(4), by, bw - U(8), bh};
             SDL_RenderFillRect(g_sdlRdr, &bubble);
@@ -873,12 +873,12 @@ void renderOverlay() {
             fillCircle(g_sdlRdr, bx + bw - U(4), by + U(4), U(4), 20, 20, 22, 235);
             fillCircle(g_sdlRdr, bx + U(4), by + bh - U(4), U(4), 20, 20, 22, 235);
             fillCircle(g_sdlRdr, bx + bw - U(4), by + bh - U(4), U(4), 20, 20, 22, 235);
-            // ��������
+            // Draw time text
             g_text.drawText(bx + U(8), by + U(4), pv, Tpt(11), 255, 255, 255);
         }
     }
 
-    // --- controlbar row1 (Ч��ͼ����): prev/PLAY�׵�/next/time ... ��Ļ/����/����/����/����/ȫ�� ---
+    // --- controlbar row1 (icons + labels): prev/PLAY/next/time ... Sub/Chap/AB/EQ/Img/Speed/Quality/Vol/Settings/FS ---
     {
         Row1Layout L;
         bool volOpen = (g_ui.volumeSliderOpen || g_ui.volumeDragging);
@@ -890,7 +890,7 @@ void renderOverlay() {
         int ctrlIconSz = U(42);
         svgicon::draw(g_sdlRdr, "prev", L.prev.x + ctrlIconSz / 2, L.prev.y + ctrlIconSz / 2, U(28),
                       255, 255, 255, A(255));
-        // PLAY ��ͼ��
+        // PLAY icon
         {
             const char* pi = (g_mpv->state() == MpvBackend::State::Paused) ? "play" : "pause";
             svgicon::draw(g_sdlRdr, pi, L.play.x + L.play.w / 2, L.play.y + L.play.h / 2,
@@ -899,7 +899,7 @@ void renderOverlay() {
         // next
         svgicon::draw(g_sdlRdr, "next", L.next.x + ctrlIconSz / 2, L.next.y + ctrlIconSz / 2, U(28),
                       255, 255, 255, A(255));
-        // time��tabular �۸�: �ȿ������屣֤��
+        // time: tabular font, fixed width for alignment
         {
             char cur[32], tot[32], ts[80];
             formatTime(cur, sizeof(cur), pos);
@@ -908,7 +908,7 @@ void renderOverlay() {
             g_text.drawText(L.timeX, L.cy - U(9), ts, Tpt(12), ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B);
         }
 
-        // �Ҳ� textbtn �� (���� + ͼ��)
+        // Draw text button (label + icon)
         auto drawTextBtn = [&](const SDL_Rect& rc, const char* label,
                                const char* iconId, Uint8 ir, Uint8 ig, Uint8 ib) {
             int tw = g_text.measureText(label, Tpt(12));
@@ -917,17 +917,17 @@ void renderOverlay() {
             svgicon::draw(g_sdlRdr, iconId, tx + tw + U(9), rc.y + U(17), U(22),
                           ir, ig, ib, A(255));
         };
-        // ��Ļ
+        // Subtitles
         {
             Uint8 ic = g_mpv->subVisible() ? 255 : 110;
             drawTextBtn(L.subBtn, i18n::subtitles(), "cc", ic, ic, ic);
         }
-        // ���� (���ְ�ť)
+        // Audio (text button)
         {
             Uint8 ic = g_mpv->audioTracks().size() > 1 ? 255 : 110;
             drawTextBtn(L.audioBtn, i18n::audioTrack(), "cc", ic, ic, ic);
         }
-        // �½� (���ְ�ť)
+        // Chapters (text button)
         {
             Uint8 ic = g_mpv->chapters().size() > 1 ? 255 : 110;
             drawTextBtn(L.chapterBtn, i18n::chapName(), "list", ic, ic, ic);
@@ -967,39 +967,39 @@ void renderOverlay() {
             g_text.drawText(L.speedBtn.x + U(8) + lw + U(4), L.speedBtn.y + U(10), spd, Tpt(12),
                             ui::ACCENT2_R, ui::ACCENT2_G, ui::ACCENT2_B);
         }
-        // ���� + �ֱ��ʱ�ǩ
+        // Quality + resolution tag
         {
             const char* ql = qualityLabel();
             int qw = g_text.measureText(i18n::quality(), Tpt(12));
             g_text.drawText(L.qualityBtn.x + U(8), L.qualityBtn.y + U(10), i18n::quality(), Tpt(12), ui::TEXT_DIM, ui::TEXT_DIM, ui::TEXT_DIM + 5);
             g_text.drawText(L.qualityBtn.x + U(8) + qw + U(4), L.qualityBtn.y + U(11), ql, Tpt(11), ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B);
         }
-        // ����ͼ��
+        // Volume icon
         {
             const char* vid = g_mpv->muted() ? "mute" : "volume";
             svgicon::draw(g_sdlRdr, vid, L.volIconCx, L.cy, U(28),
                           255, 255, 255, A(255));
         }
-        // ����(����+gear)
+        // Settings (label+gear)
         drawTextBtn(L.setBtn, i18n::settings(), "gear", 255, 255, 255);
-        // ȫ��
+        // Fullscreen
         const char* fid = g_ui.fullscreen ? "exitfull" : "full";
         svgicon::draw(g_sdlRdr, fid, L.fullBtn.x + ctrlIconSz / 2, L.fullBtn.y + ctrlIconSz / 2, U(28),
                       255, 255, 255, A(255));
 
-        // ��������(չ��̬)
+        // Volume slider (expanded state)
         if (volOpen && L.volSliderW > 0) {
             int sldW = U(80);
             int sx = L.volSliderX;
             bool hov = g_ui.volumeSliderHover || g_ui.volumeDragging;
             int slH = hov ? U(5) : U(4);
             int sy = L.cy - slH / 2;
-            // �������
+            // Track background
             Uint8 trackA = hov ? 65 : 40;
             SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, trackA);
             SDL_Rect trk = {sx, sy, sldW, slH};
             SDL_RenderFillRect(g_sdlRdr, &trk);
-            // �����
+            // Fill level
             float v = g_mpv->volume();
             int fw = (int)(sldW * v);
             if (fw > 1) {
@@ -1007,12 +1007,12 @@ void renderOverlay() {
                 SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 255);
                 SDL_RenderFillRect(g_sdlRdr, &fl);
             }
-            // Բ�� thumb (hover ʱ�ӹ���)
+            // Round thumb (glow on hover)
             int tx = sx + fw;
             int ty = L.cy;
             int thumbR = hov ? U(7) : U(6);
             if (hov) {
-                // ����
+                // Glow ring
                 fillCircle(g_sdlRdr, tx, ty, thumbR + U(3), 255, 255, 255, 40);
             }
             fillCircle(g_sdlRdr, tx, ty, thumbR, 255, 255, 255, 255);
@@ -1051,32 +1051,32 @@ void renderOverlay() {
         }
     }
 
-    // --- speed popup menu��Ч��ͼ���: Բ��r8/����չ��/k��ע�� ---
+    // --- speed popup menu (glass effect: r8 corners/expanded upward/k annotation) ---
     if (g_ui.speedMenuOpen) {
         Row1Layout L;
         layoutRow1(w, barTop, g_ui.volumeSliderOpen || g_ui.volumeDragging, L);
         int itemH = U(32);
         int menuW = U(132);
         int menuH = SPEED_PRESET_COUNT * itemH + U(12);
-        int menuX = L.speedBtn.x;                        // �밴ť�����
-        int menuY = L.speedBtn.y - menuH - U(6);        // ����չ��
-        if (menuY < 0) menuY = L.speedBtn.y + L.speedBtn.h + U(6);  // �ռ䲻��ʱ��������
+        int menuX = L.speedBtn.x;                        // Aligned with button
+        int menuY = L.speedBtn.y - menuH - U(6);        // Expand upward
+        if (menuY < 0) menuY = L.speedBtn.y + L.speedBtn.h + U(6);  // If no space, expand downward
         if (menuX + menuW > w - U(8)) menuX = w - menuW - U(8);
 
-        // Բ�Ǿ���: �Ȼ���������, ����Բ����Ľ�
+        // Rounded rect: first draw center rect, then fill corners
         int cr = U(8);  // corner radius
         SDL_Rect bgRc = {menuX + cr, menuY, menuW - cr * 2, menuH};
         SDL_SetRenderDrawColor(g_sdlRdr, 24, 24, 26, 255);
         SDL_RenderFillRect(g_sdlRdr, &bgRc);
-        // �м���Բ�ǲ���(������)
+        // Middle rect (no corners)
         SDL_Rect midH = {menuX, menuY + cr, menuW, menuH - cr * 2};
         SDL_RenderFillRect(g_sdlRdr, &midH);
-        // �Ľ�Բ
+        // Corner circles
         fillCircle(g_sdlRdr, menuX + cr, menuY + cr, cr, 24, 24, 26, 255);
         fillCircle(g_sdlRdr, menuX + menuW - cr, menuY + cr, cr, 24, 24, 26, 255);
         fillCircle(g_sdlRdr, menuX + cr, menuY + menuH - cr, cr, 24, 24, 26, 255);
         fillCircle(g_sdlRdr, menuX + menuW - cr, menuY + menuH - cr, cr, 24, 24, 26, 255);
-        // �߿�(��: ֻ��ֱ�߶�)
+        // Border (top/bottom: only horizontal lines)
         SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 26);
         SDL_RenderDrawLine(g_sdlRdr, menuX + cr, menuY, menuX + menuW - cr, menuY);
         SDL_RenderDrawLine(g_sdlRdr, menuX + cr, menuY + menuH, menuX + menuW - cr, menuY + menuH);
@@ -1093,7 +1093,7 @@ void renderOverlay() {
             if (sp == (int)sp) std::snprintf(label, sizeof(label), "%.2fx", sp);
             else               std::snprintf(label, sizeof(label), "%.2fx", sp);
             g_text.drawText(menuX + U(10), iy + U(6), label, Tpt(13), tr, tg, tb);
-            // k ��ע: ��/����/��
+            // k annotation: slow/normal/fast
             const char* k = (sp < 0.99f) ? T("慢", "Slow") : (sp < 1.01f) ? T("正常", "Normal") :
                             (sp < 2.01f) ? nullptr : T("快", "Fast");
             if (k) {
@@ -1103,7 +1103,7 @@ void renderOverlay() {
         }
     }
 
-    // --- quality popup menu (����: ��Ƶ��Ϣ + ����Ԥ��) ---
+    // --- quality popup menu (content: video info + preset selection) ---
     if (g_ui.qualityMenuOpen) {
         Row1Layout L;
         layoutRow1(w, barTop, g_ui.volumeSliderOpen || g_ui.volumeDragging, L);
@@ -1116,7 +1116,7 @@ void renderOverlay() {
         if (menuY < 0) menuY = L.qualityBtn.y + L.qualityBtn.h + U(6);
         if (menuX + menuW > w - U(8)) menuX = w - menuW - U(8);
 
-        // Բ�Ǿ��α���
+        // Rounded rect border
         int cr = U(8);
         SDL_SetRenderDrawColor(g_sdlRdr, 24, 24, 26, 255);
         SDL_Rect bgRc = {menuX + cr, menuY, menuW - cr * 2, menuH};
@@ -1133,30 +1133,30 @@ void renderOverlay() {
         SDL_RenderDrawLine(g_sdlRdr, menuX, menuY + cr, menuX, menuY + menuH - cr);
         SDL_RenderDrawLine(g_sdlRdr, menuX + menuW, menuY + cr, menuX + menuW, menuY + menuH - cr);
 
-        // ��Ƶ��Ϣ��
+        // Video info section
         int iw = g_mpv->videoWidth(), ih = g_mpv->videoHeight();
         char info[64];
         std::snprintf(info, sizeof(info), "%dx%d", iw, ih);
         g_text.drawText(menuX + U(10), menuY + U(8), info, Tpt(12), ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B);
-        // �ָ���
+        // Separator line
         SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 20);
         SDL_RenderDrawLine(g_sdlRdr, menuX + U(8), menuY + infoH - U(4),
                            menuX + menuW - U(8), menuY + infoH - U(4));
 
-        // Ԥ��ѡ��
+        // Preset selection
         const char* qNames[] = { T("省电", "Power Saving"), T("标准", "Standard"), T("卓越", "Ultimate") };
         for (int i = 0; i < QUALITY_PRESET_COUNT; ++i) {
             int iy = menuY + infoH + i * itemH;
             bool sel = (g_ui.qualityPreset == i);
             Uint8 tr = sel ? 59 : 228, tg = sel ? 130 : 228, tb = sel ? 246 : 231;
             g_text.drawText(menuX + U(10), iy + U(8), qNames[i], Tpt(13), tr, tg, tb);
-            // ��ǰѡ�б��
+            // Current selection indicator
             if (sel) {
                 fillCircle(g_sdlRdr, menuX + menuW - U(18), iy + U(14), U(4), ui::ACCENT2_R, ui::ACCENT2_G, ui::ACCENT2_B, 255);
             }
         }
     }
-    // --- EQ popup menu (6Ƶ�ξ�����) ---
+    // --- EQ popup menu (6-band frequency sliders) ---
     if (g_ui.eqMenuOpen) {
         Row1Layout L;
         layoutRow1(w, barTop, g_ui.volumeSliderOpen || g_ui.volumeDragging, L);
@@ -1165,10 +1165,10 @@ void renderOverlay() {
         int itemH = U(36);
         int menuW = U(200);
         int menuH = U(32) + 6 * itemH + U(40) + U(50);  // title + 6 bands + reset + presets
-        int menuX = w / 2 - menuW / 2;           // ������ʾ
+        int menuX = w / 2 - menuW / 2;           // Centered display
         int menuY = h / 2 - menuH / 2;
 
-        // ����
+        // Background
         int cr = U(8);
         SDL_SetRenderDrawColor(g_sdlRdr, 24, 24, 26, 255);
         SDL_Rect bgRc = {menuX + cr, menuY, menuW - cr * 2, menuH};
@@ -1179,7 +1179,7 @@ void renderOverlay() {
         fillCircle(g_sdlRdr, menuX + menuW - cr, menuY + cr, cr, 24, 24, 26, 255);
         fillCircle(g_sdlRdr, menuX + cr, menuY + menuH - cr, cr, 24, 24, 26, 255);
         fillCircle(g_sdlRdr, menuX + menuW - cr, menuY + menuH - cr, cr, 24, 24, 26, 255);
-        // ����
+        // Title
         g_text.drawText(menuX + U(10), menuY + U(10), i18n::equalizer(), Tpt(13), 255, 255, 255);
 
         // 6 频段滑块
@@ -1189,34 +1189,34 @@ void renderOverlay() {
         for (int i = 0; i < 6; ++i) {
             int iy = baseY + i * itemH;
             g_text.drawText(menuX + U(10), iy + U(8), bandNames[i], Tpt(11), ui::TIME_TEXT_R, ui::TIME_TEXT_G, ui::TIME_TEXT_B);
-            // ���
+            // Track
             SDL_SetRenderDrawColor(g_sdlRdr, 58, 58, 62, 255);
             SDL_Rect trk = {trackX, iy + U(14), trackW, U(4)};
             SDL_RenderFillRect(g_sdlRdr, &trk);
-            // ����λ��: gain -12..+12 �� 0..1
+            // Thumb position: gain -12..+12 maps to 0..1
             float gain = g_mpv->eqGain(i);
             float norm = (gain + 12.0f) / 24.0f;
             if (norm < 0.0f) norm = 0.0f; if (norm > 1.0f) norm = 1.0f;
             int thumbX = trackX + (int)(norm * trackW);
-            // ���� thumb
+            // Thumb circle
             fillCircle(g_sdlRdr, thumbX, iy + U(16), U(6), ui::ACCENT2_R, ui::ACCENT2_G, ui::ACCENT2_B, 255);
-            // ��ֵ
+            // Value label
             char val[16];
             std::snprintf(val, sizeof(val), "%+.0f", gain);
             g_text.drawText(trackX + trackW + U(8), iy + U(8), val, Tpt(11), ui::ICON_BRIGHT, ui::ICON_BRIGHT, 231);
-            // �洢�����������ڵ��
+            // Store rects for hit-testing
             static SDL_Rect s_bandRects[6];
             s_bandRects[i] = {trackX - U(8), iy, trackW + U(16), itemH};
-            // (hit-test �ں��洦��)
+            // (hit-test in wndproc)
         }
-        // Reset ��ť
+        // Reset button rect
         int resetY = baseY + 6 * itemH + U(4);
         SDL_Rect resetRc = {menuX + menuW / 2 - U(30), resetY, U(60), U(26)};
         SDL_SetRenderDrawColor(g_sdlRdr, 58, 58, 62, 255);
         SDL_RenderFillRect(g_sdlRdr, &resetRc);
         g_text.drawText(resetRc.x + U(14), resetRc.y + U(5), i18n::reset(), Tpt(11), ui::ICON_BRIGHT, ui::ICON_BRIGHT, 231);
 
-        // P1-6: EQ Ԥ�谴ť
+        // P1-6: EQ preset buttons
         struct EqPreset { const char* name; float bands[6]; };
         static const EqPreset presets[] = {
             { nullptr,    { 0,  0,  0,  0,  0,  0 } },  // Flat — 指针占位，运行时用 i18n
@@ -1238,7 +1238,7 @@ void renderOverlay() {
             int by = presetY + U(14);
             int bw = presetBtnW - U(4);
             int bh = U(22);
-            // ����Ƿ�ǰƥ��
+            // Check if current gain matches preset
             bool match = true;
             for (int b = 0; b < 6; ++b) {
                 if (std::abs(g_mpv->eqGain(b) - presets[i].bands[b]) > 0.5f) { match = false; break; }
@@ -1248,7 +1248,7 @@ void renderOverlay() {
             SDL_RenderFillRect(g_sdlRdr, &btnRc);
             g_text.drawText(bx + U(4), by + U(4), presetNames[i], Tpt(9),
                             match ? 255 : 180, match ? 255 : 180, match ? 255 : 186);
-            // �洢��ť����
+            // Store preset button rects
             static SDL_Rect s_presetRects[5];
             s_presetRects[i] = btnRc;
         }
@@ -1282,7 +1282,7 @@ void renderOverlay() {
         SDL_RenderDrawLine(g_sdlRdr, menuX + menuW, menuY + cr, menuX + menuW, menuY + menuH - cr);
         int curSubId = g_mpv->currentSubId();
         bool subVis = g_mpv->subVisible();
-        // item 0: �ر���Ļ
+        // item 0: Close subtitles
         {
             int iy = menuY + U(6);
             bool sel = !subVis;
@@ -1295,11 +1295,11 @@ void renderOverlay() {
             Uint8 tr = sel ? 59 : 228, tg = sel ? 130 : 228, tb = sel ? 246 : 231;
             g_text.drawText(menuX + U(10), iy + U(6), subs[i].desc.c_str(), Tpt(13), tr, tg, tb);
         }
-        // �ָ���
+        // Separator line
         int sepY = menuY + U(6) + (int)(subs.size() + 1) * itemH - U(2);
         SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 26);
         SDL_RenderDrawLine(g_sdlRdr, menuX + U(10), sepY, menuX + menuW - U(10), sepY);
-        // �����ⲿ��Ļ
+        // Load external subtitles
         {
             int iy = menuY + U(6) + (int)(subs.size() + 1) * itemH;
             g_text.drawText(menuX + U(10), iy + U(6), T("加载外部字幕...", "Load external..."),
@@ -1381,17 +1381,17 @@ void renderOverlay() {
     if (g_ui.playlistOpen) {
         int panelW, panelX;
         if (!g_ui.fullscreen) {
-            panelW = totalW - w;                 // ������չ���Ķ�������
+            panelW = totalW - w;                 // Panel width matches expanded area
             panelX = w;
-        } else {                                  // ȫ���޷�����: ����ʽ
+        } else {                                  // Fullscreen: no sidebar, use overlay
             panelW = U(430);
             panelX = w - panelW;
         }
-        if (panelW < U(200)) { panelW = U(200); panelX = w - panelW; }   // ����
+        if (panelW < U(200)) { panelW = U(200); panelX = w - panelW; }   // Minimum
         int panelH = h;
         int panelY = 0;
 
-        // panel background����������͸����
+        // Panel background (solid, no transparency)
         SDL_Rect pRc = {panelX, panelY, panelW, panelH};
         SDL_SetRenderDrawColor(g_sdlRdr, 16, 16, 17, 255);
         SDL_RenderFillRect(g_sdlRdr, &pRc);
@@ -1399,7 +1399,7 @@ void renderOverlay() {
         SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 25);
         SDL_RenderDrawLine(g_sdlRdr, panelX, panelY, panelX, panelY + panelH);
 
-        // title + �ر�ť��Ч��ͼ .pl-head��
+        // Title + close button (glass effect, .pl-head)
         g_text.drawText(panelX + U(14), panelY + U(16), i18n::playlist(), Tpt(13), 255, 255, 255);
         int closeX = panelX + panelW - U(44);
         int closeY = panelY + U(8);
@@ -1408,12 +1408,12 @@ void renderOverlay() {
                       255, 255, 255, 255);
         g_ui.plCloseRect = closeRc;
 
-        // items from playlist queue����Ƭ��: thumb100��56+dur�Ǳ�+title+state��
+        // Items from playlist queue (card layout: thumb100x56+duration badge+title+state)
         int itemY = panelY + U(45);
-        int itemH = U(72);                       // ��Ƭ�߶�(56 thumb+padding)
+        int itemH = U(72);                       // Card height (56 thumb+padding)
         int scroll = g_ui.playlistScroll;
         std::vector<std::string> visiblePaths;
-        // �ü����б���: ����ʱ���ݲ����ס�̶�������
+        // Clip playlist list: do not clip fixed header area
         SDL_Rect listClip = {panelX, itemY, panelW, panelY + panelH - itemY};
         SDL_RenderSetClipRect(g_sdlRdr, &listClip);
         for (size_t pi = 0; pi < g_playlist.size(); ++pi) {
@@ -1428,7 +1428,7 @@ void renderOverlay() {
             auto hit = g_cfg.history.find(p);
             if (hit != g_cfg.history.end()) hpos = hit->second.pos;
 
-            // hover ����������ڱ����ڣ�
+            // Hover highlight (within panel bounds)
             bool hovered = (g_ui.mouseX >= panelX + U(8) &&
                             g_ui.mouseX <= panelX + panelW - U(8) &&
                             g_ui.mouseY >= iy && g_ui.mouseY <= iy + itemH - U(6));
@@ -1439,7 +1439,7 @@ void renderOverlay() {
                 SDL_RenderFillRect(g_sdlRdr, &hlRc);
             }
 
-            // ����ͼ 100��56 r7������ռλ�� #26262c��#15151a ���ƣ�
+            // Thumbnail 100x56 r7 rounded rect (placeholder #26262c/#15151a approximation)
             SDL_Rect thRc = {panelX + U(12), iy + U(8), U(100), U(56)};
             SDL_SetRenderDrawColor(g_sdlRdr, 33, 33, 38, 255);
             SDL_RenderFillRect(g_sdlRdr, &thRc);
@@ -1450,7 +1450,7 @@ void renderOverlay() {
                 svgicon::draw(g_sdlRdr, "play", thRc.x + U(50), thRc.y + U(28), U(24),
                               255, 255, 255, 255);
             }
-            // dur �Ǳ�(right4 bottom4 ��.72)
+            // Duration badge (right4 bottom4, alpha.72)
             {
                 char durBuf[16] = "";
                 if (hpos > 1.0) {
@@ -1466,12 +1466,12 @@ void renderOverlay() {
                 }
             }
 
-            // meta: title һ�� + state ��
+            // Meta: title one line + state row
             std::string fn = fileNameOf(p);
             int maxTw = panelW - U(140);
             if (maxTw < U(80)) maxTw = U(80);
             {
-                // �����ؿ��ض�
+                // Ellipsize if too long
                 if (g_text.measureText(fn, Tpt(12)) > maxTw) {
                     while (fn.size() > 4 && g_text.measureText(fn + "...", Tpt(12)) > maxTw)
                         fn.pop_back();
@@ -1481,7 +1481,7 @@ void renderOverlay() {
                       tb = isCurrent ? 255 : 240;   // playing #bfd6ff
                 g_text.drawText(thRc.x + thRc.w + U(10), iy + U(10), fn, Tpt(12), tr, tg, tb);
             }
-            // state: ���ڲ���(accent2)/�Ѳ���(#6b7280)/δ����(#3f3f46)
+            // State: Playing (accent2)/Played (#6b7280)/Unplayed (#3f3f46)
             {
                 const char* st; Uint8 sr, sg_, sb_;
                 if (isCurrent) { st = i18n::playing(); sr = 59; sg_ = 130; sb_ = 246; }
@@ -1490,9 +1490,9 @@ void renderOverlay() {
                 g_text.drawText(thRc.x + thRc.w + U(10), iy + U(32), st, Tpt(11), sr, sg_, sb_);
             }
         }
-        SDL_RenderSetClipRect(g_sdlRdr, nullptr);   // ����ü�(��קָʾ��/��������Խ��)
+        SDL_RenderSetClipRect(g_sdlRdr, nullptr);   // Reset clip rect (drag indicator/bounds check)
 
-        // ��ק�����Ӿ�����������ָʾ�� + ���������
+        // Drag reorder: insertion line indicator + source highlight
         if (g_ui.plDragging && g_ui.plDragFrom >= 0) {
             int itemH = U(72);
             int topY = panelY + U(45);
@@ -1516,7 +1516,7 @@ void renderOverlay() {
             }
         }
 
-        // �ύ�ɼ���������ͼ worker����ȱͼ��; �ϲ�����, ����������ͼ������
+        // Submit visible items to thumb worker (missing thumbnails); merge with existing queue
         {
             std::lock_guard<std::mutex> lk(g_thumbMtx);
             for (auto& p : visiblePaths) {
@@ -1526,7 +1526,7 @@ void renderOverlay() {
             }
         }
 
-        // scrollbar��M33d: ��ͣ����/��ק/�����ҳ��
+        // Scrollbar (M33d: hover expand/drag/page up-down)
         {
             int contentH = (int)g_playlist.size() * itemH;
             int viewH = panelH - U(55);
@@ -1539,13 +1539,13 @@ void renderOverlay() {
                 SDL_RenderFillRect(g_sdlRdr, &trk);
                 int barH = std::max(U(30), viewH * viewH / contentH);
                 int barY = trackY + g_ui.playlistScroll * (viewH - barH) / (contentH - viewH);
-                // hover/��קʱ����
+                // Hover/drag: brighter
                 Uint8 ba = (g_ui.sbHover || g_ui.sbDragging) ? 160 : 70;
                 SDL_SetRenderDrawColor(g_sdlRdr, 235, 235, 240, ba);
                 SDL_Rect br = {trackX, barY, trackW, barH};
                 SDL_RenderFillRect(g_sdlRdr, &br);
 
-                // ��¶���θ����в���
+                // Expose scroll hit-test areas
                 g_ui.sbTrackX = trackX; g_ui.sbTrackY = trackY;
                 g_ui.sbTrackW = trackW; g_ui.sbTrackH = viewH;
                 g_ui.sbBarY = barY;     g_ui.sbBarH = barH;
@@ -1563,13 +1563,13 @@ void renderOverlay() {
     if (g_ui.settingsOpen) {
         SettingsGeom sg = settingsGeom(w, h);
 
-        // ģ̬����: ���͸��ѹ��(per-pixel alpha), ��Ƶ��Լ�ɼ�
+        // Modal backdrop: semi-transparent dim (per-pixel alpha, low-opacity)
         SDL_SetRenderDrawBlendMode(g_sdlRdr, SDL_BLENDMODE_BLEND);
         SDL_SetRenderDrawColor(g_sdlRdr, 0, 0, 0, 140);
         SDL_Rect fullRc = {0, 0, w, h};
         SDL_RenderFillRect(g_sdlRdr, &fullRc);
 
-        // �����Ӱ�������ɢ��
+        // Shadow: outer diffuse glow
         for (int i = 4; i >= 1; --i) {
             Uint8 sha = (Uint8)(12 * i);
             SDL_SetRenderDrawColor(g_sdlRdr, 0, 0, 0, sha);
@@ -1577,7 +1577,7 @@ void renderOverlay() {
             SDL_RenderDrawRect(g_sdlRdr, &sr);
         }
 
-        // panel (Բ�Ǿ���)
+        // Panel (rounded rect)
         int cr = U(12);
         SDL_SetRenderDrawColor(g_sdlRdr, 28, 28, 30, 255);
         SDL_Rect pBody = {sg.panelX + cr, sg.panelY, sg.panelW - cr*2, sg.panelH};
@@ -1588,7 +1588,7 @@ void renderOverlay() {
         fillCircle(g_sdlRdr, sg.panelX + sg.panelW - cr, sg.panelY + cr, cr, 28, 28, 30, 255);
         fillCircle(g_sdlRdr, sg.panelX + cr, sg.panelY + sg.panelH - cr, cr, 28, 28, 30, 255);
         fillCircle(g_sdlRdr, sg.panelX + sg.panelW - cr, sg.panelY + sg.panelH - cr, cr, 28, 28, 30, 255);
-        // �߿�
+        // Border
         SDL_SetRenderDrawColor(g_sdlRdr, 255, 255, 255, 20);
         SDL_Rect borderH = {sg.panelX + cr, sg.panelY, sg.panelW - cr*2, sg.panelH};
         SDL_RenderDrawRect(g_sdlRdr, &borderH);
@@ -1645,7 +1645,7 @@ void renderOverlay() {
             }
         }
 
-        // playback mode row (ѡ��=��ɫ����, δѡ��=�������ޱ߿�)
+        // playback mode row (selected=filled pill, unselected=transparent no border)
         g_text.drawText(sg.panelX + U(20), sg.modeRowY + U(3), i18n::playbackMode(), Tpt(13), 200, 200, 200);
         const char* modes[] = { i18n::modeSingle(), i18n::modeLoop(), i18n::modeShuffle() };
         for (int i = 0; i < 3; ++i) {
@@ -1664,7 +1664,7 @@ void renderOverlay() {
                             sel ? 255 : 150, sel ? 255 : 150, sel ? 255 : 150);
         }
 
-        // �����л��� (ͬ���: ѡ��=��ɫ����, δѡ��=������)
+        // Language switcher (same style: selected=filled pill, unselected=transparent)
         g_text.drawText(sg.panelX + U(20), sg.langRowY + U(3), i18n::language(), Tpt(13), 200, 200, 200);
         const char* langLabels[] = { i18n::chinese(), i18n::english() };
         for (int i = 0; i < 2; ++i) {
@@ -1685,7 +1685,7 @@ void renderOverlay() {
         }
     }
 
-    // --- toast notification��M32g ������ʽ: ����Բ����� + ���֣� ---
+    // --- toast notification (M32g pill style: rounded rect + icon) ---
     if (g_ui.toastActive) {
         Uint32 elapsed = SDL_GetTicks() - g_ui.toastStart;
         if (elapsed > ui::TOAST_MS) {
@@ -1712,7 +1712,7 @@ void renderOverlay() {
         }
     }
 
-    // --- OSD ��Ϣ���ӣ��� I �л���8 ���Զ���ʧ�� ---
+    // --- OSD info overlay (I key toggle, 8s auto-hide) ---
     if (g_ui.osdActive) {
         if (SDL_GetTicks() - g_ui.osdStart > 8000) {
             g_ui.osdActive = false;
