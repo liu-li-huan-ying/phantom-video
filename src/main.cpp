@@ -349,12 +349,28 @@ void applySetting(const char* key, int value) {
     else if (std::strcmp(key, "interp") == 0)  applyMotionInterp(value != 0);
     else if (std::strcmp(key, "vsinterp") == 0) {
         g_cfg.interpolation = value;
-        if (g_mpv) g_mpv->applyVapourSynthFilter(value, g_cfg.superRes);
+        if (g_mpv) {
+            g_mpv->setInitVfOption(g_cfg.interpolation, g_cfg.superRes);
+            auto snap = g_mpv->reinit(g_mpvHwnd, g_cfg.enableZeroCopy != 0);
+            if (!snap.path.empty() && snap.pos > 1.0) {
+                g_pendingResumePos = snap.pos;
+                if (snap.wasPaused) g_suppressNextUnpause = true;
+                g_mpv->loadFile(snap.path);
+            }
+        }
         showToast(value ? "MVTools: ON" : "MVTools: OFF");
     }
     else if (std::strcmp(key, "vssr") == 0) {
         g_cfg.superRes = value;
-        if (g_mpv) g_mpv->applyVapourSynthFilter(g_cfg.interpolation, value);
+        if (g_mpv) {
+            g_mpv->setInitVfOption(g_cfg.interpolation, g_cfg.superRes);
+            auto snap = g_mpv->reinit(g_mpvHwnd, g_cfg.enableZeroCopy != 0);
+            if (!snap.path.empty() && snap.pos > 1.0) {
+                g_pendingResumePos = snap.pos;
+                if (snap.wasPaused) g_suppressNextUnpause = true;
+                g_mpv->loadFile(snap.path);
+            }
+        }
         showToast(value ? "Real-CUGAN 2x: ON" : "Real-CUGAN 2x: OFF");
     }
     else if (std::strcmp(key, "hiq") == 0) {

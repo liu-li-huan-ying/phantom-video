@@ -756,51 +756,10 @@ void MpvBackend::setInitVfOption(int interp, int superRes) {
 }
 
 void MpvBackend::applyVapourSynthFilter(int interp, int superRes) {
-    if (!mpv_) { LOG_WARN("MPV", "applyVapourSynthFilter: mpv_ is null!"); return; }
-    std::string vf = buildVapourSynthFilter(interp, superRes);
-    LOG_INFO("MPV", "applyVapourSynthFilter interp=%d superRes=%d vf='%s'", interp, superRes, vf.c_str());
-
-    if (vf.empty()) {
-        int r = mpv_set_property_string(mpv_, "vf", "");
-        LOG_INFO("MPV", "vf cleared (both off), ret=%d (%s)", r, mpv_error_string(r));
-        return;
-    }
-
-    // 验证脚本文件存在
-    {
-        std::string scriptPath = exeDir() + "vapoursynth/scripts/";
-        if (interp && superRes) scriptPath += "interp_upscale.vpy";
-        else if (interp) scriptPath += "mvtools_interp.vpy";
-        else if (superRes) scriptPath += "realcugan_upscale.vpy";
-        else scriptPath += "passthrough.vpy";
-        DWORD attr = GetFileAttributesA(scriptPath.c_str());
-        LOG_INFO("MPV", "script file: %s exists=%d", scriptPath.c_str(), (attr != INVALID_FILE_ATTRIBUTES));
-
-        // 验证 plugins 存在
-        std::string mvtoolsPath = exeDir() + "vapoursynth\\runtime\\vs-plugins\\mvtools.dll";
-        std::string cuganPath = exeDir() + "vapoursynth\\runtime\\vs-plugins\\librcnv.dll";
-        LOG_INFO("MPV", "mvtools.dll: %s exists=%d", mvtoolsPath.c_str(), (GetFileAttributesA(mvtoolsPath.c_str()) != INVALID_FILE_ATTRIBUTES));
-        LOG_INFO("MPV", "librcnv.dll: %s exists=%d", cuganPath.c_str(), (GetFileAttributesA(cuganPath.c_str()) != INVALID_FILE_ATTRIBUTES));
-    }
-
-    // 设置 vf 属性
-    int r = mpv_set_property_string(mpv_, "vf", vf.c_str());
-    LOG_INFO("MPV", "mpv_set_property_string(vf) ret=%d (%s)", r, mpv_error_string(r));
-
-    // 读回验证
-    char* readback = mpv_get_property_string(mpv_, "vf");
-    if (readback) {
-        LOG_INFO("MPV", "vf readback: '%s'", readback);
-        mpv_free(readback);
-    } else {
-        LOG_WARN("MPV", "vf readback: NULL");
-    }
-
-    // 读取当前 VO 信息
-    char* vo = mpv_get_property_string(mpv_, "current-vo");
-    char* hwdec = mpv_get_property_string(mpv_, "hwdec-current");
-    if (vo) { LOG_INFO("MPV", "current-vo: %s", vo); mpv_free(vo); }
-    if (hwdec) { LOG_INFO("MPV", "hwdec-current: %s", hwdec); mpv_free(hwdec); }
+    // VS 滤镜必须在 mpv_initialize 前设置，运行时 vf set 不重建滤镜链。
+    // 运行时切换应通过 setInitVfOption + reinit + loadFile 实现。
+    // 此函数仅保留向后兼容，实际不做任何操作。
+    LOG_INFO("MPV", "applyVapourSynthFilter: no-op (use reinit for VS toggle)");
 }
 
 void MpvBackend::clearVapourSynthFilter() {
