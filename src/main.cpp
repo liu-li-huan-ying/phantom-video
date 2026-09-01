@@ -4,7 +4,7 @@
 #include <SDL.h>
 #include <SDL_syswm.h>
 
-const char* PHANTOM_VERSION = "0.1.0";
+const char* PHANTOM_VERSION = "1.0.0";
 
 #include <shellapi.h>
 #include <dwmapi.h>
