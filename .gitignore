@@ -11,6 +11,5 @@ dev/
 c.json
 seek_debug*.log
 icon_debug_*.bmp
-AGENTS.md
 docs/DEVELOPMENT_LOG.md
 
