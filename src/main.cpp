@@ -822,44 +822,6 @@ int main(int argc, char** argv) {
     Logger::instance().setLevel(diag ? LogLevel::Trace : LogLevel::Info);
     LOG_INFO("MAIN", "phantom video (mpv + SDL2 overlay) starting");
 
-    // Crash handler: write crash info to absolute path
-    {
-        static const char* crashLog = "G:\\vedioplayer\\build\\crash.log";
-        AddVectoredExceptionHandler(1, [](PEXCEPTION_POINTERS ep) -> LONG {
-            auto* rec = ep->ExceptionRecord;
-            FILE* f = fopen(crashLog, "a");
-            if (f) {
-                fprintf(f, "code=0x%08lx addr=%p flags=0x%lx\n",
-                        rec->ExceptionCode, rec->ExceptionAddress, rec->ExceptionFlags);
-                for (DWORD i = 0; i < rec->NumberParameters; i++)
-                    fprintf(f, "  p%lu=0x%p\n", i, (void*)rec->ExceptionInformation[i]);
-                fflush(f);
-                fclose(f);
-            }
-            return EXCEPTION_CONTINUE_SEARCH;
-        });
-        SetUnhandledExceptionFilter([](PEXCEPTION_POINTERS ep) -> LONG {
-            auto* rec = ep->ExceptionRecord;
-            FILE* f = fopen(crashLog, "a");
-            if (f) {
-                fprintf(f, "UNHANDLED code=0x%08lx addr=%p\n",
-                        rec->ExceptionCode, rec->ExceptionAddress);
-                fflush(f);
-                fclose(f);
-            }
-            return EXCEPTION_CONTINUE_SEARCH;
-        });
-        // CRT abort handler
-        _set_purecall_handler([]() {
-            FILE* f = fopen(crashLog, "a");
-            if (f) { fprintf(f, "PURECALL\n"); fclose(f); }
-        });
-        _set_invalid_parameter_handler([](const wchar_t*, const wchar_t*, const wchar_t*, unsigned int, uintptr_t) {
-            FILE* f = fopen(crashLog, "a");
-            if (f) { fprintf(f, "INVALID_PARAM\n"); fclose(f); }
-        });
-    }
-
     loadConfig(configPath(), g_cfg);
 
     // VapourSynth: 设置环境变量，使 mpv 能找到 VSScript.dll 和 Python 模块

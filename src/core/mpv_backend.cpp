@@ -738,8 +738,16 @@ void MpvBackend::setHdrPeakDetect(bool on) {
 
 // ---- VapourSynth 滤镜 ----
 static std::string buildVapourSynthFilter(int interp, int superRes) {
-    // Use relative path - mpv M_OPT_FILE resolves relative to CWD
-    return "vapoursynth=vapoursynth/scripts/minimal_test.vpy";
+    // All paths relative to CWD (set to exeDir in main.cpp)
+    static const char* VS_PASSTHROUGH = "vapoursynth=vapoursynth/scripts/passthrough.vpy";
+    static const char* VS_INTERP      = "vapoursynth=vapoursynth/scripts/mvtools_interp.vpy";
+    static const char* VS_SUPERRES    = "vapoursynth=vapoursynth/scripts/realcugan_upscale.vpy";
+    static const char* VS_INTERP_SUPER= "vapoursynth=vapoursynth/scripts/interp_upscale.vpy";
+
+    if (interp > 1 && superRes > 1) return VS_INTERP_SUPER;
+    if (interp > 1)                 return VS_INTERP;
+    if (superRes > 1)               return VS_SUPERRES;
+    return VS_PASSTHROUGH;
 }
 
 void MpvBackend::setInitVfOption(int interp, int superRes) {
@@ -844,7 +852,7 @@ void MpvBackend::eventLoop() {
 
         case MPV_EVENT_LOG_MESSAGE: {
             auto* lm = (mpv_event_log_message*)event->data;
-            if (lm->log_level >= MPV_LOG_LEVEL_NONE)
+            if (lm->log_level >= MPV_LOG_LEVEL_WARN)
                 LOG_WARN("MPV", "[%s] %s", lm->prefix ? lm->prefix : "?",
                          lm->text ? lm->text : "");
             break;
