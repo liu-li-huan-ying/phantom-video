@@ -270,6 +270,10 @@ namespace i18n {
     inline const char* osdFallback()   { return T("降级", "fallback"); }
     inline const char* osdVfChain()    { return T("视频滤镜", "vf"); }
     inline const char* osdAfChain()    { return T("音频滤镜", "af"); }
+    inline const char* osdVsOff()      { return T("关闭", "off"); }
+    inline const char* osdVsInterp()   { return T("插帧", "interp"); }
+    inline const char* osdVsSuperRes() { return T("超分", "superres"); }
+    inline const char* osdVsBoth()     { return T("插帧+超分", "interp+superres"); }
     inline const char* osdPixelFmt()   { return T("像素格式", "pixfmt"); }
     inline const char* osdContainerFmt() { return T("容器格式", "container"); }
 }

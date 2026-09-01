@@ -1747,7 +1747,7 @@ void renderOverlay() {
             int vw = g_mpv->videoWidth(), vh = g_mpv->videoHeight();
 
             // ===== 格式化每一行，标签跟随 i18n 语言 =====
-            char lines_buf[14][256] = {};
+            char lines_buf[16][256] = {};
             int lineCount = 0;
 
             // 1. 标题
@@ -1775,11 +1775,35 @@ void renderOverlay() {
                 if (n > 0) lineCount++;
             }
 
-            // 4. 滤镜后帧率 (仅当 != stream fps 时)
-            if (!evfps.empty() && evfps != vfps) {
-                std::snprintf(lines_buf[lineCount], 256, "%s (%s): %s",
-                    i18n::osdVfFps(), T("估算", "estimated"), evfps.c_str());
-                lineCount++;
+            // 4. 滤镜后帧率 (始终显示)
+            {
+                char* p = lines_buf[lineCount];
+                int n = 0;
+                if (!evfps.empty() && evfps != vfps)
+                    n += std::snprintf(p+n, 256-n, "%s: %s", i18n::osdVfFps(), evfps.c_str());
+                else if (!vfps.empty())
+                    n += std::snprintf(p+n, 256-n, "%s: -", i18n::osdVfFps());
+                if (n > 0) lineCount++;
+            }
+
+            // 4b. VapourSynth 滤镜状态
+            {
+                bool hasVS = !vf.empty() && vf.find("vapoursynth") != std::string::npos;
+                if (hasVS) {
+                    char* p = lines_buf[lineCount];
+                    int n = std::snprintf(p, 256, "VS: ");
+                    if (vf.find("interp_upscale") != std::string::npos)
+                        n += std::snprintf(p+n, 256-n, "%s", i18n::osdVsBoth());
+                    else if (vf.find("mvtools_interp") != std::string::npos)
+                        n += std::snprintf(p+n, 256-n, "%s", i18n::osdVsInterp());
+                    else if (vf.find("realcugan") != std::string::npos)
+                        n += std::snprintf(p+n, 256-n, "%s", i18n::osdVsSuperRes());
+                    else
+                        n += std::snprintf(p+n, 256-n, "active");
+                    if (!vfps.empty() && !evfps.empty() && evfps != vfps)
+                        n += std::snprintf(p+n, 256-n, "  %s->%s fps", vfps.c_str(), evfps.c_str());
+                    lineCount++;
+                }
             }
 
             // 5. 码率
