@@ -328,6 +328,16 @@ static bool g_needsUnpause = false;
 static std::atomic<bool> g_suppressNextUnpause{false};  // exclusive toggle: 保持暂停状态
 
 // Ӧ�����ñ���� mpv�����ط�תʱ���ã�
+// Reinit+resume helper: used by excl/vsinterp/vssr settings to rebuild mpv and restore playback
+static void applyWithReinit() {
+    auto snap = g_mpv->reinit(g_mpvHwnd, g_cfg.enableZeroCopy != 0);
+    if (!snap.path.empty() && snap.pos > 1.0) {
+        g_pendingResumePos = snap.pos;
+        if (snap.wasPaused) g_suppressNextUnpause = true;
+        g_mpv->loadFile(snap.path);
+    }
+}
+
 void applySetting(const char* key, int value) {
     if      (std::strcmp(key, "hw") == 0)      mpvSetOpt("hwdec", value ? (g_cfg.enableZeroCopy ? "auto-safe" : "auto-copy-safe") : "no");
     else if (std::strcmp(key, "sub") == 0)     mpvSetOpt("sub-auto", value ? "fuzzy" : "no");
@@ -335,12 +345,7 @@ void applySetting(const char* key, int value) {
         g_cfg.audioExclusive = (value != 0);
         if (g_mpv) {
             g_mpv->setAudioExclusive(value != 0);
-            auto snap = g_mpv->reinit(g_mpvHwnd, g_cfg.enableZeroCopy != 0);
-            if (!snap.path.empty() && snap.pos > 1.0) {
-                g_pendingResumePos = snap.pos;
-                if (snap.wasPaused) g_suppressNextUnpause = true;
-                g_mpv->loadFile(snap.path);
-            }
+            applyWithReinit();
         }
         showToast(value ? i18n::exclusiveAudio() : i18n::exclusiveAudio());
     }
@@ -351,12 +356,7 @@ void applySetting(const char* key, int value) {
         g_cfg.interpolation = value;
         if (g_mpv) {
             g_mpv->setInitVfOption(g_cfg.interpolation, g_cfg.superRes);
-            auto snap = g_mpv->reinit(g_mpvHwnd, g_cfg.enableZeroCopy != 0);
-            if (!snap.path.empty() && snap.pos > 1.0) {
-                g_pendingResumePos = snap.pos;
-                if (snap.wasPaused) g_suppressNextUnpause = true;
-                g_mpv->loadFile(snap.path);
-            }
+            applyWithReinit();
         }
         showToast(value ? "MVTools: ON" : "MVTools: OFF");
     }
@@ -364,12 +364,7 @@ void applySetting(const char* key, int value) {
         g_cfg.superRes = value;
         if (g_mpv) {
             g_mpv->setInitVfOption(g_cfg.interpolation, g_cfg.superRes);
-            auto snap = g_mpv->reinit(g_mpvHwnd, g_cfg.enableZeroCopy != 0);
-            if (!snap.path.empty() && snap.pos > 1.0) {
-                g_pendingResumePos = snap.pos;
-                if (snap.wasPaused) g_suppressNextUnpause = true;
-                g_mpv->loadFile(snap.path);
-            }
+            applyWithReinit();
         }
         showToast(value ? "Real-CUGAN 2x: ON" : "Real-CUGAN 2x: OFF");
     }
