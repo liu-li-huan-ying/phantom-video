@@ -62,4 +62,4 @@ jobs:
         with:
           name: Phantom Video ${{ steps.version.outputs.tag }}
           generate_release_notes: true
-          files: $env:GITHUB_WORKSPACE/${{ env.ZIP }}
+          files: ${{ env.ZIP }}
